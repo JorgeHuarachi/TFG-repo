@@ -1,6 +1,8 @@
 import networkx as nx 
 import matplotlib.pyplot as plt
 import numpy as np
+from itertools import combinations as combs
+
 
 # ###############################  FUNCIONES ###############################
 
@@ -37,11 +39,53 @@ def Agrupacion(camino):
     en grupos de dos consecutivos ya sean pares o impares, siempre daran 
     grupos de dos.
     
-    
     """
+    
     lista = {(camino[i],camino[i+1]) for i in range(len(camino)-1)}
     pares = sorted(lista) # Lo ordena (no como quiero pero funciona)
     return pares
+
+def Visualizar(G,posiciones,lista,axes,ejex,ejey):
+    """Permite visualizar ciertas aristas u nodos que pertenecen a un grafo más grande de un color diferente
+    se debe conocer en la malla de graficos que posición ocupan (ejex,ejey)
+    
+    Parameters
+    ----------
+    
+    G : Grafo completo dibujado anteriormente.
+    
+    pos : Las posiciones de todos los nodos ya definida.
+    
+    lista : Conjunto de nodos que se desea pintar (normalmente aquellos que pasan por las aristas)
+    
+    aristas : Conjunto de arista que se desea pintar (normalmente aquellas que pasan por los nodos)
+    
+    ejex : Es la pososición x que adquirirá en la matriz de graficos que se mostrará por pantalla
+    
+    ejey : Es la pososición x que adquirirá en la matriz de graficos que se mostrará por pantalla
+    
+    Return
+    --------
+    Se limita a dibujar las aristas y los nodos del grafo con los colores, no los muestra por pantalla
+    si se quiere ver los gráficos dibujados se debe usar: plt.show() despues de dibujar todo lo deseado.
+    
+    """
+    
+    aristas = Agrupacion(lista) # Agrupa en conjuntos de 2
+    
+    # Dibuja los nodos y las aristas, en instrucciones diferentes
+    nx.draw_networkx_nodes(G, posiciones, ax=axes[ejey, ejex],node_size=150)
+    nx.draw_networkx_edges(G, posiciones, ax=axes[ejey, ejex],width=1)
+    # axes[ejey, ejex].set_title("Gráfica ")
+
+    # color a una aristas y nodos
+    nx.draw_networkx_edges(G, posiciones, aristas, ax=axes[ejey, ejex], width=2, edge_color="red")
+    nx.draw_networkx_nodes(G,posiciones,lista, ax=axes[ejey, ejex],node_size=150,node_color="red")
+    # etiquetas
+    nx.draw_networkx_labels(G, posiciones, ax=axes[ejey, ejex])
+
+    # edge_labels = nx.get_edge_attributes(G, "weight")
+    # nx.draw_networkx_edge_labels(G, posiciones, edge_labels,ax=axes[ejey, ejex])
 
 def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f_seguridad):
     """ 
@@ -171,7 +215,7 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
         
         # -----------------------------
         
-        #print(f"\nHACIA EL NODO {exit}:")
+        print(f"\nHACIA EL NODO {exit}:")
         
         for origenes in nodos: # Para cada uno de los nodos origen diferentes al destino
             
@@ -180,7 +224,7 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                 num_caminos_aceptables = 0 # Donde se cuenta los caminos minimos diferentes validos
                 
                 coste_principal, lista_camino = nx.multi_source_dijkstra(G,sources={origenes},target=exit)
-                #print(f"\nprincipal: {coste_principal} {lista_camino} ")
+                print(f"\nprincipal: {coste_principal} {lista_camino} ")
                 
                 lista_aristas = Agrupacion(lista_camino) # Para reprensentarlo y quitar lista_aristas una a una
 
@@ -191,41 +235,40 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                 
                 # ----- FACTOR DE TOLERANCIA ------
                 coste_max = coste_principal*(1+f_tolerancia) # en tanto por uno (un mismo factor de tolerancia para todos)
-                #print(f"Coste maximo: {coste_max}")
+                print(f"Coste maximo: {coste_max}")
                 
-                for arista_quitar in lista_aristas: # Para cada una de als aristas en la lista de aristas del camino minimo principal
-                    # -- CAMBIO DE GRAFO (quito una arista) --
-                    
-                    valor = G_costes[arista_quitar] # Guardo el valor para no perderlo en la siguiente iteracion
-                    
-                    # ------ APAÑO FEO PERO FUNCIONA -- (DIFERENTES FORMAS DE CONSTRUIR GRAFO PUEDEN AYUDAR)
-                    # Elimminar valor (i,j) y (j,i) de la matriz, sino no se quita del todo
-                    
-                    G_costes[arista_quitar[0],arista_quitar[1]] = 0 #Elimino la arista una por una (i,j)
-                    G_costes[arista_quitar[1],arista_quitar[0]] = 0 #Elimino la arista una por una (j,1)
-                    
-                    G = nx.from_numpy_array(G_costes) # Nuevo grafo con una arista menos
+                def quitar_k_aristas(matriz, indices, k):
+                    if k > len(indices):
+                        raise ValueError("k no puede ser mayor que la cantidad de aristas disponibles.")
+                    for combinacion in combs(indices, k):
+                        temp = matriz.copy()
+                        for i, j in combinacion:
+                            temp[i, j] = 0
+                            temp[j, i] = 0
+                        yield temp,combinacion  #  devuelve la matriz Y las aristas quitadas
+
+                
+                for matriz_quitado,arista_quitada in quitar_k_aristas(G_costes, lista_aristas,k=1):# Para cada una de als aristas en la lista de aristas del camino minimo principal
+                 
+                    G = nx.from_numpy_array(matriz_quitado) # Nuevo grafo con una arista menos
                     # -- FIN CAMBIO GRAFO --
                     
                     coste_nuevo, lista_camino_nuevo = nx.multi_source_dijkstra(G,sources={origenes},target=exit)
                     
-                    #print(f"nuevo: {coste_nuevo} {lista_camino_nuevo}")
-                    
-                    
+                    print(f"nuevo: {coste_nuevo} {lista_camino_nuevo}")
+
                     # ----- FACTOR DE TOLERANCIA ------
                     
-                    if coste_nuevo<coste_max:
+                    if coste_nuevo<=coste_max:
                         num_caminos_aceptables += 1
-                    
-                    # ---------------------------------
-                    
-                    ejex=lista_aristas.index(arista_quitar)+1
+
+                    # --intento de volver a visualizar
+                    ejex=lista_aristas.index(arista_quitada[0])+1
                     Visualizar(G,posiciones,lista_camino_nuevo, axes=axes1,ejex=ejex,ejey=ejey)
-                    # --- Lambda? --
-                    G_costes[arista_quitar[0],arista_quitar[1]] = valor # Devuelvo la arista una por una
-                    G_costes[arista_quitar[1],arista_quitar[0]] = valor # Devuelvo la arista una por una
-                    # ---
-                    G = nx.from_numpy_array(G_costes) # Vuelvo a tener el Grafo del principio
+                    # -- fin intento de volver a visualizar
+
+                
+                G = nx.from_numpy_array(G_costes) # Vuelvo a tener el Grafo del principio
                     
                 centralidad_evacuacion[origenes].append(num_caminos_aceptables)
                 
@@ -238,48 +281,6 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
     # ----------------------
 
     return centralidad_evacuacion
-
-def Visualizar(G,posiciones,lista,axes,ejex,ejey):
-    """Permite visualizar ciertas aristas u nodos que pertenecen a un grafo más grande de un color diferente
-    se debe conocer en la malla de graficos que posición ocupan (ejex,ejey)
-    
-    Parameters
-    ----------
-    
-    G : Grafo completo dibujado anteriormente.
-    
-    pos : Las posiciones de todos los nodos ya definida.
-    
-    lista : Conjunto de nodos que se desea pintar (normalmente aquellos que pasan por las aristas)
-    
-    aristas : Conjunto de arista que se desea pintar (normalmente aquellas que pasan por los nodos)
-    
-    ejex : Es la pososición x que adquirirá en la matriz de graficos que se mostrará por pantalla
-    
-    ejey : Es la pososición x que adquirirá en la matriz de graficos que se mostrará por pantalla
-    
-    Return
-    --------
-    Se limita a dibujar las aristas y los nodos del grafo con los colores, no los muestra por pantalla
-    si se quiere ver los gráficos dibujados se debe usar: plt.show() despues de dibujar todo lo deseado.
-    
-    """
-    
-    aristas = Agrupacion(lista) # Agrupa en conjuntos de 2
-    
-    # Dibuja los nodos y las aristas, en instrucciones diferentes
-    nx.draw_networkx_nodes(G, posiciones, ax=axes[ejey, ejex],node_size=150)
-    nx.draw_networkx_edges(G, posiciones, ax=axes[ejey, ejex],width=1)
-    # axes[ejey, ejex].set_title("Gráfica ")
-
-    # color a una aristas y nodos
-    nx.draw_networkx_edges(G, posiciones, aristas, ax=axes[ejey, ejex], width=2, edge_color="red")
-    nx.draw_networkx_nodes(G,posiciones,lista, ax=axes[ejey, ejex],node_size=150,node_color="red")
-    # etiquetas
-    nx.draw_networkx_labels(G, posiciones, ax=axes[ejey, ejex])
-
-    # edge_labels = nx.get_edge_attributes(G, "weight")
-    # nx.draw_networkx_edge_labels(G, posiciones, edge_labels,ax=axes[ejey, ejex])
 
 # ############################### FIN FUNCIONES ###############################
 
@@ -323,7 +324,7 @@ coordenadas = {
 f_tol = 0.5
 
 # Destinos considerados seguros
-destinos_seguros = [3,6,7]
+destinos_seguros = [5,6,7]
 
 # Factor de seguridad crítica 
 f_sec = 0.7
@@ -340,5 +341,5 @@ centralidades = Caminos_diferentes(
 
 
 # Para la visualización
-# plt.show()
+plt.show()
 
