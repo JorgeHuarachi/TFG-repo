@@ -87,6 +87,40 @@ def Visualizar(G,posiciones,lista,axes,ejex,ejey):
     # edge_labels = nx.get_edge_attributes(G, "weight")
     # nx.draw_networkx_edge_labels(G, posiciones, edge_labels,ax=axes[ejey, ejex])
 
+def quitar_k_aristas(matriz, indices, k):   
+    """Esta función permite obtener las matrices resultado de quitar elementos de una lista de aristas en conbinaciones de k aristas.
+    es decir, de la lista de aristas quitando 1, 2, 3 o más aristas (todas las combinaciones de estas)
+    
+    
+    Parameters
+    ----------
+    
+    matriz : Matriz de adyacencia
+    
+    indices : lista de aristas para quitar en combinaciones de k aristas
+    
+    k : numero de combinacion de aristas para quitar
+    
+    Return
+    ------
+    
+    
+    Example
+    -------
+    
+    
+    """
+    
+    if k > len(indices):
+        raise ValueError("k no puede ser mayor que la cantidad de aristas disponibles.") # Si por lo que sea pones mas numero de aristas de las que existne en indices
+    for combinacion in combs(indices, k):
+        temp = matriz.copy() # 
+        for i, j in combinacion:
+            temp[i, j] = 0
+            temp[j, i] = 0
+        yield temp,combinacion  #  Devuelve la matriz y las aristas quitadas
+
+
 def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f_seguridad):
     """ 
     [MEJORAS PENDIENTES]
@@ -199,9 +233,9 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
       
     ## ----------------------------- 
 
-    G = nx.from_numpy_array(G_costes)
+    G = nx.from_numpy_array(G_costes) # paso de matriz a grafo
     
-    nodos = list(G.nodes) # Obtendo una lista de todos los nodos
+    nodos = list(G.nodes) # Obtengo una lista de todos los nodos
     
     centralidad_evacuacion = {nodos[i]: [] for i in range(len(nodos))} # Inicializo el diccionairo donde se guardaran los valores calculados (centralidades)
 
@@ -219,41 +253,32 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
         
         for origenes in nodos: # Para cada uno de los nodos origen diferentes al destino
             
-            if exit != origenes:
+            if exit != origenes: # Si el destino no coincide con el origen (para que no coincida no puede ocurrir de esta forma se incluyen los nodos destino quizas adyacentes)
                 
-                num_caminos_aceptables = 0 # Donde se cuenta los caminos minimos diferentes validos
+                num_caminos_aceptables = 0 # Inicializo donde se cuenta los caminos minimos diferentes validos
                 
                 coste_principal, lista_camino = nx.multi_source_dijkstra(G,sources={origenes},target=exit)
                 print(f"\nprincipal: {coste_principal} {lista_camino} ")
                 
                 lista_aristas = Agrupacion(lista_camino) # Para reprensentarlo y quitar lista_aristas una a una
 
-                # ---- Camino principal --- (en x siempre 0, empieza  ala izq)
+                # ---- Para visualización Camino principal --- 
                 ejey = nodos.index(origenes) 
-                Visualizar(G,posiciones,lista_camino,axes=axes1,ejex=0,ejey=ejey)
-                # ----
+                Visualizar(G,posiciones,lista_camino,axes=axes1,ejex=0,ejey=ejey) # (en x siempre 0, empieza a la izq)
+                # --------------------------------------------
                 
                 # ----- FACTOR DE TOLERANCIA ------
                 coste_max = coste_principal*(1+f_tolerancia) # en tanto por uno (un mismo factor de tolerancia para todos)
                 print(f"Coste maximo: {coste_max}")
                 
-                def quitar_k_aristas(matriz, indices, k):
-                    if k > len(indices):
-                        raise ValueError("k no puede ser mayor que la cantidad de aristas disponibles.")
-                    for combinacion in combs(indices, k):
-                        temp = matriz.copy()
-                        for i, j in combinacion:
-                            temp[i, j] = 0
-                            temp[j, i] = 0
-                        yield temp,combinacion  #  devuelve la matriz Y las aristas quitadas
-
                 
-                for matriz_quitado,arista_quitada in quitar_k_aristas(G_costes, lista_aristas,k=1):# Para cada una de als aristas en la lista de aristas del camino minimo principal
+                
+                for matriz_quitado,arista_quitada in quitar_k_aristas(G_costes, lista_aristas,k=1): # Para cada k aristas en la lista de aristas del camino minimo principal
                  
-                    G = nx.from_numpy_array(matriz_quitado) # Nuevo grafo con una arista menos
+                    G_temp = nx.from_numpy_array(matriz_quitado) # Nuevo grafo con una arista menos
                     # -- FIN CAMBIO GRAFO --
                     
-                    coste_nuevo, lista_camino_nuevo = nx.multi_source_dijkstra(G,sources={origenes},target=exit)
+                    coste_nuevo, lista_camino_nuevo = nx.multi_source_dijkstra(G_temp,sources={origenes},target=exit)
                     
                     print(f"nuevo: {coste_nuevo} {lista_camino_nuevo}")
 
@@ -262,13 +287,10 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                     if coste_nuevo<=coste_max:
                         num_caminos_aceptables += 1
 
-                    # --intento de volver a visualizar
+                    # -- Para la visualización Camino nuevo --
                     ejex=lista_aristas.index(arista_quitada[0])+1
-                    Visualizar(G,posiciones,lista_camino_nuevo, axes=axes1,ejex=ejex,ejey=ejey)
-                    # -- fin intento de volver a visualizar
-
-                
-                G = nx.from_numpy_array(G_costes) # Vuelvo a tener el Grafo del principio
+                    Visualizar(G_temp,posiciones,lista_camino_nuevo, axes=axes1,ejex=ejex,ejey=ejey)
+                    # ----------------------------------------
                     
                 centralidad_evacuacion[origenes].append(num_caminos_aceptables)
                 
@@ -339,7 +361,7 @@ centralidades = Caminos_diferentes(
     f_tolerancia = f_tol,
     f_seguridad = f_sec)
 
-
+print(centralidades)
 # Para la visualización
 plt.show()
 
