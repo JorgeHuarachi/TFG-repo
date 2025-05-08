@@ -3,30 +3,71 @@ config:
   theme: default
 ---
 erDiagram
+    direction RL
+        
+    EDIFICIO ||--|{ PLANTA : "contiene"
+    PLANTA ||--|{ AREA : "contiene"
+    TIPO_AREA ||--o{ AREA : "es de tipo"
+    ADYACENCIA ||--|{ AREA : "con origen" 
+    ADYACENCIA ||--|{ AREA : "con destino" 
+    TIPO_ADYACENCIA ||--o{ ADYACENCIA : "es de tipo"
+    
+    AREA ||--o{ BALIZA : "ubicada en"
+    ADYACENCIA ||--o{ BALIZA : "ubicada en"
+    
+    BALIZA ||--o{ ASOCIACION_BALIZA_SENSOR : "esta conectado a "
+    SENSOR ||--o{ ASOCIACION_BALIZA_SENSOR : "es parte de"
+    SENSOR ||--o{ ASOCIACION_SENSOR_VARIABLE : "mide"
+    VARIABLE ||--o{ ASOCIACION_SENSOR_VARIABLE : "usado en"
+
+    LECTURA ||--o{ BALIZA : "registra"
+    LECTURA ||--o{ SENSOR : "usa"
+    LECTURA ||--o{ VARIABLE : "mide"
+
+
+    ADYACENCIA ||--o{ ASIGNACION_LECTURA_ADYACENCIA : "tiene"
+    ASIGNACION_LECTURA_ADYACENCIA ||--o{ LECTURA : "es una"
+
+    AREA ||--o{ LECTURA_BALIZA_AREAS : "tiene"
+    LECTURA_BALIZA_AREAS ||--o{ LECTURA : "e"
+
+    LECTURA ||--o{ HISTORICO_LECTURAS : "recoge"
+
+    SEGURIDAD_RED ||--|{ LECTURA_SEGURIDAD : "basada en"
+    LECTURA ||--o{ LECTURA_SEGURIDAD : "asocia a seguridad"
+    SEGURIDAD_RED }|--|| TIPO_EVENTO : "tiene"
+
+    SEGURIDAD_RED ||--o{ HISTORICO_SEGURIDAD : "recoge"
+
+    RUTA }|--|{ SEGURIDAD_RED : "tiene"
+    RUTA ||--o{ AREA : "es origen de"
+    RUTA ||--o{ HISTORICO_RUTA : "recoge"
+
+    USUARIO ||--o{ RUTA : "solicita"
+    USUARIO ||--o{ USUARIO_UBICACION_ACTUAL : "tiene"
+    USUARIO ||--o{ HISTORICO_USUARIO_UBICACION : "tuvo"
+
     EDIFICIO {
       int id_edificio PK
       varchar nombre
       text descripción
       float latitud
       float longitud
-      int numero_plantas
-      int capacidad
-      float superficie_total
+      int capacidad_personas
+      float superficie_metros_cuadrados
     }
-    PLANTA {
+    PLANTA{
       int id_planta PK
-      float superficie
-      int numero_areas
+      float superficie_metros_cuadrados
       int id_edificio FK
     }
     AREA {
       int id_area PK
       varchar nombre
-      text descripcion
-      float superficie
-      int capacidad
+      text descripción
+      float superficie_metros_cuadrados
+      int capacidad_personas
       boolean salida_segura
-      boolean baliza
       int id_planta FK
       int id_tipo_area FK
     }
@@ -36,40 +77,35 @@ erDiagram
       text descripción
     }
     ADYACENCIA {
-      int id_conexion PK
+      int id_adyacencia PK
       varchar nombre
-      text descripcion
-      float distancia
-      int capacidad_flujo
-      float tiempo_estimado
+      text descripción
+      float distancia_metros
+      int capacidad_flujo_personas_minuto
+      float tiempo_estimado_segundos
       boolean bidireccional
-      boolean baliza
       int id_area_origen FK
       int id_area_destino FK
-      int id_conexion FK
+      int id_tipo_adyacencia FK
     }
     TIPO_ADYACENCIA {
-      int id_adyacencia PK
-      varchar tipo
-      text descripcion
+      int id_tipo_adyacencia PK
+      varchar nombre
+      text descripción
     }
-    SEGURIDAD_RED {
-      int id_seguridad_red PK
-      int id_conexion FK
-      int id_area FK      
-      float valor_seguridad
-      boolean seguro
-    }
-    BALIZAS {
+    BALIZA {
       int id_baliza PK
       varchar nombre
       text descripción
-      int id_ambiente FK
+      boolean activa
+      int id_area FK
+      int id_adyacencia FK
     }
     SENSOR {
       int id_sensor PK 
       varchar nombre
-      text descripcion
+      text descripción
+      boolean activa
     }
     VARIABLE {
       int id_variable PK
@@ -77,45 +113,48 @@ erDiagram
       text descripción
       varchar unidad
     }
-    BALIZA_SENSOR {
+    ASOCIACION_BALIZA_SENSOR {
       int id PK
       int id_baliza FK
       int id_sensor FK 
       text descripción
     }
-    SENSOR_VARIABLE {
+    ASOCIACION_SENSOR_VARIABLE {
       int id PK
       int id_sensor FK
       int id_variable FK
       text descripción
     }
+    LECTURA {
+      int id_lectura PK
+      timestamp datatime
+      int id_baliza FK
+      int id_sensor FK
+      int id_variable FK
+      float valor
+    }    
     LECTURA_BALIZA_AREAS {
-      int id_lectura_area PK
-      timestamp datatime
+      int id_lectura FK
       int id_area FK
-      int id_baliza FK
-      int id_sensor FK
-      int id_variable FK
     }
-    LECTURA_BALIZA_ADYACENCIAS {
-      int id_lectura_adyacencia PK
-      timestamp datatime
-      int id_adyacencia FK 
-      int id_baliza FK
-      int id_sensor FK
-      int id_variable FK
+    ASIGNACION_LECTURA_ADYACENCIA {
+      int id_lectura FK
+      int id_adyacencia FK
     }
     HISTORICO_LECTURAS {
       int id PK
       timestamp datatime
-      int id_lectura_adyacencia FK
-      int id_lectura_area FK
+      int id_lectura FK
+    }
+    LECTURA_SEGURIDAD {
+      int id PK
+      ind id_lectura FK
+      int id_seguridad FK
     }
     SEGURIDAD_RED {
-      int seguridad PK
+      int id_seguridad PK
       timestamp datetime 
-      int id_lectura_area FK
-      int id_lectura_adyacencia FK
+      int id_lectura FK
       int id_evento FK
       float seguridad
       boolean seguro
@@ -130,54 +169,40 @@ erDiagram
       varchar nombre
       boolean requiere_evacuar
     }
-    RUTAS {
+    USUARIO {
+        int id_usuario PK
+        varchar nombre
+        varchar correo
+        timestamp creado_en
+    }
+    USUARIO_UBICACION_ACTUAL {
+        int id PK
+        int id_usuario FK
+        enum tipo_ubicacion 
+        int id_area FK
+        int id_adyacencia FK
+        timestamp fecha
+    }  
+    HISTORICO_USUARIO_UBICACION{
+        int id PK
+        int id_usuario FK
+        enum tipo_ubicacion
+        int id_area FK
+        int id_adyacencia FK
+        timestamp detección
+    } 
+    RUTA {
       int id_ruta PK
       int area_origen FK
       timestamp fecha
       int tiempo_estimado_total
       jsonb ruta
       int id_seguridad FK
+      int id_usuario FK
     }
-    HISTORICO_RUTAS {
+    HISTORICO_RUTA {
       int id PK
       int id_ruta FK
       timestamp datatime
     }
 
-    EDIFICIO ||--|{ PLANTA : "contiene"
-    PLANTA ||--|{ AREA : "contiene"
-    TIPO_AREA ||--o{ AREA : "es de tipo"
-    ADYACENCIA ||--|{ AREA : "interconecta" 
-    TIPO_ADYACENCIA ||--o{ ADYACENCIA : "interconecta"
-
-    AREA ||--o{ BALIZAS : "puede contener"
-    ADYACENCIA ||--o{ BALIZAS : "puede contener"
-    BALIZAS ||--o{ BALIZA_SENSOR : "contiene"
-    SENSOR ||--o{ BALIZA_SENSOR : "se conecta a"
-    SENSOR ||--o{ SENSOR_VARIABLE : "contiene"
-    VARIABLE ||--o{ SENSOR_VARIABLE : "se mide en"
-
-    LECTURA_BALIZA_ADYACENCIAS ||--o{ ADYACENCIA : "tiene"
-    LECTURA_BALIZA_ADYACENCIAS ||--o{ BALIZAS : "recoge"
-    LECTURA_BALIZA_ADYACENCIAS ||--o{ SENSOR : "usa"
-    LECTURA_BALIZA_ADYACENCIAS ||--o{ VARIABLE : "mide"
-
-    LECTURA_BALIZA_AREAS ||--o{ BALIZAS : "tiene"
-    LECTURA_BALIZA_AREAS ||--o{ BALIZAS : "recoge"
-    LECTURA_BALIZA_AREAS ||--o{ SENSOR : "usa"
-    LECTURA_BALIZA_AREAS ||--o{ VARIABLE : "mide"
-
-    LECTURA_BALIZA_AREAS ||--o{ HISTORICO_LECTURAS : "recoge"
-    LECTURA_BALIZA_ADYACENCIAS ||--o{ HISTORICO_LECTURAS : "recoge"
-
-    SEGURIDAD_RED ||--|| LECTURA_BALIZA_AREAS : "tiene"
-    SEGURIDAD_RED ||--|| LECTURA_BALIZA_ADYACENCIAS : "tiene"
-    SEGURIDAD_RED ||--|| AREA : "tiene"
-    SEGURIDAD_RED ||--|| ADYACENCIA : "tiene"
-    SEGURIDAD_RED }|--|| TIPO_EVENTO : "tiene"
-
-    SEGURIDAD_RED ||--o{ HISTORICO_SEGURIDAD : "recoge"
-
-    RUTAS ||--o{ SEGURIDAD_RED : "tiene"
-    RUTAS ||--o{ AREA : "tiene"
-    RUTAS ||--o{ HISTORICO_RUTAS : "recoge"
