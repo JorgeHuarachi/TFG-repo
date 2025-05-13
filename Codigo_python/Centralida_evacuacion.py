@@ -5,6 +5,9 @@ from itertools import combinations as combs
 
 
 # ###############################  FUNCIONES ###############################
+## ANALISIS DE SENSIBILIDAD DE RUTAS MINIMAS 
+# YO LO ENTIENDO COMO ALGO ASI COMO LA ROBUSTEZ ESTRUCTURAL DE LA RED EN CASO DE DEJAR DE TENER ARISTAS DISPONIBLES
+# PARA MI SERIA COMO UNA CENTRALIDAD DE NODOS BASADO EN CAMINOS MINIMOS RESTRINGIDOS POR EL TIEMPO
 
 def Agrupacion(camino):
     """Agrupa en conjuntos de tamaño 2 una lista de tamaño mayor a 2, esto se

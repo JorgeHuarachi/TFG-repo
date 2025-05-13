@@ -3,7 +3,7 @@ config:
   theme: default
 ---
 erDiagram
-    direction RL
+    direction TB
         
     EDIFICIO ||--|{ PLANTA : "contiene"
     PLANTA ||--|{ AREA : "contiene"
@@ -15,10 +15,16 @@ erDiagram
     AREA ||--o{ BALIZA : "ubicada en"
     ADYACENCIA ||--o{ BALIZA : "ubicada en"
     
-    BALIZA ||--o{ ASOCIACION_BALIZA_SENSOR : "esta conectado a "
-    SENSOR ||--o{ ASOCIACION_BALIZA_SENSOR : "es parte de"
-    SENSOR ||--o{ ASOCIACION_SENSOR_VARIABLE : "mide"
-    VARIABLE ||--o{ ASOCIACION_SENSOR_VARIABLE : "usado en"
+    BALIZA ||--o{ BALIZA_SENSOR : "esta conectado a "
+    SENSOR ||--o{ BALIZA_SENSOR : "es parte de"
+    SENSOR ||--o{ SENSOR_VARIABLE : "mide"
+    VARIABLE ||--o{ SENSOR_VARIABLE : "usado en"
+
+    BALIZA ||--o{ ASIGNACION_BALIZA_AREA : "tiene"
+    ASIGNACION_BALIZA_AREA ||--o{ AREA : "es una"
+
+    BALIZA ||--o{ ASIGNACION_BALIZA_ADYACENCIA : "tiene"
+    ASIGNACION_BALIZA_ADYACENCIA ||--o{ ADYACENCIA : "es una"
 
     LECTURA ||--o{ BALIZA : "registra"
     LECTURA ||--o{ SENSOR : "usa"
@@ -28,8 +34,8 @@ erDiagram
     ADYACENCIA ||--o{ ASIGNACION_LECTURA_ADYACENCIA : "tiene"
     ASIGNACION_LECTURA_ADYACENCIA ||--o{ LECTURA : "es una"
 
-    AREA ||--o{ LECTURA_BALIZA_AREAS : "tiene"
-    LECTURA_BALIZA_AREAS ||--o{ LECTURA : "e"
+    AREA ||--o{ ASIGNACION_LECTURA_AREA : "tiene"
+    ASIGNACION_LECTURA_AREA ||--o{ LECTURA : "e"
 
     LECTURA ||--o{ HISTORICO_LECTURAS : "recoge"
 
@@ -46,6 +52,12 @@ erDiagram
     USUARIO ||--o{ RUTA : "solicita"
     USUARIO ||--o{ USUARIO_UBICACION_ACTUAL : "tiene"
     USUARIO ||--o{ HISTORICO_USUARIO_UBICACION : "tuvo"
+
+    USUARIO_UBICACION_ACTUAL ||--o{ ASIGNACION_UBICACION_ACTUAL_AREA : "tiene"
+    ASIGNACION_UBICACION_ACTUAL_AREA ||--o{ AREA : "es una"
+
+    USUARIO_UBICACION_ACTUAL ||--o{ ASIGNACION_UBICACION_ACTUAL_ADYACENCIA : "tiene"
+    ASIGNACION_UBICACION_ACTUAL_ADYACENCIA ||--o{ ADYACENCIA : "es una"
 
     EDIFICIO {
       int id_edificio PK
@@ -101,6 +113,14 @@ erDiagram
       int id_area FK
       int id_adyacencia FK
     }
+    ASIGNACION_BALIZA_AREA {
+      int id_baliza FK
+      int id_area FK
+    }
+    ASIGNACION_BALIZA_ADYACENCIA {
+      int id_adyacencia FK
+      int id_adyacencia FK
+    }
     SENSOR {
       int id_sensor PK 
       varchar nombre
@@ -113,13 +133,13 @@ erDiagram
       text descripción
       varchar unidad
     }
-    ASOCIACION_BALIZA_SENSOR {
+    BALIZA_SENSOR {
       int id PK
       int id_baliza FK
       int id_sensor FK 
       text descripción
     }
-    ASOCIACION_SENSOR_VARIABLE {
+    SENSOR_VARIABLE {
       int id PK
       int id_sensor FK
       int id_variable FK
@@ -133,7 +153,7 @@ erDiagram
       int id_variable FK
       float valor
     }    
-    LECTURA_BALIZA_AREAS {
+    ASIGNACION_LECTURA_AREA {
       int id_lectura FK
       int id_area FK
     }
@@ -176,13 +196,18 @@ erDiagram
         timestamp creado_en
     }
     USUARIO_UBICACION_ACTUAL {
-        int id PK
+        int id_ubicación_usuario PK
         int id_usuario FK
-        enum tipo_ubicacion 
-        int id_area FK
-        int id_adyacencia FK
         timestamp fecha
     }  
+    ASIGNACION_UBICACION_ACTUAL_AREA {
+      int id_ubicación_usuario FK
+      int id_area FK
+    }
+    ASIGNACION_UBICACION_ACTUAL_ADYACENCIA {
+      int id_ubicación_usuario FK
+      int id_adyacencia FK
+    }
     HISTORICO_USUARIO_UBICACION{
         int id PK
         int id_usuario FK
