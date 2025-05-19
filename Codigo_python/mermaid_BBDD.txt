@@ -4,79 +4,68 @@ config:
 ---
 erDiagram
     direction TB
-        
     EDIFICIO ||--|{ PLANTA : "contiene"
     PLANTA ||--|{ AREA : "contiene"
     TIPO_AREA ||--o{ AREA : "es de tipo"
-    ADYACENCIA ||--|{ AREA : "con origen" 
-    ADYACENCIA ||--|{ AREA : "con destino" 
+    ADYACENCIA ||--|{ AREA : "tiene origen"
+    ADYACENCIA ||--|{ AREA : "tiene destino"
     TIPO_ADYACENCIA ||--o{ ADYACENCIA : "es de tipo"
-    
-    AREA ||--o{ BALIZA : "ubicada en"
-    ADYACENCIA ||--o{ BALIZA : "ubicada en"
-    
-    BALIZA ||--o{ BALIZA_SENSOR : "esta conectado a "
+
+    UBICACION ||--|| AREA : "es"
+    UBICACION ||--|| ADYACENCIA : "es"
+    TIPO_UBICACION ||--o{ UBICACION : "clasifica"
+
+    UBICACION ||--o{ BALIZA : "ubicada en"
     SENSOR ||--o{ BALIZA_SENSOR : "es parte de"
+    BALIZA ||--o{ BALIZA_SENSOR : "conectada a"
     SENSOR ||--o{ SENSOR_VARIABLE : "mide"
-    VARIABLE ||--o{ SENSOR_VARIABLE : "usado en"
+    VARIABLE ||--o{ SENSOR_VARIABLE : "usada en"
 
-    BALIZA ||--o{ ASIGNACION_BALIZA_AREA : "tiene"
-    ASIGNACION_BALIZA_AREA ||--o{ AREA : "es una"
+    BALIZA ||--o{ LECTURA : "genera"
+    SENSOR ||--o{ LECTURA : "usa"
+    VARIABLE ||--o{ LECTURA : "mide"
 
-    BALIZA ||--o{ ASIGNACION_BALIZA_ADYACENCIA : "tiene"
-    ASIGNACION_BALIZA_ADYACENCIA ||--o{ ADYACENCIA : "es una"
-
-    LECTURA ||--o{ BALIZA : "registra"
-    LECTURA ||--o{ SENSOR : "usa"
-    LECTURA ||--o{ VARIABLE : "mide"
-
-
-    ADYACENCIA ||--o{ ASIGNACION_LECTURA_ADYACENCIA : "tiene"
-    ASIGNACION_LECTURA_ADYACENCIA ||--o{ LECTURA : "es una"
-
-    AREA ||--o{ ASIGNACION_LECTURA_AREA : "tiene"
-    ASIGNACION_LECTURA_AREA ||--o{ LECTURA : "e"
-
+    UBICACION ||--o{ LECTURA : "ocurre en"
     LECTURA ||--o{ HISTORICO_LECTURAS : "recoge"
 
-    SEGURIDAD_RED ||--|{ LECTURA_SEGURIDAD : "basada en"
-    LECTURA ||--o{ LECTURA_SEGURIDAD : "asocia a seguridad"
-    SEGURIDAD_RED }|--|| TIPO_EVENTO : "tiene"
+    ESTADO_ACTUAL ||--|{ LECTURA_ESTADO : "basada en"
+    LECTURA ||--o{ LECTURA_ESTADO : "asociada"
+    ESTADO_ACTUAL ||--o{ HISTORICO_ESTADO : "recoge"
 
-    SEGURIDAD_RED ||--o{ HISTORICO_SEGURIDAD : "recoge"
+    EVALUACION_SEGURIDAD }|--|| TIPO_EVENTO : "tiene"
+    EVALUACION_SEGURIDAD ||--o{ ESTADO_ACTUAL : "deriva de"
+    EVALUACION_SEGURIDAD ||--o{ HISTORICO_EVALUACION_SEGURIDAD : "recoge"
+    UBICACION||--|| EVALUACION_SEGURIDAD : "evaluada en"
 
-    RUTA }|--|{ SEGURIDAD_RED : "tiene"
-    RUTA ||--o{ AREA : "es origen de"
+    RUTA }|--|{ EVALUACION_SEGURIDAD : "usa"
+    RUTA ||--o{ UBICACION : "es origen de"
     RUTA ||--o{ HISTORICO_RUTA : "recoge"
-
+    
     USUARIO ||--o{ RUTA : "solicita"
     USUARIO ||--o{ USUARIO_UBICACION_ACTUAL : "tiene"
-    USUARIO ||--o{ HISTORICO_USUARIO_UBICACION : "tuvo"
+    USUARIO_UBICACION_ACTUAL ||--o{ HISTORICO_USUARIO_UBICACION : "tuvo"
 
-    USUARIO_UBICACION_ACTUAL ||--o{ ASIGNACION_UBICACION_ACTUAL_AREA : "tiene"
-    ASIGNACION_UBICACION_ACTUAL_AREA ||--o{ AREA : "es una"
-
-    USUARIO_UBICACION_ACTUAL ||--o{ ASIGNACION_UBICACION_ACTUAL_ADYACENCIA : "tiene"
-    ASIGNACION_UBICACION_ACTUAL_ADYACENCIA ||--o{ ADYACENCIA : "es una"
+    UBICACION ||--o{ USUARIO_UBICACION_ACTUAL : "usuario en"
 
     EDIFICIO {
       int id_edificio PK
       varchar nombre
-      text descripción
+      text descripcion
       float latitud
       float longitud
       int capacidad_personas
       float superficie_metros_cuadrados
     }
-    PLANTA{
+    PLANTA {
       int id_planta PK
       float superficie_metros_cuadrados
       int id_edificio FK
     }
     AREA {
       int id_area PK
+      int id_ubicacion FK
       varchar nombre
-      text descripción
+      text descripcion
       float superficie_metros_cuadrados
       int capacidad_personas
       boolean salida_segura
@@ -86,12 +75,13 @@ erDiagram
     TIPO_AREA {
       int id_tipo_area PK
       varchar nombre
-      text descripción
+      text descripcion
     }
     ADYACENCIA {
       int id_adyacencia PK
+      int id_ubicacion FK
       varchar nombre
-      text descripción
+      text descripcion
       float distancia_metros
       int capacidad_flujo_personas_minuto
       float tiempo_estimado_segundos
@@ -103,91 +93,96 @@ erDiagram
     TIPO_ADYACENCIA {
       int id_tipo_adyacencia PK
       varchar nombre
-      text descripción
+      text descripcion
+    }
+    UBICACION {
+      int id_ubicacion PK
+      int id_tipo_ubicacion FK
+    }
+    TIPO_UBICACION {
+      int id_tipo_ubicacion PK
+      varchar nombre 
     }
     BALIZA {
       int id_baliza PK
       varchar nombre
-      text descripción
+      text descripcion
       boolean activa
-      int id_area FK
-      int id_adyacencia FK
-    }
-    ASIGNACION_BALIZA_AREA {
-      int id_baliza FK
-      int id_area FK
-    }
-    ASIGNACION_BALIZA_ADYACENCIA {
-      int id_adyacencia FK
-      int id_adyacencia FK
+      int id_ubicacion FK
     }
     SENSOR {
       int id_sensor PK 
       varchar nombre
-      text descripción
+      text descripcion
       boolean activa
     }
     VARIABLE {
       int id_variable PK
       varchar nombre
-      text descripción
+      text descripcion
       varchar unidad
     }
     BALIZA_SENSOR {
       int id PK
       int id_baliza FK
       int id_sensor FK 
-      text descripción
+      text descripcion
     }
     SENSOR_VARIABLE {
       int id PK
       int id_sensor FK
       int id_variable FK
-      text descripción
+      text descripcion
     }
     LECTURA {
       int id_lectura PK
-      timestamp datatime
+      int id_ubicacion FK
+      timestamp datetime
       int id_baliza FK
       int id_sensor FK
       int id_variable FK
       float valor
-    }    
-    ASIGNACION_LECTURA_AREA {
-      int id_lectura FK
-      int id_area FK
-    }
-    ASIGNACION_LECTURA_ADYACENCIA {
-      int id_lectura FK
-      int id_adyacencia FK
     }
     HISTORICO_LECTURAS {
       int id PK
-      timestamp datatime
+      timestamp datetime
       int id_lectura FK
     }
-    LECTURA_SEGURIDAD {
+    LECTURA_ESTADO {
       int id PK
-      ind id_lectura FK
-      int id_seguridad FK
+      int id_lectura FK
+      int id_estado_actual FK
     }
-    SEGURIDAD_RED {
-      int id_seguridad PK
+    ESTADO_ACTUAL {
+      int id_estado_actual PK
       timestamp datetime 
       int id_lectura FK
-      int id_evento FK
-      float seguridad
-      boolean seguro
     }
-    HISTORICO_SEGURIDAD {
+    HISTORICO_ESTADO {
       int id PK
-      timestamp datatime
+      timestamp datetime
+      int id_estado_actual FK
+    }
+    EVALUACION_SEGURIDAD {
+      int id_seguridad PK
+      timestamp datetime 
+      float valor_seguridad
+      boolean requiere_evacuar
+      text descripcion
+      int id_estado_actual FK
+      int id_evento FK
+      int id_ubicacion FK
+    }
+    HISTORICO_EVALUACION_SEGURIDAD {
+      int id PK
+      timestamp datetime
       int id_seguridad FK
     }
     TIPO_EVENTO {
       int id_evento PK
       varchar nombre
       boolean requiere_evacuar
+      VARCHAR tipo_de_evento
     }
     USUARIO {
         int id_usuario PK
@@ -196,29 +191,20 @@ erDiagram
         timestamp creado_en
     }
     USUARIO_UBICACION_ACTUAL {
-        int id_ubicación_usuario PK
+        int id_ubicacion_usuario PK
         int id_usuario FK
+        int id_ubicacion FK
         timestamp fecha
-    }  
-    ASIGNACION_UBICACION_ACTUAL_AREA {
-      int id_ubicación_usuario FK
-      int id_area FK
     }
-    ASIGNACION_UBICACION_ACTUAL_ADYACENCIA {
-      int id_ubicación_usuario FK
-      int id_adyacencia FK
-    }
-    HISTORICO_USUARIO_UBICACION{
+    HISTORICO_USUARIO_UBICACION {
         int id PK
         int id_usuario FK
-        enum tipo_ubicacion
-        int id_area FK
-        int id_adyacencia FK
-        timestamp detección
-    } 
+        int id_ubicacion FK
+        timestamp deteccion
+    }
     RUTA {
       int id_ruta PK
-      int area_origen FK
+      int id_ubicacion_origen FK
       timestamp fecha
       int tiempo_estimado_total
       jsonb ruta
@@ -228,6 +214,5 @@ erDiagram
     HISTORICO_RUTA {
       int id PK
       int id_ruta FK
-      timestamp datatime
+      timestamp datetime
     }
-
