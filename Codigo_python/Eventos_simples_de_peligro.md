@@ -22,6 +22,10 @@
     'Occupancy':"counts",
     'Battery level' : "%"
 
+
+
+
+
 # CONDICIONES DE PELIGRO (de los que pienso que hay, solo tomando en cuenta el valor undividual de una varaible)
 
 Estas condiciones de peligro toman en cuenta dos cosas importantes.
@@ -111,6 +115,116 @@ Tiempo de exposición máximo:
 5 mSv/h: 1 minuto o menos. Evita este pasillo si puedes; el daño puede ser significativo incluso en exposiciones cortas.
 
 Recomendación: Si no hay otra opción, cruza rápido y busca atención médica después de la evacuación.
+
+## **MIS EVENTOS SIMPLES (PARAMETROS QUE QUIZAS TENGO)**
+
+    Parámetro	Nombre (Display)	Unidad	Descripción 
+
+    co2	CO₂	ppm	Nivel de dióxido de carbono en el aire. Indica la calidad de ventilación.
+    iaq	Indoor Air Quality	adim	Índice estimado de calidad del aire. Basado en gases, humedad, CO₂, etc.
+    calib_iaq	Indoor Air Quality calibration	adim	Valor interno del sensor para calibrar el IAQ. No es directamente útil para alertas.
+    tvoc	TVOC	ppb	Compuestos Orgánicos Volátiles Totales. Indican presencia de químicos en el aire.
+    air_temperature	Air Temperature	°C	Temperatura del aire ambiente.
+    air_humidity	Air Humidity	%	Humedad relativa del aire. Afecta confort, riesgo de moho o estrés térmico.
+    barometric_pressure	Barometric Pressure	hPa	Presión atmosférica. Útil para detectar cambios bruscos en el entorno (explosión, fuga, etc.).
+    pir_count	PIR Count	counts	Cuenta de detección por sensor PIR (movimiento). Indica si hay presencia reciente.
+    ambient_light	Ambient Light	counts	Cantidad de luz ambiental (luminosidad). Útil para saber si hay luz natural o artificial.
+    battery_voltage	Battery Voltage	V	Voltaje de la batería del sensor. Útil para monitorear salud del dispositivo.
+
+## EVENTOS SIMPLES
+
+### Dóxido de Carbono (CO₂ > 1,000 ppm)
+
+Efecto: Afecta la capacidad cognitiva, provoca fatiga, cefaleas, desorientación y en niveles altos, pérdida de conciencia.
+
+Tiempo de exposición máximo:
+
+1,000-2,000 ppm: 10-30 minutos. Puede causar somnolencia y reducción del rendimiento cognitivo. Puedes pasar brevemente.
+2,000-5,000 ppm: 5-10 minutos. Riesgo de fatiga, dolor de cabeza, sensación de encierro. Evita exposiciones prolongadas.
+5,000 ppm: 2-3 minutos. Puede causar hiperventilación y desorientación; atraviesa rápidamente.
+
+Recomendación: Mejora la ventilación si es posible. Cruza sin correr y mantén la calma para no hiperventilar.
+
+
+### Calidad del Aire Interior (IAQ > 100 adim)
+
+Efecto: Indicador compuesto de contaminación; valores altos significan aire viciado o contaminado.
+
+Tiempo de exposición máximo:
+
+100-150 adim: 10-20 minutos. Disminuye la calidad del aire, puede causar molestias respiratorias leves.
+150 adim: 5 minutos. Riesgo de irritación o malestar para personas sensibles. Evita zonas con IAQ > 150.
+
+Recomendación: Usa mascarilla si está disponible. Ventila si es posible.
+
+
+### Compuestos Orgánicos Volátiles (TVOC > 500 ppb)
+
+Efecto: Provoca irritación ocular, dolor de cabeza, daños hepáticos, y algunos son cancerígenos a largo plazo.
+
+Tiempo de exposición máximo:
+
+500-1,000 ppb: 10 minutos. Leve irritación para personas sensibles.
+1,000-3,000 ppb: 3-5 minutos. Aumenta el riesgo de malestar; atraviesa rápido.
+3,000 ppb: 1-2 minutos. Riesgo alto de toxicidad, evita esta zona o usa protección respiratoria.
+
+Recomendación: Usa mascarilla con filtro químico si es posible. No permanezcas en el área.
+
+### Temperatura (Air Temperature)
+
+Valor actual: 20.19°C (normal)
+
+Efecto: Bajo 15°C puede causar hipotermia en exposiciones largas. Sobre 30°C puede generar fatiga térmica.
+
+Tiempo de exposición máximo (en caso de anomalías):
+
+<10°C: 30 minutos sin abrigo. Puede causar temblores o entumecimiento.
+30°C: 15 minutos. Aumenta el riesgo de deshidratación.
+
+Recomendación: Actualmente en valores seguros. Observar si cambia.
+
+### Humedad del aire (> 70% o < 30%)
+
+Efecto: Afecta la capacidad del cuerpo para enfriarse. Alta humedad evita evaporación del sudor; baja reseca mucosas.
+
+Tiempo de exposición máximo:
+
+70-80%: 10-15 minutos. Incomoda la respiración, puede generar fatiga.
+80%: 5 minutos. Riesgo de golpe de calor si la temperatura es alta.
+
+Recomendación: Ventila o usa deshumidificadores si puedes. Actualmente está en un rango saludable (55%).
+
+### Presión barométrica (Barometric Pressure)
+
+Valor actual: 947.18 hPa (bajo)
+
+Efecto: Puede indicar tormentas o baja disponibilidad de oxígeno en altitudes. Personas sensibles pueden tener cefaleas.
+
+Recomendación: No es riesgosa en sí misma, pero si hay otros síntomas acompañantes (mareos), monitorear.
+
+### Movimiento detectado (PIR count > 0)
+
+Efecto: Indica presencia/movimiento de personas. No tiene riesgo en sí, pero puede ser clave para activar otros eventos (intrusión, presencia humana en zona peligrosa).
+
+### Luz ambiente (Ambient Light)
+
+Valor actual: 164 (bajo-moderado)
+
+Efecto: Niveles muy bajos pueden causar caídas, fatiga visual. No se considera peligroso por sí mismo.
+
+### Voltaje de batería
+
+Valor actual: 3.71V
+
+Efecto: Solo relevante para asegurar que el sensor funcione correctamente. No afecta a las personas directamente.
+
+Calibración IAQ
+
+Valor actual: 0 (sin calibrar)
+
+Comentario: La falta de calibración puede afectar la precisión del valor de IAQ. Se recomienda calibración periódica para mantener la fiabilidad del sistema.
+
+
 
 
 

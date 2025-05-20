@@ -25,11 +25,16 @@ erDiagram
     SENSOR ||--o{ LECTURA : "usa"
     VARIABLE ||--o{ LECTURA : "mide"
 
+    BALIZA ||--o{ HISTORICO_LECTURAS : "genera"
+    SENSOR ||--o{ HISTORICO_LECTURAS : "usa"
+    VARIABLE ||--o{ HISTORICO_LECTURAS : "mide"
+
+    UBICACION ||--o{ HISTORICO_LECTURAS : "ocurre en"
     UBICACION ||--o{ LECTURA : "ocurre en"
     LECTURA ||--o{ HISTORICO_LECTURAS : "recoge"
 
-    ESTADO_ACTUAL ||--|{ LECTURA_ESTADO : "basada en"
-    LECTURA ||--o{ LECTURA_ESTADO : "asociada"
+    ESTADO_ACTUAL ||--|{ ESTADO_HISTORICO_LECTURAS : "basada en"
+    HISTORICO_LECTURAS ||--o{ ESTADO_HISTORICO_LECTURAS : "asociada"
     ESTADO_ACTUAL ||--o{ HISTORICO_ESTADO : "recoge"
 
     EVALUACION_SEGURIDAD }|--|| TIPO_EVENTO : "tiene"
@@ -137,26 +142,30 @@ erDiagram
     LECTURA {
       int id_lectura PK
       int id_ubicacion FK
-      timestamp datetime
       int id_baliza FK
       int id_sensor FK
       int id_variable FK
       float valor
+      timestamp datetime
     }
     HISTORICO_LECTURAS {
-      int id PK
+      int id_historico_lecturas PK
+      int id_ubicacion FK
+      int id_baliza FK
+      int id_sensor FK
+      int id_variable FK
       timestamp datetime
       int id_lectura FK
     }
-    LECTURA_ESTADO {
+    ESTADO_HISTORICO_LECTURAS {
       int id PK
       int id_lectura FK
-      int id_estado_actual FK
+      int id_historico_lecturas FK
     }
     ESTADO_ACTUAL {
       int id_estado_actual PK
+      text descripcion
       timestamp datetime 
-      int id_lectura FK
     }
     HISTORICO_ESTADO {
       int id PK
@@ -165,13 +174,13 @@ erDiagram
     }
     EVALUACION_SEGURIDAD {
       int id_seguridad PK
-      timestamp datetime 
+      int id_ubicacion FK
       float valor_seguridad
       boolean requiere_evacuar
       text descripcion
+      timestamp datetime
       int id_estado_actual FK
       int id_evento FK
-      int id_ubicacion FK
     }
     HISTORICO_EVALUACION_SEGURIDAD {
       int id PK
