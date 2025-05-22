@@ -429,9 +429,32 @@ nodos = set(centralidades.keys()) | set(centralidades2.keys())
 
 resultado = {clave: sum(centralidades.get(clave, [])) + sum(centralidades2.get(clave, [])) for clave in nodos}
 
-print(centralidades,centralidades2)
-print(resultado)
+# print(centralidades,centralidades2)
+# print(resultado)
 [print(i) for i in resultado.items()]
 # Para la visualización
 # plt.show()
 
+
+G_post = nx.from_numpy_array(matriz_costes)
+nx.set_node_attributes(G_post, resultado,name="weight")
+
+nx.draw(
+    G=G_post, 
+    pos=coordenadas, 
+    with_labels=False, 
+    node_color='lightblue', 
+    edge_color='gray', 
+    node_size=2000, 
+    font_size=12)
+
+node_labels = {node: f"{node}\n({data['weight']})" for node, data in G_post.nodes(data=True)}
+nx.draw_networkx_labels(
+    G=G_post, 
+    pos=coordenadas, 
+    labels=node_labels, 
+    font_size=12, 
+    font_color='black')
+
+plt.title("Grafo con pesos en los nodos")
+plt.show()

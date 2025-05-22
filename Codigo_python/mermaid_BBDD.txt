@@ -37,7 +37,7 @@ erDiagram
     HISTORICO_LECTURAS ||--o{ ESTADO_HISTORICO_LECTURAS : "asociada"
     ESTADO_ACTUAL ||--o{ HISTORICO_ESTADO : "recoge"
 
-    EVALUACION_SEGURIDAD }|--|| TIPO_EVENTO : "tiene"
+    EVALUACION_SEGURIDAD }|--|| EVENTO : "tiene"
     EVALUACION_SEGURIDAD ||--o{ ESTADO_ACTUAL : "deriva de"
     EVALUACION_SEGURIDAD ||--o{ HISTORICO_EVALUACION_SEGURIDAD : "recoge"
     UBICACION||--|| EVALUACION_SEGURIDAD : "evaluada en"
@@ -187,7 +187,7 @@ erDiagram
       timestamp datetime
       int id_seguridad FK
     }
-    TIPO_EVENTO {
+    EVENTO {
       int id_evento PK
       varchar nombre
       boolean requiere_evacuar
