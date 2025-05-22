@@ -32,9 +32,21 @@ def quitar_k_aristas(matriz, indices, k):
         yield temp, combinacion  #  devuelve la matriz Y las aristas quitadas
 
 # Ejemplo de uso para k=1
-for variante, aristas_quitadas in quitar_k_aristas(matriz, indices, k):
-    print(f"\nSe han quitado las istas: {aristas_quitadas}")
-    print(type(aristas_quitadas[0]))
-    print("Matriz modificada:")
-    print(variante)
-    print("-----")
+#for variante, aristas_quitadas in quitar_k_aristas(matriz, indices, k):
+#    print(f"\nSe han quitado las istas: {aristas_quitadas}")
+#    print(type(aristas_quitadas[0]))
+#    print("Matriz modificada:")
+#    print(variante)
+#    print("-----")
+
+# Combinar claves y sumar valores (si prefieres este enfoque)
+dict1 = {'a': 10, 'b': 20, 'c': 30}
+dict2 = {'a': 5, 'b': 15, 'd': 25}
+
+# Obtener todas las claves
+claves = set(dict1.keys()) | set(dict2.keys())
+
+# Crear diccionario con valores sumados
+resultado = {clave: dict1.get(clave, 0) + dict2.get(clave, 0) for clave in claves}
+
+print("Diccionario combinado:", resultado)

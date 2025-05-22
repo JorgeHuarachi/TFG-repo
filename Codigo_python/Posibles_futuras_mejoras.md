@@ -22,3 +22,10 @@ Para trabajar con kafka necesito diseñar una estructura de datos basada en even
 3. Luego de kafka para procesarlo se puede ir a flink.
 
 Lo bueno de esto es que en teoria trabaja con MongoDB o PostgreSQL
+
+## **EN LA RECOMENDACION DE RUTAS**
+Que los valores de centralidad solo sumen 1 cuando el camino es nuevo, para lo que pasa con el nodo 6 por ejemplo, quitando todas las aristas marca un solo camino minimo siempre el mismo, da igual que arista quites pero lo cuenta como 4 caminos minimos, pero esos 4 son el mismo, es decir es el mismo, pero en otras circunstancias.
+Esto quiere decir que aun quitando cualquiera de las aristas de ese camino el camino minimo nuevo siempre sera el mismo sin importar cual.
+
+Vale para esto se me ocurre:
+1. Crear un objeto que guarde todos los caminos minimos y que al finalizar quitando todas las aristas, quite las que se repiten de tal forma que el numero de caminos minimos serian realmente diferentes. En el caso mencionado antes seria 1, porque todos son iguales
