@@ -1,18 +1,21 @@
 ---
 config:
   theme: default
+
+title: Modelo de Datos de Edificios y Espacios
+
 ---
 erDiagram
     direction TB
     EDIFICIO ||--|{ PLANTA : "contiene"
     PLANTA ||--|{ AREA : "contiene"
     TIPO_AREA ||--o{ AREA : "es de tipo"
-    ADYACENCIA ||--|{ AREA : "tiene origen"
-    ADYACENCIA ||--|{ AREA : "tiene destino"
-    TIPO_ADYACENCIA ||--o{ ADYACENCIA : "es de tipo"
+    CONEXION ||--|{ AREA : "tiene origen"
+    CONEXION ||--|{ AREA : "tiene destino"
+    TIPO_CONEXION ||--o{ CONEXION : "es de tipo"
 
     UBICACION ||--|| AREA : "es"
-    UBICACION ||--|| ADYACENCIA : "es"
+    UBICACION ||--|| CONEXION : "es"
     TIPO_UBICACION ||--o{ UBICACION : "clasifica"
 
     UBICACION ||--o{ BALIZA : "ubicada en"
@@ -82,8 +85,8 @@ erDiagram
       varchar nombre
       text descripcion
     }
-    ADYACENCIA {
-      int id_adyacencia PK
+    CONEXION {
+      int id_conexion PK
       int id_ubicacion FK
       varchar nombre
       text descripcion
@@ -93,10 +96,10 @@ erDiagram
       boolean bidireccional
       int id_area_origen FK
       int id_area_destino FK
-      int id_tipo_adyacencia FK
+      int id_tipo_conexion FK
     }
-    TIPO_ADYACENCIA {
-      int id_tipo_adyacencia PK
+    TIPO_CONEXION {
+      int id_tipo_conexion PK
       varchar nombre
       text descripcion
     }
@@ -225,3 +228,42 @@ erDiagram
       int id_ruta FK
       timestamp datetime
     }
+
+%% --- ESTILOS DE LAS TABLAS ---
+    style EDIFICIO fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style PLANTA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style AREA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style TIPO_AREA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style TIPO_CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+
+    style BALIZA fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style SENSOR fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style VARIABLE fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style BALIZA_SENSOR fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style SENSOR_VARIABLE fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style LECTURA fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style HISTORICO_LECTURAS fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+
+    style EVALUACION_SEGURIDAD fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style HISTORICO_EVALUACION_SEGURIDAD fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style ESTADO_ACTUAL fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style HISTORICO_ESTADO fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style EVENTO fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style ESTADO_HISTORICO_LECTURAS fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+
+    style USUARIO fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px
+    style USUARIO_UBICACION_ACTUAL fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px
+    style HISTORICO_USUARIO_UBICACION fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px
+    style RUTA fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px
+    style HISTORICO_RUTA fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px
+
+    style UBICACION fill:#E0F7FA,stroke:#0097A7,stroke-width:2px
+    style TIPO_UBICACIONUBICACION fill:#E0F7FA,stroke:#0097A7,stroke-width:2px
+
+
+
+
+
+
+
