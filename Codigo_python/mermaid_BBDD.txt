@@ -1,10 +1,8 @@
 ---
 config:
   theme: default
-
-title: Modelo de Datos de Edificios y Espacios
-
 ---
+
 erDiagram
     direction TB
     EDIFICIO ||--|{ PLANTA : "contiene"
@@ -230,12 +228,17 @@ erDiagram
     }
 
 %% --- ESTILOS DE LAS TABLAS ---
+
+%% --- Edificios y espacios ---
+
     style EDIFICIO fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
     style PLANTA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
     style AREA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
     style TIPO_AREA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
     style CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
     style TIPO_CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+
+%% --- Sensores y lecturas ---
 
     style BALIZA fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
     style SENSOR fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
@@ -245,12 +248,16 @@ erDiagram
     style LECTURA fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
     style HISTORICO_LECTURAS fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
 
+%% --- Seguridad ---
+
     style EVALUACION_SEGURIDAD fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
     style HISTORICO_EVALUACION_SEGURIDAD fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
     style ESTADO_ACTUAL fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
     style HISTORICO_ESTADO fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
     style EVENTO fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
     style ESTADO_HISTORICO_LECTURAS fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+
+%% --- Usuarios y Rutas ---
 
     style USUARIO fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px
     style USUARIO_UBICACION_ACTUAL fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px

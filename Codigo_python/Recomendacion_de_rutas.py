@@ -410,7 +410,7 @@ coordenadas = {
 f_tol = 0.5
 
 # Destinos considerados seguros
-destinos_seguros = [6,7]
+destinos_seguros = [7,6,5]
 
 # Factor de seguridad crítica 
 f_sec = 0.7
@@ -429,14 +429,14 @@ nodos = set(centralidades.keys()) | set(centralidades2.keys())
 
 resultado = {clave: sum(centralidades.get(clave, [])) + sum(centralidades2.get(clave, [])) for clave in nodos}
 
-# print(centralidades,centralidades2)
-# print(resultado)
 [print(i) for i in resultado.items()]
+
 # Para la visualización
 # plt.show()
 
 
 G_post = nx.from_numpy_array(matriz_costes)
+
 nx.set_node_attributes(G_post, resultado,name="weight")
 
 nx.draw(
