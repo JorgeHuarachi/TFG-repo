@@ -1,12 +1,12 @@
-# Condiciones Ambientales y de Seguridad: Variables y Riesgos
+# Condiciones Ambientales y de Seguridad Simples
 
-Este documento describe las **variables ambientales** que se pueden medir y las **condiciones de peligro** asociadas, considerando valores críticos y tiempos de exposición. También incluye eventos simples basados en los parámetros monitoreados.
+Este documento muestra las **variables ambientales** que se pueden medir (creo, en principio) y las **condiciones de peligro Simples** asociadas a ellas.
 
 ---
 
-## Variables Ambientales Monitoreadas
+## Variables Ambientales Monitoreadas (las que creo que quizas se pueden medir)
 
-A continuación, se presentan las variables que se pueden medir con sus respectivas unidades y descripciones:
+Las variables que se pueden medir con sus respectivas unidades y descripciones:
 
 | **Parámetro**                     | **Unidad** | **Descripción**                                                                 |
 |-----------------------------------|------------|---------------------------------------------------------------------------------|
@@ -15,7 +15,7 @@ A continuación, se presentan las variables que se pueden medir con sus respecti
 | Barometric Pressure              | hPa        | Presión atmosférica. Útil para detectar cambios bruscos (explosiones, fugas).   |
 | Battery Voltage                  | V          | Voltaje de la batería del sensor. Indica la salud del dispositivo.              |
 | Activity Counter                 | counts     | Conteo de actividad detectada. Indica movimiento o presencia.                   |
-| Ambient Light (Visible + IR)     | adim       | Luz ambiental (visible + infrarroja). Útil para evaluar iluminación.            |
+| Ambient Light (Visible + IR)     | adim       | Luz ambiental (visible + infrarroja). Para evaluar iluminación.                 |
 | Total VOC                        | ppb        | Compuestos orgánicos volátiles totales. Indica presencia de químicos.           |
 | CO₂ Concentration                | ppm        | Nivel de dióxido de carbono. Indica calidad de ventilación.                     |
 | Illuminance                      | lx         | Intensidad de luz visible. Afecta la visibilidad y el confort.                  |
@@ -26,7 +26,7 @@ A continuación, se presentan las variables que se pueden medir con sus respecti
 
 ---
 
-## Condiciones de Peligro
+## Condiciones de Peligro (de los que hay)
 
 Las condiciones de peligro se evalúan según **dos criterios**:
 1. **Valor de la variable**: Si supera los límites aceptables.
