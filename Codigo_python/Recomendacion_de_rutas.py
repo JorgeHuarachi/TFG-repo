@@ -410,7 +410,7 @@ coordenadas = {
 f_tol = 0.5
 
 # Destinos considerados seguros
-destinos_seguros = [7,6,5]
+destinos_seguros = [6,7]
 
 # Factor de seguridad crítica 
 f_sec = 0.7
@@ -434,6 +434,8 @@ resultado = {clave: sum(centralidades.get(clave, [])) + sum(centralidades2.get(c
 # Para la visualización
 # plt.show()
 
+##################################################################################################################################
+# A PARTIR DE AQUI PASO A PENSAR CON ESTOS VALORES DE CENTRALIDAD COMO PONDERO ALOS NODOS
 
 G_post = nx.from_numpy_array(matriz_costes)
 

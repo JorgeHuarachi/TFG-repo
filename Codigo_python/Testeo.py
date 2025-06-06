@@ -140,6 +140,9 @@ def Caminos_diferentes(G_costes, G_seguridades, posiciones, destinos, f_toleranc
                 lista_camino = caminos[exit]
                 print(f"\nprincipal: {coste_principal} {lista_camino}")
                 coste_max = coste_principal * (1 + f_tolerancia)
+                
+                print(f"Coste maximo: {coste_max}")
+                
                 lista_aristas = Agrupacion(lista_camino)
                 
                 # Añadir camino principal a la animación
@@ -261,7 +264,7 @@ coordenadas = {
 }
 
 f_tol = 0.5
-destinos_seguros = [5]
+destinos_seguros = [6,7]
 f_sec = 0.7
 
 centralidades, centralidades2 = Caminos_diferentes(
@@ -272,6 +275,11 @@ centralidades, centralidades2 = Caminos_diferentes(
     f_tolerancia=f_tol,
     f_seguridad=f_sec
 )
+
+#############################################################################################
+# A PARTIR DE AQUI SE PASO A PENSAR COMO PONDERAR LOS NODOS CON ESTOS VALORES
+#############################################################################################
+
 
 nodos = set(centralidades.keys()) | set(centralidades2.keys())
 resultado = {clave: sum(centralidades.get(clave, [])) + sum(centralidades2.get(clave, [])) for clave in nodos}

@@ -29,6 +29,9 @@ Esto quiere decir que aun quitando cualquiera de las aristas de ese camino el ca
 
 Vale para esto se me ocurre:
 1. Crear un objeto que guarde todos los caminos minimos y que al finalizar quitando todas las aristas, quite las que se repiten de tal forma que el numero de caminos minimos serian realmente diferentes. En el caso mencionado antes seria 1, porque todos son iguales
+2. poner nodo final jsonb
+3. floyd warshall
+4. estudiar el problema de congestion y choque de flujos
 
 ## EL METODO DE ANIMACION DE MATPLOTIB
 
@@ -37,3 +40,11 @@ Fijate que los nuevos caminos tu has hecho que si ya se han procesado cno anteri
 el primer nuevo camino quitando 0,1 es 0,4,5 en el siguiente proceso quitas 0,4 y en el siguiente 4,5.
 Pero Resulta que quitando el camino 1,4 queda el mismo camino 0,4,5 entonces hacer el mismo proceso, aunque:
 CONSIDERALO quizas tiene sentido hacer el mismo proceso porque la hay diferencia con el anterior, que ademas no tiene 1,4 pero si tiene 0,1. **CUIDADO**
+
+## FORMAS DE INTERACTUAR CON EL USUARIO
+
+Sobretodo para recomendar la ruta y el usuario sepa donde ir
+
+- proyectores tipo ikea
+- buzers
+- tipo maps (cochecito)
