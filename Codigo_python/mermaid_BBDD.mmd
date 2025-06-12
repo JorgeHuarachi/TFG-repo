@@ -5,6 +5,7 @@ config:
 
 erDiagram
     direction TB
+    %% --- Bloque 1: Edificio y Espacios ---
     EDIFICIO ||--|{ PLANTA : "contiene"
     PLANTA ||--|{ AREA : "contiene"
     TIPO_AREA ||--o{ AREA : "es de tipo"
@@ -15,7 +16,8 @@ erDiagram
     UBICACION ||--|| AREA : "es"
     UBICACION ||--|| CONEXION : "es"
     TIPO_UBICACION ||--o{ UBICACION : "clasifica"
-
+    
+    %% --- Bloque 3: Sensores y Lecturas ---
     UBICACION ||--o{ BALIZA : "ubicada en"
     SENSOR ||--o{ BALIZA_SENSOR : "es parte de"
     BALIZA ||--o{ BALIZA_SENSOR : "conectada a"
@@ -34,15 +36,19 @@ erDiagram
     UBICACION ||--o{ LECTURA : "ocurre en"
     LECTURA ||--o{ HISTORICO_LECTURAS : "recoge"
 
+    %% --- Bloque 4: Seguridad ---
+
     ESTADO_ACTUAL ||--|{ ESTADO_HISTORICO_LECTURAS : "basada en"
     HISTORICO_LECTURAS ||--o{ ESTADO_HISTORICO_LECTURAS : "asociada"
     ESTADO_ACTUAL ||--o{ HISTORICO_ESTADO : "recoge"
 
     EVALUACION_SEGURIDAD }|--|| EVENTO : "tiene"
     EVALUACION_SEGURIDAD ||--o{ ESTADO_ACTUAL : "deriva de"
+
     EVALUACION_SEGURIDAD ||--o{ HISTORICO_EVALUACION_SEGURIDAD : "recoge"
     UBICACION||--|| EVALUACION_SEGURIDAD : "evaluada en"
 
+    %% --- Bloque 5: Usuarios y Rutas ---
     RUTA }|--|{ EVALUACION_SEGURIDAD : "usa"
     RUTA ||--o{ UBICACION : "es origen de"
     RUTA ||--o{ HISTORICO_RUTA : "recoge"
@@ -67,6 +73,7 @@ erDiagram
       float superficie_metros_cuadrados
       int id_edificio FK
     }
+  %% las areas en las que se divide la planta del edificio
     AREA {
       int id_area PK
       int id_ubicacion FK
@@ -83,6 +90,7 @@ erDiagram
       varchar nombre
       text descripcion
     }
+  %% Seria lo que conecta a una area con otra
     CONEXION {
       int id_conexion PK
       int id_ubicacion FK
@@ -101,6 +109,7 @@ erDiagram
       varchar nombre
       text descripcion
     }
+  %% Esto es una superentidad referencial, para que muchas cosas esten referenciadas a una ubicación, en tipos setia una adyacencia o una AREA
     UBICACION {
       int id_ubicacion PK
       int id_tipo_ubicacion FK
@@ -109,6 +118,7 @@ erDiagram
       int id_tipo_ubicacion PK
       varchar nombre 
     }
+  %% Estas tablas hasta lectura entiendo que son el procesamiento complejo de datos
     BALIZA {
       int id_baliza PK
       varchar nombre
@@ -140,6 +150,7 @@ erDiagram
       int id_variable FK
       text descripcion
     }
+  %% LECTURA pretendo que sea como un snapshot de las valores en cada una de las ubicaciones, solo guarde las ultimas lecturas y esta tabla no crezca en el tiempo, como un live
     LECTURA {
       int id_lectura PK
       int id_ubicacion FK
@@ -149,6 +160,7 @@ erDiagram
       float valor
       timestamp datetime
     }
+  %% Aqui me gustaria guardar cada uno de los cambios en lectura, que sirva como para auditar o coger varias medidas y calcular la media y a partir de eso definir cosas
     HISTORICO_LECTURAS {
       int id_historico_lecturas PK
       int id_ubicacion FK
@@ -158,21 +170,25 @@ erDiagram
       timestamp datetime
       int id_lectura FK
     }
+  %% Aqui asigno un grupo de lecturas, a estado asi un estado esta formado por varias lecturas, o esta asociado a varias lecturas
     ESTADO_HISTORICO_LECTURAS {
       int id PK
       int id_lectura FK
       int id_historico_lecturas FK
     }
+  %% Con la misma intención que LECTURA esto muestra el ultimo estado (aunque es cierto que solo tiene una id dentro, aqui ya me pierdo un poco)
     ESTADO_ACTUAL {
       int id_estado_actual PK
       text descripcion
       timestamp datetime 
     }
+  %% Voy guardando los nuevos estados aqui.
     HISTORICO_ESTADO {
       int id PK
       timestamp datetime
       int id_estado_actual FK
     }
+  %% Aqui debería guardar el resultado de CEP de la evaluación de la seguridad segun el evento que da como resultado.
     EVALUACION_SEGURIDAD {
       int id_seguridad PK
       int id_ubicacion FK
@@ -183,35 +199,41 @@ erDiagram
       int id_estado_actual FK
       int id_evento FK
     }
+  %% Voy guardadno (aunque tiene solo id, eso me confunde)
     HISTORICO_EVALUACION_SEGURIDAD {
       int id PK
       timestamp datetime
       int id_seguridad FK
     }
+  %% Aqui guardaria los eventos posibles como humo, fuego, CO2 alto, cosas asi, en teoria es estatico.
     EVENTO {
       int id_evento PK
       varchar nombre
       boolean requiere_evacuar
       VARCHAR tipo_de_evento
     }
+  %% Aqui infomacion del usuario
     USUARIO {
         int id_usuario PK
         varchar nombre
         varchar correo
         timestamp creado_en
     }
+  %% Aqui volcaria la ubicación de usiario tras la triangulación, estara en alguna ubicación
     USUARIO_UBICACION_ACTUAL {
         int id_ubicacion_usuario PK
         int id_usuario FK
         int id_ubicacion FK
         timestamp fecha
     }
+  %% De esta forma se por que sitios ha estado el usuario.
     HISTORICO_USUARIO_UBICACION {
         int id PK
         int id_usuario FK
         int id_ubicacion FK
         timestamp deteccion
     }
+  %% Aqui vuelco la ruta tras realizar la recomendación de ruta.
     RUTA {
       int id_ruta PK
       int id_ubicacion_origen FK
@@ -221,6 +243,7 @@ erDiagram
       int id_seguridad FK
       int id_usuario FK
     }
+  %% Voy guaradndo las rutas que se han recomendado durante toda la evacuación (solo guarad id, eso me confunde)
     HISTORICO_RUTA {
       int id PK
       int id_ruta FK

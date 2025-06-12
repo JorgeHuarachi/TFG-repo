@@ -20,7 +20,7 @@ El boceto lo hice en papel, luego en el ipad y finalmente es el siguiente en una
 
 [Ver Wireframe en Miro](https://miro.com/app/board/uXjVIrp7DBM=/?share_link_id=797036388208)
 
-![Boceto Wireframe](Wireframe-boceto.jpg)
+![Boceto Wireframe](Figuras_boceto\Wireframe-boceto.jpg)
 
 La diferencia entre el de la izquierda y el de la derecha es que en el de la derecha comentado de azul tiene la intención de que tu puedas introducir los datos manualmente o de alguna forma para poder ver como responde el sistema de recomendación de rutas, ver como varían a medida que cambian los datos
 

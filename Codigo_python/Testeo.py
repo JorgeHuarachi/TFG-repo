@@ -281,7 +281,7 @@ centralidades, centralidades2 = Caminos_diferentes(
 #############################################################################################
 
 
-nodos = set(centralidades.keys()) | set(centralidades2.keys())
+""" nodos = set(centralidades.keys()) | set(centralidades2.keys())
 resultado = {clave: sum(centralidades.get(clave, [])) + sum(centralidades2.get(clave, [])) for clave in nodos}
 [print(i) for i in resultado.items()]
 
@@ -306,4 +306,4 @@ nx.draw_networkx_labels(
     font_color='black'
 )
 plt.title("Grafo con pesos en los nodos")
-plt.show()
+plt.show() """
