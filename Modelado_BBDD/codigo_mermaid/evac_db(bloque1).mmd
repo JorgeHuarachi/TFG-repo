@@ -1,0 +1,146 @@
+---
+config:
+  theme: default
+---
+
+erDiagram
+
+    %% --- Bloque 1: Edificio y Espacios ---
+    %% Esto modela la estructura del edificio espacialmente, es estático.
+
+    CONEXION              ||--o{ AREA : "tiene origen/destino"
+    CONEXION_CONDICIONAL  ||--o{ AREA : "tiene origen/destino"
+    
+    EDIFICIO  ||--|{ PLANTA : "tiene"
+    PLANTA    ||--|{ AREA : "contiene"
+    TIPO_AREA ||--o{ AREA : "es de tipo"
+
+    ESTADO_CONEXION ||--|| CONEXION  : "tiene estado"
+    
+    TIPO_CONEXION ||--|| CONEXION             : "es de tipo"
+    TIPO_CONEXION ||--|| CONEXION_CONDICIONAL : "es de tipo"
+    
+    ESTADO_CONEXION_CONDICIONAL ||--|| CONEXION_CONDICIONAL  : "tiene estado"
+
+    EDIFICIO {
+      int id_edificio PK
+      varchar nombre
+      text descripcion
+      float latitud
+      float longitud
+      int capacidad_personas
+      float superficie_m2
+    }
+    PLANTA {
+      int id_planta PK
+      int id_edificio FK
+      varchar nombre
+      int nivel
+      float superficie_m2
+    }
+    AREA {
+      int id_area PK
+      int id_planta FK
+      varchar nombre
+      text descripcion
+      float superficie_m2
+      int capacidad_personas
+      boolean salida_segura
+
+      int id_tipo_area FK
+    }
+    TIPO_AREA {
+      int id_tipo_area PK
+      varchar nombre                    
+      text descripcion                  
+    }
+    %% CONEXION son las puertas (o alternativamente ventanas) o todo aquello que esta entre una AREA y otra AREA (normalmente puertas)
+    CONEXION {
+      int id_conexion PK
+      int id_area_origen FK
+      int id_area_destino FK
+      varchar nombre
+      text descripcion
+      float ancho
+      float alto
+      int flujo_personas_min
+      boolean bidireccional
+      int id_tipo_conexion FK
+    }
+    %% Esto modela la existencia de ventanas/hueco/ventilación/rupturas_estructurales como conexiones que no son puertas 
+    %% Algunas de estas conexiones son solo transitables en situaciones extremas y la mayoria solo para perfiles de movilidad concretos
+    CONEXION_CONDICIONAL {
+      int id_conexion_condicional PK
+      int id_area_origen FK
+      int id_area_destino FK
+      int tipo_conexion FK
+      float alto 
+      float ancho 
+      boolean requiere_rescate
+      boolean uso_extremo
+      boolean restriccion_movilidad 
+      boolean accesible_bomberos
+      text descripcion 
+    }
+    TIPO_CONEXION {
+      int id_tipo_conexion 
+      varchar nombre 
+      text descripcion 
+      enum clase_acceso
+      boolean requiere_rescate
+      boolean uso_extremo
+      boolean restriccion_movilidad 
+      boolean accesible_bomberos
+      boolean bidireccional 
+      boolean requiere_apertura 
+      TEXT observaciones 
+    }
+    %% Las puertas pueden estar abiertas/cerradas/bloqueadas/intransitables el grafo navegable dependerá de esto
+    %% Se tiene que tener en cuenta y modificar dinámicamente el grafo y su transitabilidad
+    ESTADO_CONEXION {
+      int id_estado_conexion PK
+      int id_conexion FK
+      enum estado 
+      int severidad
+      text descripcion
+      text origen_evento
+      datetime timestamp
+    }
+    ESTADO_CONEXION_CONDICIONAL {
+      int id_estado_condicional PK
+      int id_conexion_condicional FK
+      enum estado 
+      int severidad
+      text descripcion
+      text origen_evento
+      datetime timestamp
+    }
+
+    
+    
+    %% --- Bloque 2: Sensores y Lecturas ---
+
+    %% --- Bloque 3: Seguridad ---
+
+    %% --- Bloque 4: Usuarios y Rutas ---
+
+    %% --- ESTILOS DE LAS TABLAS ---
+
+    %% --- Edificios y espacios ---
+    style EDIFICIO fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style PLANTA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style AREA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style TIPO_AREA fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style TIPO_CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style ESTADO_CONEXION fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style ESTADO_CONEXION_CONDICIONAL fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style CONEXION_CONDICIONAL fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+
+
+    %% --- Sensores y lecturas ---
+
+    %% --- Seguridad ---
+
+    %% --- Usuarios y Rutas ---
+
