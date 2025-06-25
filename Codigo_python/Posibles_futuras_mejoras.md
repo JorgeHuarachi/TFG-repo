@@ -241,8 +241,14 @@ Ej. “si se define en la conexión individual, tiene prioridad sobre el tipo”
 
 ## cep conexion
 ⚙️ “Los eventos se derivan de las lecturas mediante un motor externo CEP (Complex Event Processing), por lo que no existe una relación directa en el modelo físico. No obstante, existe una dependencia lógica entre LECTURA → EVENTO, importante para entender el flujo de datos.”
-
+__
+A todo esto he necestiado instalas tambien 
+    pip install ifcopenshell #para abrirlo
+    pip install ifcopenshell-visualizer # para visualizarlo
 
 __
 Este chat empieza a ser algo lento, crees ser capaz de darme un prompt suficicientemente elaborado como para dirigirme a un nuevo chat contigo y poder continuar con la misma calidad de conversación que tengo aqui pero con mas velocidad?
 __
+
+__
+

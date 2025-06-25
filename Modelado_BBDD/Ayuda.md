@@ -349,4 +349,108 @@ WHERE rn <= 3
 GROUP BY id_sensor, id_variable, id_ubicacion;
 ```
 Este cálculo lo puedes aplicar dentro de un procedimiento o script que se ejecute cada 10 segundos. También puedes usar una vista materializada si usas PostgreSQL o engines que lo soporten.
+_____________
+🗄️ Resumen de cambios en la base de datos
+Para poder almacenar también la posición de cada área y puerta, basta con añadir unos pocos campos a tus tablas:
 
+sql
+Copiar código
+-- En AREA, guardamos el centroide y opcionalmente su caja envolvente:
+ALTER TABLE AREA
+  ADD COLUMN centroid_x DOUBLE PRECISION,
+  ADD COLUMN centroid_y DOUBLE PRECISION,
+  ADD COLUMN min_x DOUBLE PRECISION,
+  ADD COLUMN min_y DOUBLE PRECISION,
+  ADD COLUMN max_x DOUBLE PRECISION,
+  ADD COLUMN max_y DOUBLE PRECISION;
+
+-- En CONEXION (puertas), guardamos el punto de inserción:
+ALTER TABLE CONEXION
+  ADD COLUMN pos_x DOUBLE PRECISION,
+  ADD COLUMN pos_y DOUBLE PRECISION;
+
+-- En PLANTA, opcionalmente el origen de coordenadas:
+ALTER TABLE PLANTA
+  ADD COLUMN origin_x DOUBLE PRECISION,
+  ADD COLUMN origin_y DOUBLE PRECISION;
+
+  ___
+
+Vale quiero ir la siguiente bloque, quiero que recuerdes todo lo que hablamos y me digas qeu es lo que recuerdas para comfinar, añadir o elimiinar ideas.
+
+Te paso el codigo mermaid de referentia.
+
+con respecto alas balizas tambien me gustaria conoces u coordenada xy y lo otro igual que hemos hecho antes asi podemos situarlas en el espacio.
+
+ %% --- Bloque 2: Sensores y Lecturas ---
+    %% Esto modela los sensores y el estado en tiempo real de las mediciones, es dinámica.
+    AREA ||--o{ LECTURA : "ocurre en"
+    AREA ||--o{ HISTORICO_LECTURAS : "ocurre en"
+    AREA ||--o{ BALIZA : "tiene"
+
+    BALIZA   ||--o{ BALIZA_SENSOR    : "tiene sensores"
+    SENSOR   ||--|| SENSOR_VARIABLE  : "mide variables"
+    SENSOR   ||--o{ BALIZA_SENSOR    : "conectado a"
+    VARIABLE ||--|| SENSOR_VARIABLE  : "definida en"
+
+    HISTORICO_LECTURAS||--o{ VARIABLE : "mide"
+    HISTORICO_LECTURAS||--o{ SENSOR   : "usa"
+    HISTORICO_LECTURAS||--o{ BALIZA   : "genera"
+
+    LECTURA ||--o{ VARIABLE  : "mide"
+    LECTURA ||--o{ SENSOR    : "usa"
+    LECTURA ||--o{ BALIZA    : "genera"
+    
+    BALIZA {
+      int id_baliza PK
+      varchar nombre
+      text descripcion
+      boolean activa
+      int id_area FK
+    }
+    SENSOR {
+      int id_sensor PK
+      varchar nombre
+      text descripcion
+      boolean activa
+    }
+    VARIABLE {
+      int id_variable PK
+      varchar nombre
+      text descripcion
+      varchar unidad
+    }
+    BALIZA_SENSOR {
+      int id PK
+      int id_baliza FK
+      int id_sensor FK
+      text descripcion
+    }
+    SENSOR_VARIABLE {
+      int id PK
+      int id_sensor FK
+      int id_variable FK
+      text descripcion
+    }
+    %% En LECTURA se almacena los ultimos valores medidos por los sensores de las balizas en cada una de las AREAS, su tamaño es fijo, y unicamente se actualiza el valor de la variable, se podría decir que es una especie de Snapshot del estado del sistema en términos de las variables.
+    %% Mi idea con esta entidad es tener las ultimas lecturas como si fuera un Live.
+    LECTURA {
+      int id_lectura PK
+      int id_area FK
+      int id_baliza FK
+      int id_sensor FK
+      int id_variable FK
+      float valor
+      datetime timestamp
+    }
+    %% Como LECTURA es una tabla estática, para no perdér los datos con cada nueva lectura, se deben ir volcando con cada nueva LECTURA en su HISTORICO, se vuelca al mismo tiempo que se obtiene la lectura de tal modo que los ultimos registros de LECTURA y su HISTORICO son los mismos
+    %% Mi idea con esta entidad es poder tener un registro en el tiempo de como han evolucionado las variabes (Tº, CO2, Humo) y poder auditar lo que ha ocurrido, tambien de obtener una media de las ultimas lecturas, como una media de temperatura, el incremento, etc, para poder tener control sobre como evolucionan y detectar patrones.
+    HISTORICO_LECTURAS {
+      int id_historico_lectura PK
+      int id_area FK
+      int id_baliza FK
+      int id_sensor FK
+      int id_variable FK
+      float valor
+      datetime timestamp
+    }

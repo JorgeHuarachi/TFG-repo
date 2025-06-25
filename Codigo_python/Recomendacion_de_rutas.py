@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from itertools import combinations as combs
 from matplotlib.animation import FuncAnimation # GRACIAS A ESTO PUEDO ANIMAR LOS GRAFOS QUE OBTENGO
+from matplotlib.lines import Line2D
 
 
 # ###############################  FUNCIONES ###############################
@@ -45,11 +46,10 @@ def Agrupacion(camino):
     
     """
     
-    lista = {(camino[i],camino[i+1]) for i in range(len(camino)-1)}
-    pares = sorted(lista) # Lo ordena (no como quiero pero funciona, investigar si se puede ordenar el orden secuencial)
-    return pares
+    lista = [(camino[i],camino[i+1]) for i in range(len(camino)-1)]
+    return lista
 
-def Visualizar(G,posiciones,lista,ax, title="Gráfico"):
+def Visualizar(G,posiciones,lista,aristas_quitadas,ax, title="Gráfico",coste=None, origen=None, destino=None,coste_max=None):
     """Permite visualizar ciertas aristas u nodos que pertenecen a un grafo más grande de un color diferente
     se debe conocer en la malla de graficos que posición ocupan (ejex,ejey)
     
@@ -80,6 +80,20 @@ def Visualizar(G,posiciones,lista,ax, title="Gráfico"):
     nx.draw_networkx_nodes(G, posiciones, ax=ax, node_size=150, node_color="lightblue")
     nx.draw_networkx_edges(G, posiciones, ax=ax, width=1, edge_color="gray")
 
+    # if aristas_quitadas:
+    #     nx.draw_networkx_edges(
+    #         G, posiciones,
+    #         edgelist=list(aristas_quitadas),
+    #         ax=ax,
+    #         style="--",
+    #         edge_color="gray",
+    #         width=2
+    #     )
+    
+    # Camino “anterior” tenue (sombra): puedes guardar en estados previos si quieres
+    # nx.draw_networkx_edges(G, posiciones, edgelist=[...], style="-", edge_color="pink", alpha=0.3, width=2)
+ 
+
     # color a una aristas y nodos
     nx.draw_networkx_edges(G, posiciones, aristas, ax=ax, width=2, edge_color="red")
     nx.draw_networkx_nodes(G, posiciones, lista, ax=ax, node_size=150, node_color="red")
@@ -87,8 +101,21 @@ def Visualizar(G,posiciones,lista,ax, title="Gráfico"):
     # etiquetas
     nx.draw_networkx_labels(G, posiciones, ax=ax)
     
+    # Leyendas
+    legend_items = [
+        Line2D([0], [0], color="red", lw=2, label="Camino actual"),
+        Line2D([0], [0], color="gray", linestyle="--", lw=2, label="Arista eliminada")
+    ]
+    # Titulo
+    ax.legend(handles=legend_items, loc="upper right")
+    
+     
     ax.set_title(title)
-
+    
+    info = f"Coste máximo: {coste_max}\nCoste: {coste}"
+    if origen is not None and destino is not None:
+        info += f" | Origen: {origen} → Destino: {destino}"
+    ax.text(0.02, 0.02, info, transform=ax.transAxes, verticalalignment="bottom")
 
 def quitar_k_aristas(matriz, indices, k):   
     """Esta función permite obtener las matrices resultado de quitar elementos de una lista de aristas en conbinaciones de k aristas.
@@ -251,18 +278,15 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
 
     for exit in destinos: # Para cada uno de los DESTINOS
         
-        print(f"\nHACIA EL NODO {exit}:")
-        
-        # --- Para la visualicación ---
-        # 
-        # fig, axes1 = plt.subplots(len(nodos),5)  # Este 5, nose como lo podria calcular, pero lo tengo que saber con antelación       
-        # fig.set_size_inches(len(nodos)*3,5*3) # Solo para visualizarlo, nada mas
-        # 
-        # -----------------------------
+        print(f"\nHACIA EL NODO {exit}:\n\n")
         
         # Calculos el camino minimo de uno a todos, desde el nodoo destino a todos los nodos origen
         coste_principal, lista_camino = nx.multi_source_dijkstra(G,sources={exit})
-        print(f"{coste_principal} \n {lista_camino}")
+        
+        for k in lista_camino: lista_camino[k] = lista_camino[k][::-1] 
+        
+        [print(f"DESDE EL NODO {nodo}: Coste: {coste_principal[nodo]} Camino: {lista_camino[nodo]}") for nodo in sorted(lista_camino)]
+        print("\n__________________________\n")
         
         for origenes in nodos: # Para cada uno de los nodos origen diferentes al destino
             
@@ -284,11 +308,11 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                 if exit not in coste_principal:
                     raise nx.NetworkXNoPath
                 
-                print(f"\nprincipal: {coste_principal[origenes]} {lista_camino[origenes]} ")
-                
+                print(f"Desde el nodo {origenes} hacia el nodo {exit}\nCamino principal: {coste_principal[origenes]} {lista_camino[origenes]}\n ")
+ 
                 # Para reprensentarlo y quitar lista_aristas una a una
-                lista_aristas = Agrupacion(lista_camino[origenes]) 
-                
+                lista_aristas = Agrupacion(lista_camino[origenes])
+                print(lista_aristas)
                 # ---- Para visualización Camino principal --- 
                 # 
                 # ejey = nodos.index(origenes) 
@@ -302,7 +326,16 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                 # ---------------------------------
                 
                 # Añadir camino principal a la animación
-                caminos_animacion.append((G, lista_camino[origenes], f"Principal: {origenes} a {exit}"))
+                caminos_animacion.append((
+                    G, 
+                    lista_camino[origenes], 
+                    set(), 
+                    f"Camino: {origenes} a {exit}",
+                    coste_principal[origenes],
+                    origenes,
+                    exit,
+                    coste_max
+                    ))
 
                 
                 for matriz_quitado,arista_quitada in quitar_k_aristas(G_costes, lista_aristas,k=1): # Para cada k aristas en la lista de aristas del camino minimo principal
@@ -313,14 +346,25 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                     try:
                         
                         coste_nuevo, lista_camino_nuevo = nx.multi_source_dijkstra(G_temp,sources={exit})
+                        for k in lista_camino_nuevo: lista_camino_nuevo[k] = lista_camino_nuevo[k][::-1] 
                         
                         if exit not in coste_nuevo:
                             raise nx.NetworkXNoPath
                         
-                        print(f"    nuevo camino: {coste_nuevo[origenes]} {lista_camino_nuevo[origenes]} quitando la arista {arista_quitada}" )
+                        print(f"|    Camino alternativo nivel 1: {coste_nuevo[origenes]} {lista_camino_nuevo[origenes]} Quitando la arista {arista_quitada}" )
                         
                         # Añadir camino alternativo a la animación
-                        caminos_animacion.append((G_temp, lista_camino_nuevo[origenes], f"Alternativo: {origenes} a {exit} sin {arista_quitada}"))        
+                        caminos_animacion.append((
+                            G_temp, 
+                            lista_camino_nuevo[origenes],
+                            {arista_quitada}, 
+                            f"Alternativo Nivel 1: {origenes} a {exit}",
+                            coste_nuevo[origenes],
+                            origenes,
+                            exit,
+                            coste_max
+                            ))
+                                                 
                         
                         if coste_nuevo[origenes]<=coste_max: # si el coste del nuevo camino minimo resultante de quitar una arista esta por debajo del maximo
                             
@@ -342,13 +386,24 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
                                 try:
                                     coste_nuevo2, lista_camino_nuevo2 = nx.multi_source_dijkstra(G_temp2,sources={exit})
                                     
+                                    for k in lista_camino_nuevo2: lista_camino_nuevo2[k] = lista_camino_nuevo2[k][::-1] 
+
                                     if exit not in coste_nuevo2:
                                         raise nx.NetworkXNoPath
                                     
-                                    print(f"        nuevo camino2: {coste_nuevo2[origenes]} {lista_camino_nuevo2[origenes]} quitando la arista2 {arista_quitada2}" )
+                                    print(f"|    |   Camino alternativo nivel 2: {coste_nuevo2[origenes]} {lista_camino_nuevo2[origenes]} Quitando la arista2 {arista_quitada2}" )
                                     
                                     # Añadir camino nivel 2 a la animación
-                                    caminos_animacion.append((G_temp2, lista_camino_nuevo2[origenes], f"Nivel 2: {origenes} a {exit} sin {arista_quitada,arista_quitada2}"))
+                                    caminos_animacion.append((
+                                        G_temp2, 
+                                        lista_camino_nuevo2[origenes]
+                                        ,{arista_quitada,arista_quitada2}, 
+                                        f"Alternativo Nivel 2: {origenes} a {exit}",
+                                        coste_nuevo2[origenes],
+                                        origenes,
+                                        exit,
+                                        coste_max
+                                        ))
                                     
                                     if coste_nuevo2[origenes]<=coste_max:
 
@@ -358,21 +413,15 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
 
                                 except nx.NetworkXNoPath:
                                     continue
-
-                        # -- Para la visualización Camino nuevo --
-                        #
-                        #ejex=lista_aristas.index(arista_quitada[0])+1
-                        #Visualizar(G_temp,posiciones,lista_camino_nuevo, axes=axes1,ejex=ejex,ejey=ejey)
-                        #
-                        # ----------------------------------------
                     except nx.NetworkXNoPath:
                         continue
+                    
                 centralidad_evacuacion[origenes].append(num_caminos_aceptables)
                 centralidad_evacuacion2[origenes].append(num_caminos_aceptables_dos)
                 centralidad_evacuacion_diferentes[origenes].append(len(lista_temporal))
                 centralidad_evacuacion2_diferentes[origenes].append(len(lista_temporal2))    
                 print(f"{len(lista_temporal)} lista_temporal: {lista_temporal} ") # son los nuevos caminos estrictamente diferentes
-                print(f"        {len(lista_temporal2)} lista_temporal2: {lista_temporal2}\n ")
+                print(f"{len(lista_temporal2)} lista_temporal2: {lista_temporal2}\n ")
             
             except nx.NetworkXNoPath:
                 centralidad_evacuacion[origenes].append(0)
@@ -402,8 +451,8 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
     fig, ax = plt.subplots(figsize=(8, 6))
     
     def update(frame):
-        G_frame, camino, title = caminos_animacion[frame]
-        Visualizar(G_frame, posiciones, camino, ax, title)
+        G_frame, camino,aristas_quitadas, title, coste, origen, destino, coste_max = caminos_animacion[frame]
+        Visualizar(G_frame, posiciones, camino,aristas_quitadas, ax, title, coste,  origen, destino,coste_max)
     
     ani = FuncAnimation(fig, update, frames=len(caminos_animacion), interval=3000, repeat=True)
     plt.show()

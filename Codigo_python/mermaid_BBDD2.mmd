@@ -46,6 +46,7 @@ erDiagram
       float superficie_m2
       int capacidad_personas
       boolean salida_segura
+
       int id_tipo_area FK
     }
     TIPO_AREA {
@@ -117,7 +118,7 @@ erDiagram
 
     
     
-    %% --- Bloque 3: Sensores y Lecturas ---
+    %% --- Bloque 2: Sensores y Lecturas ---
     %% Esto modela los sensores y el estado en tiempo real de las mediciones, es dinámica.
     AREA ||--o{ LECTURA : "ocurre en"
     AREA ||--o{ HISTORICO_LECTURAS : "ocurre en"
