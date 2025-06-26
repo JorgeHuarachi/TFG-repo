@@ -4,6 +4,7 @@
 
 - pasar todo a ingles
 - imcluir imagenes de figuras 
+- Hacer el video antes de todo, porque voy a tardar en hacer lo anterior
 
 ## Breve introducción del documento y la base de datos
 
