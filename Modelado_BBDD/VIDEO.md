@@ -1,4 +1,4 @@
 # prueba
 para poder visualiza run videa
 
-![texto](RPReplay_Final1750949978.mp4)
+[![Ver video](Modelado_BBDD/miniatura.png)](Modelado_BBDD/RPReplay_Final1750949978.mp4)
