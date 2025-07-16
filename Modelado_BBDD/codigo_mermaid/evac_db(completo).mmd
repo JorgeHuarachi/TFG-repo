@@ -5,7 +5,7 @@ config:
 
 erDiagram
 
-    %% --- Bloque 1: Edificio y Espacios ---
+    %% --- Bloque 1: Edificio, Espacios y conexiones ---
     %% Esto modela la estructura del edificio espacialmente, es estático.
 
     CONEXION              ||--o{ AREA : "tiene origen/destino"
@@ -37,17 +37,21 @@ erDiagram
       varchar nombre
       int nivel
       float superficie_m2
+      float origen_x 
+      float origen_y
     }
     AREA {
       int id_area PK
+      int id_tipo_area FK
       int id_planta FK
       varchar nombre
       text descripcion
-      float superficie_m2
+      geometry geometria
+      float posicion_centroide_x
+      float posicion_centroide_y
       int capacidad_personas
+      float superficie_m2
       boolean salida_segura
-
-      int id_tipo_area FK
     }
     TIPO_AREA {
       int id_tipo_area PK
@@ -57,15 +61,17 @@ erDiagram
     %% CONEXION son las puertas (o alternativamente ventanas) o todo aquello que esta entre una AREA y otra AREA (normalmente puertas)
     CONEXION {
       int id_conexion PK
+      int id_tipo_conexion FK
       int id_area_origen FK
       int id_area_destino FK
       varchar nombre
       text descripcion
+      geomtry posicion_xy
+      float distancia
       float ancho
       float alto
-      int flujo_personas_min
       boolean bidireccional
-      int id_tipo_conexion FK
+      int flujo_personas_min
     }
     %% Esto modela la existencia de ventanas/hueco/ventilación/rupturas_estructurales como conexiones que no son puertas 
     %% Algunas de estas conexiones son solo transitables en situaciones extremas y la mayoria solo para perfiles de movilidad concretos
@@ -121,7 +127,7 @@ erDiagram
 
     
     
-    %% --- Bloque 2: Sensores y Lecturas ---
+    %% --- Bloque 2: Balozas, sensores y Lecturas ---
     %% Esto modela los sensores y el estado en tiempo real de las mediciones, es dinámica.
     AREA ||--o{ LECTURA : "ocurre en"
     AREA ||--o{ HISTORICO_LECTURAS : "ocurre en"

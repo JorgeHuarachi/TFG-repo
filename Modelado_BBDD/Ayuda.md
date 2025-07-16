@@ -349,7 +349,11 @@ WHERE rn <= 3
 GROUP BY id_sensor, id_variable, id_ubicacion;
 ```
 Este cálculo lo puedes aplicar dentro de un procedimiento o script que se ejecute cada 10 segundos. También puedes usar una vista materializada si usas PostgreSQL o engines que lo soporten.
+
 _____________
+
+### añadir centroide a area y conexion, origen en planta
+
 🗄️ Resumen de cambios en la base de datos
 Para poder almacenar también la posición de cada área y puerta, basta con añadir unos pocos campos a tus tablas:
 
@@ -454,3 +458,130 @@ con respecto alas balizas tambien me gustaria conoces u coordenada xy y lo otro 
       float valor
       datetime timestamp
     }
+
+### Orden al crear la base de datos
+
+🧪 ¿Qué orden seguir?
+Cuando montas toda la base desde cero, este es el orden lógico:
+
+Crear la base de datos (si aún no existe).
+
+Crear las tablas base.
+
+Crear las funciones de trigger (son funciones como set_pos_from_geom()).
+
+Crear los triggers que usan esas funciones.
+
+Crear las vistas.
+
+Crear los índices.
+
+📍 En pgAdmin
+Abre tu base en pgAdmin.
+
+Clic derecho en el esquema → Query Tool.
+
+Pega el bloque SQL (función, trigger o vista).
+
+Ejecuta (F5 o botón del rayo).
+
+Puedes hacer uno por uno o pegar un archivo .sql completo con todo junto (si el orden es correcto).
+
+✅ Recomendación
+Si estás haciendo un proyecto serio (aunque sea personal):
+
+✨ Crea tu estructura.sql desde ya.
+
+Añade todos tus CREATE TABLE, CREATE FUNCTION, CREATE TRIGGER, CREATE VIEW, CREATE INDEX.
+
+Usa IF NOT EXISTS y CREATE OR REPLACE para que lo puedas ejecutar varias veces sin miedo.
+
+___
+
+/sql/
+├── 00_create_database.sql       ← (opcional) crea la base si no existe
+├── 01_schemas.sql               ← schemas si usas (ej: `public`, `gis`, etc.)
+├── 02_tables_core.sql           ← tablas principales (usuarios, áreas, etc.)
+├── 03_tables_relacionales.sql   ← tablas intermedias, relaciones N:M
+├── 04_views.sql                 ← vistas
+├── 05_functions.sql             ← funciones PL/pgSQL (ej: triggers)
+├── 06_triggers.sql              ← triggers conectados a funciones
+├── 07_indexes.sql               ← índices
+├── 08_sample_data.sql           ← datos de prueba (si quieres)
+
+__
+
+/sql/
+├── 02_tablas_autenticacion.sql
+├── 03_tablas_espaciales.sql
+├── 04_tablas_eventos.sql
+
+/sql/
+├── 00_create_database.sql
+├── 01_extensions.sql                    ← PostGIS y otras
+├── 02_schemas.sql                       ← Si usas varios esquemas
+├── 03_tablas_autenticacion.sql
+├── 04_tablas_espaciales.sql
+├── 05_tablas_eventos.sql
+├── 06_particiones_eventos.sql          ← Si particionas por años
+├── 07_functions_triggers.sql
+├── 08_views.sql
+├── 09_indexes.sql
+├── 10_datos_prueba.sql
+
+✅ Recomendación final
+Necesidad	Solución
+Base con muchas tablas	✅ Divide por bloques (.sql por módulo)
+Evitar errores al ejecutar varias veces	✅ Usa IF NOT EXISTS, OR REPLACE
+Crear base completa desde cero	✅ Usa script con orden y comentarios
+Tener futuro control de versiones	✅ Guarda en Git (estructura + cambios)
+Particiones	✅ Dentro del archivo de su tabla, o aparte
+
+___
+
+📦 Conclusión
+Tu estructura es totalmente válida y no es necesario “repensarla” ahora. Pero puedes:
+
+Mejora	Acción sugerida
+Mejor organización	✅ Separar en un bloque tablas_usuarios.sql
+Buen rendimiento futuro	✅ Añadir índices geom, timestamp, etc.
+Mayor claridad	✅ Añadir comentarios en cada tabla
+Automatización o lógica espacial	✅ Usar PostGIS también aquí, si guardas ubicaciones
+
+---
+
+✅ Conclusión
+Quieres...	Usa...
+Solo usar NetworkX o exportar a Python	pos_x, pos_y
+Mostrar en plano GIS / QGIS / mapas interactivos	GEOMETRY(POINT)
+Hacer análisis espacial (distancias, zonas)	GEOMETRY(POINT)
+Tener ambos	Usa geometry(POINT) y calcula pos_x, pos_y como campos o vista
+
+---
+### entidda door-to-door para tener distancias (aristas)
+ALTER TABLE door_to_door
+ADD COLUMN distancia_metros DOUBLE PRECISION GENERATED ALWAYS AS (
+  ST_Length(geom)
+) STORED;
+
+👉 Esto te da una columna siempre sincronizada con la geometría. Perfecto para usar como peso en NetworkX (weight).
+
+---
+### modelar door-to-door
+✅ Entonces sí necesitas modelar door-to-door aparte
+Porque estás pasando de:
+
+🔳 Área-a-área (conceptual, a nivel de recinto)
+→ conexiones (ya la tienes)
+
+a
+
+🚪 Puerta-a-puerta (físico, en el plano)
+→ door_to_door (que tú defines)
+
+### Sobre los espacios en forma de L T U
+
+Dividirlo en rectangulos conectados.
+L: dos rectangulos con una conexion |_
+T: dos rectangulos con una conexion |-
+U: tres rectangulos con dos conexiones |_|

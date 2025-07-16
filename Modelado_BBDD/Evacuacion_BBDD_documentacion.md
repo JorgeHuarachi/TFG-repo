@@ -1,4 +1,4 @@
-# DOCUMENTACIÓN ``evac_db`` 
+# DOCUMENTACIÓN **``evac_db``** 
 
 *Pendientes
 
@@ -19,13 +19,26 @@ Primero se va presentar una imagen completa de la base de datos, para posteriorm
 
 ![Boceto Wireframe](Figuras_BBDD/evac_db(completo).png)
 
-### **`AREA`**
-Algo que se puede explicar y apreciar desde ya es la entidad central ``AREA`` con la cual estan conectadas todos los bloques, esta entidad modela todos los espacioes existentes en todas las plantas del edificio y gracias a indices como ``id_planta`` las que pertenencen a una misma planta estan asociadas a una sola planta.
+### Entidad central **`AREA`**
+Algo que se puede explicar desde ya es la entidad central `AREA` con la cual estan conectadas todos los bloques, es decir todos estan referenciados a uno o varias areas.
+
+Esta entidad modela todos los espacios interiores existentes en todas las plantas del edificio. Gracias a los indices `id_edificio` e `id_planta` queda definida la jerarquia entre esas entidades.
+
+#### Atributos de `AREA`
+
+Entre los atributos nos encontramos ademas de los indices `id_area` `id_planta` `id_tipo_area` `id_nombre` `descripción` indices como:
+
+`ancho` `largo`
+
+`superficie_m2`: Que es la superfice en metors cuadrados que tiene el area.
+
+`capacidad_personas`: Es el numero de personas recomendable o limite que tiene un Area para contener dentro, depende de la superficie y los muebles que tenga el Area.
+
+`salida_segura`: Indica si ese area tiene acceso a una salida al exterior o una salida de elergencia que se considere segura.
 
 Brevemente los atributos dan información sobre el espacio, como superficie en metros cuadrados, o capacidad de personas, si contiene salidas de evacuación y el tipo de area que es.
 
-Idealmente me gustaria añadir información sobre la posición espacial de la superficie de la sala y las dimensiones, para poder reprensentarlo en un mapa o dibujarlo en algun sitio. Se que existen datos de tipo ``GEOMETRY`` que si me permite meter datos como poligonos, lineas o puntos, pero de momento no lo he implementado. He dado prioridad a conocer las conexiones que existen entre Areas/salas/espacios. 
-
+Idealmente me gustaria añadir información sobre la posición espacial de la superficie de la sala y las dimensiones, para poder reprensentarlo en un mapa o dibujarlo en algun sitio. Se que existen datos de tipo `GEOMETRY` que si me permite meter datos como poligonos, lineas o puntos, pero de momento no lo he implementado. He dado prioridad a conocer las conexiones que existen entre Areas/salas/espacios. 
 
 
 ## Explicación de los bloques
