@@ -1,4 +1,8 @@
-# Cosas que deben estar en la dodumentación del modelado de la base de datos.
+# Ayuda en el orden, y que debe estar en la documentación de la creación de la BBDD
+
+Cosas que deben estar en la documentación del modelado de la base de datos.
+
+¿Demasiado, en el Anexo?
 
 | Fase                          | Resultado esperado (documento/artefacto)               |
 | ----------------------------- | ------------------------------------------------------ |
@@ -7,7 +11,8 @@
 | 3. **Diseño lógico**          | Modelo relacional: tablas, claves, tipos               |
 | 4. **Diseño físico**          | Esquema en SQL, índices, constraints, particiones      |
 
-1. Análisis de requisitos
+## 1. Análisis de requisitos
+
 Objetivo:
 Entender qué necesita el sistema y qué datos deben almacenarse.
 
@@ -37,7 +42,8 @@ Necesidades de persistencia de información.
 
 Qué significa cada dato, quién lo usa, si es obligatorio, etc.
 
-2. Diseño conceptual
+## 2. Diseño conceptual
+
 Objetivo:
 Convertir los requisitos en un modelo abstracto de alto nivel, independiente del sistema gestor.
 
@@ -63,7 +69,7 @@ Atributos clave
 
 ✅ Descripción textual del modelo: para complementar el diagrama.
 
-3. Diseño lógico
+## 3. Diseño lógico
 Objetivo:
 Traducir el modelo conceptual a un modelo relacional (tablas, columnas, tipos).
 
@@ -81,7 +87,7 @@ Documentos de salida:
 
 ✅ Reglas de integridad descritas.
 
-Ejemplo concreto:
+## Ejemplo concreto:
 Supón que estás modelando un sistema de gestión de estancias en un hospital:
 
 1. Análisis de requisitos
@@ -116,7 +122,7 @@ SQL para cada tabla
 
 Optimización para lecturas por fecha y dispositivo
 
-🧩 Documentación final ideal:
+## 🧩 Documentación final ideal:
 Una buena documentación incluiría:
 
 ✅ Documento de requisitos (narrativa + actores)
@@ -132,4 +138,6 @@ Una buena documentación incluiría:
 ✅ Plan de índices y rendimiento (si aplica)
 
 ✅ Notas sobre uso futuro: por ejemplo, uso con grafos, visualización, etc.
+
+---
 

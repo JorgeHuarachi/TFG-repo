@@ -1,10 +1,11 @@
 # DOCUMENTACIÓN **``evac_db``** 
 
-*Pendientes
+**Cosas Pendientes**
 
-- pasar todo a ingles
-- imcluir imagenes de figuras 
-- Hacer el video antes de todo, porque voy a tardar en hacer lo anterior
+- Alinear el modeloado al estandar de OGC IndoorGML.
+- pasar todo a ingles.
+- imcluir imagenes de figuras. 
+- Hacer el video antes de todo, porque voy a tardar en hacer lo anterior.
 
 ## Breve introducción del documento y la base de datos
 
@@ -45,7 +46,7 @@ Idealmente me gustaria añadir información sobre la posición espacial de la su
 
 ### Bloque 1: Edificios y Espacios (Conexiones)
 
-![Boceto Wireframe](Figuras_BBDD/evac_db(bloque1).png)
+![Boceto Wireframe](Figuras_BBDD/evac_db(bloque1)_PreIndoorGML.png)
 
 El primer bloque además de modelar el Edificio y los Espacios/Areas fisicos modela también las conexiones que existen entre ellos mediante un entidad especifica que es `CONEXION` y `CONEXION_CONDICIONAL`.
 

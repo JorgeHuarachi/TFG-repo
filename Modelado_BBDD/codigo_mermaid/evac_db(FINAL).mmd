@@ -1,0 +1,218 @@
+erDiagram
+
+%% --- BLOQUE 1: IndoorGML espacios y caracteristicas ---
+
+  nav_navigablespace        ||--|| CellSpace : "subclass of"
+  cellBoundary              o{--|| CellSpace : "Delimited by"
+  node                      ||--|| CellSpace  : "Duality"
+  nav_nonnavigableboundary  ||--|| cellBoundary : "subclass of"
+  nav_navigableboundary     ||--|| cellBoundary : "subclass of"
+  edge                      o{--o{ cellBoundary : "Duality"
+  nav_transferspace         ||--|| nav_navigablespace : "subclass of"
+  nav_generalspace          ||--|| nav_navigablespace : "subclass of"
+  edge                      ||--o{ node : "Connects"
+
+
+
+  CellSpace {
+    uuid cell_id PK
+    int4 level_id FK
+    text name
+    text category
+    bool navigable
+    geometry geom
+  }
+  cellBoundary {
+    uuid boundary_id PK
+    int4 level_id FK
+    text type
+    uuid left_cell FK
+    uuid right_cell FK
+    geometry geom
+  }
+
+  nav_generalspace {
+    uuid cell_id PK
+    text function
+  }
+  nav_navigableboundary {
+    uuid boundary_id PK
+    bool boundary_orientation
+    text function
+  }
+  nav_navigablespace {
+    uuid cell_id PK
+    text locomotion_type
+  }
+  nav_nonnavigableboundary {
+    uuid boundary_id PK
+  }
+  nav_transferspace {
+    uuid cell_id PK
+    text function
+    text category
+  }
+
+  node {
+    uuid node_id PK
+    int4 layer_id FK
+    int4 level_id FK
+    uuid dual_cell FK
+    text role
+    geometry geom
+  }
+  edge {
+    uuid trans_id PK
+    int4 layer_id FK
+    uuid from_node FK
+    uuid to_node FK
+    uuid boundary_id FK
+    float8 weight_m
+    geometry geom
+  }
+
+
+%% --- BLOQUE 2: Sensores y lecturas ---
+  CellSpace ||--o{ HISTORICO_LECTURAS : "ocurre en"
+  CellSpace ||--o{ LECTURA : "ocurre en"
+  CellSpace ||--o{ BALIZA : "tiene" 
+
+  BALIZA   ||--o{ BALIZA_SENSOR    : "tiene sensores"
+  SENSOR   ||--|| SENSOR_VARIABLE  : "mide variables"
+  SENSOR   ||--o{ BALIZA_SENSOR    : "conectado a"
+  VARIABLE ||--|| SENSOR_VARIABLE  : "definida en"
+
+  HISTORICO_LECTURAS||--o{ VARIABLE : "mide"
+  HISTORICO_LECTURAS||--o{ SENSOR   : "usa"
+  HISTORICO_LECTURAS||--o{ BALIZA   : "genera"
+
+  LECTURA ||--o{ VARIABLE  : "mide"
+  LECTURA ||--o{ SENSOR    : "usa"
+  LECTURA ||--o{ BALIZA    : "genera"
+
+  BALIZA {
+    int id_baliza PK
+    varchar nombre
+    text descripcion
+    boolean activa
+    int id_area FK
+  }
+  SENSOR {
+    int id_sensor PK
+    varchar nombre
+    text descripcion
+    boolean activa
+  }
+  VARIABLE {
+    int id_variable PK
+    varchar nombre
+    text descripcion
+    varchar unidad
+  }
+  BALIZA_SENSOR {
+    int id PK
+    int id_baliza FK
+    int id_sensor FK
+    text descripcion
+  }
+  SENSOR_VARIABLE {
+    int id PK
+    int id_sensor FK
+    int id_variable FK
+    text descripcion
+  }
+  %% En LECTURA se almacena los ultimos valores medidos por los sensores de las balizas en cada una de las AREAS, su tamaño es fijo, y unicamente se actualiza el valor de la variable, se podría decir que es una especie de Snapshot del estado del sistema en términos de las variables.
+  %% Mi idea con esta entidad es tener las ultimas lecturas como si fuera un Live.
+  LECTURA {
+    int id_lectura PK
+    int id_area FK
+    int id_baliza FK
+    int id_sensor FK
+    int id_variable FK
+    float valor
+    datetime timestamp
+  }
+  %% Como LECTURA es una tabla estática, para no perdér los datos con cada nueva lectura, se deben ir volcando con cada nueva LECTURA en su HISTORICO, se vuelca al mismo tiempo que se obtiene la lectura de tal modo que los ultimos registros de LECTURA y su HISTORICO son los mismos
+  %% Mi idea con esta entidad es poder tener un registro en el tiempo de como han evolucionado las variabes (Tº, CO2, Humo) y poder auditar lo que ha ocurrido, tambien de obtener una media de las ultimas lecturas, como una media de temperatura, el incremento, etc, para poder tener control sobre como evolucionan y detectar patrones.
+  HISTORICO_LECTURAS {
+    int id_historico_lectura PK
+    int id_area FK
+    int id_baliza FK
+    int id_sensor FK
+    int id_variable FK
+    float valor
+    datetime timestamp}
+
+%% --- BLOQUE 3: Seguridad y eventos ---
+
+    node                 ||--|| HISTORICO_EVALUACION_SEGURIDAD : "historico en"
+    node                 ||--|| EVENTO : "tiene"
+    EVENTO               ||--|| HISTORICO_EVALUACION_SEGURIDAD  : "origina"
+    EVENTO               ||--|| EVALUACION_SEGURIDAD  : "origina"
+    node                 ||--|| EVALUACION_SEGURIDAD : "tiene"
+   
+    
+
+    %% EVENTO es un registro de hechos
+    %% La lógica de cómo cambian los estados en base a los eventos se hara de forma externa a la base de datos (motor CEP)
+    EVENTO {
+      int id_evento PK
+      varchar tipo_evento
+      text descripcion
+      enum severidad
+      datatime timestamp
+      int id_area FK
+      varchar origen
+      boolean requiere_evacuar
+    }
+    %% EVALUACION_SEGURIDAD Esto es el estado actual en base a los eventos
+    EVALUACION_SEGURIDAD {
+      int id_seguridad PK
+      int id_area FK
+      float valor
+      datetime timestamp
+      int id_evento FK
+      text accion_recomendada
+    }
+    HISTORICO_EVALUACION_SEGURIDAD {
+      int id_historico_seguridad PK
+      int id_area FK
+      float valor
+      datetime timestamp
+      int id_evento FK
+      text accion_recomendada
+
+    }
+
+    %% --- Edificios y espacios ---
+    style nav_navigablespace fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style CellSpace fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style cellBoundary fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style node fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style nav_nonnavigableboundary fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style nav_navigableboundary fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style edge fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style nav_transferspace fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+    style nav_generalspace fill:#E3F2FD,stroke:#64B5F6,stroke-width:2px
+
+    %% --- Sensores y lecturas ---
+    style BALIZA fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style SENSOR fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style VARIABLE fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style BALIZA_SENSOR fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style SENSOR_VARIABLE fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style LECTURA fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+    style HISTORICO_LECTURAS fill:#E8F5E9,stroke:#66BB6A,stroke-width:2px
+
+    %% --- Seguridad ---
+    style EVALUACION_SEGURIDAD fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style HISTORICO_EVALUACION_SEGURIDAD fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+    style EVENTO fill:#F5F5DC,stroke:#A1887F,stroke-width:2px
+
+
+
+
+
+
+    
+  

@@ -1,5 +1,11 @@
 
-Creacion del primer bloque
+# Consultas para crear la Base de datos (ANTIGUO PRE indoorGML)
+
+Aqui quise empezar a pegar las consultas de creación de la base de datos en postgreSQL, esto como sabes son consultas que se ejecutan una sola vez.
+
+Existe una forma de hacerlo bien, como meter todos los archivos en una carpeta dedicada a la creación de la base de datos (Pero quizas no es necesario)
+
+## Creacion del primer bloque
 
 ```sql
 -- ============================

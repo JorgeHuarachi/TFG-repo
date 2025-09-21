@@ -1,7 +1,8 @@
-# indoorGML
-Es eso del standar para modelo de datos de interiores como un vocubulario comun y tal.
+# IndoorGML
 
-Esta indicato para este tipo de proyectos.
+Es eso del estandar para modelo de datos de interiores como un vocubulario comun y tal.
+
+## Esta indicado para este tipo de proyectos.
 
 | Dominio                             | Cómo se usa IndoorGML                                                                                      |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -11,7 +12,9 @@ Esta indicato para este tipo de proyectos.
 | **Emergencias / seguridad pública** | Pre-planos para primeros respondedores (véase el Pilot de NIST-OGC).                                       |
 | **AR/VR y *digital twins***         | Sincroniza la maqueta 3D, la topología y la base de activos en un único formato intercambiable.            |
 
-Lo que implica para mi
+A mi me interesa el primero de todos Navegación Indoor.
+
+## Lo que implica para mi el estandar OGC IndoorMGL
 
 | Aspecto                   | Sin adoptar el estándar                                            | Adoptando (total o parcialmente) IndoorGML 2.0                                                            |
 | ------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
@@ -20,13 +23,19 @@ Lo que implica para mi
 | **Curva de aprendizaje**  | Baja (ya la dominas).                                              | Debes leer la especificación y mapear tablas → clases.                                                    |
 | **Valor académico (TFG)** | Correcto si el jurado valora la solución “casera”.                 | Plus por alinearte con un estándar OGC emergente; muestra rigor, comparabilidad y proyección profesional. |
 
-Conviene?
+Adoptar paricalmente este estandar es la mejor idea, no en su totalidad, la idea será alinear mi trabajo con el suyo.
+
+## ¿Conviene?
 
 | Situación                                                                                   | Recomendación                                                                                                 |
 | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Proyecto corto, sin intercambio externo y con fecha límite inminente.                       | Adopta **“IndoorGML-lite”**: `CellSpace` + `Node/Edge` y deja reflejado un roadmap para el resto.             |
 | Proyecto que aspira a ser usado/extendido por terceros (universidad, empresa, open source). | Implementa IndoorGML 2.0 completo (al menos Core + Navigation) y documenta tu **ETL**.                        |
 | TFG enfocado a innovación/ investigación.                                                   | Incluir FSS y multilayer te da **originalidad** y abre líneas futuras (robótica, evacuación, análisis AR/VR). |
+
+El primer de todos es la opción, adoptar Solo una parte y lo demas dejarlo en un roadmap, como futuras inclusiones.
+
+## Preguntas
 
 | Pregunta                         | Respuesta breve                                                                                                   |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -35,6 +44,10 @@ Conviene?
 | **¿Tengo que adoptarlo entero?** | No. Puedes implementar sólo el *Core* (celdas + grafo) y declarar “compatible con FSS” para futuras mejoras.      |
 | **¿Qué gano a largo plazo?**     | Intercambio inmediato con FME, flujos BIM (IFC) y con cualquier cliente que pida IndoorGML —sin reescribir tu BD. |
 
+Con esto añado valor académico al proyecto.
+
+## Aporte al TFG
+
 | Beneficio concreto               | Qué aportaría al TFG                                                                         |
 | -------------------------------- | -------------------------------------------------------------------------------------------- |
 | **Interoperabilidad** automática | Tu BD podría exportarse/importarse con QGIS, FME, NavVis, etc., sin transformaciones ad-hoc. |
@@ -42,7 +55,7 @@ Conviene?
 | **Rigor académico**              | Referenciar un estándar OGC demuestra que el trabajo sigue buenas prácticas consolidadas.    |
 | **Escalabilidad**                | Si mañana añades sensores, mobiliario o accesibilidad, IndoorGML ya tiene dónde guardarlo.   |
 
-inconvenientes
+## Inconvenientes
 
 | Desafío                  | Impacto                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------------------------- |
@@ -50,14 +63,16 @@ inconvenientes
 | **Overhead de ETL**      | Mapear tus tablas a `CellSpace`, `Node`, `Edge` y generar el .gml (unas semanas si partes de cero).   |
 | **Evolución 2.0**        | La nomenclatura cambia (`State→Node`, etc.); si implementas ahora la 1.1 tendrás que renombrar luego. |
 
-opciones
+## Opciones
 
 | Opción                           | ¿Qué harías ahora?                                                                              | Ventajas                                                                                     | Riesgos                                                                 |
 | -------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | **A. “Mínimo viable IndoorGML”** | 1. Exportar sólo `CellSpace` + `Node/Edge`.<br>2. Documentar cómo se añadiría FSS en el futuro. | Ganas interoperabilidad y puntos académicos sin retrasar la entrega.                         | Ajustar tu BD y escribir un script de exportación.                      |
 | **B. “Lo menciono y listo”**     | 1. Describir IndoorGML en el estado-del-arte.<br>2. Dejar la adopción como línea futura.        | Cero tiempo de desarrollo ahora; evitas apostar por una versión que está a punto de cambiar. | Pierdes la oportunidad de enseñar resultados exportables y comparables. |
 
-### Ayuda para los cambios
+Va a ser la opción A
+
+## Ayuda para los cambios
 
 | Concepto IndoorGML | Función                                                                                                                  | Por qué no basta con una sola tabla `AREAS`                                                                                                                  |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -96,7 +111,7 @@ ALTER TABLE node
   ADD CONSTRAINT uk_node_cell UNIQUE (cell_id, node_id);
 ```
 
-Ventajas
+## Ventajas
 
 | Ventaja                             | Con este esquema nuevo                                                                                                                    |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -216,7 +231,10 @@ Así demuestras que tu base de datos **exprime** IndoorGML para casos de uso ava
 
 [1]: https://www.mdpi.com/2220-9964/6/4/116 "A Standard Indoor Spatial Data Model—OGC IndoorGML and Implementation Approaches"
 
-## terminologia que me interesa.
+## terminologia que me interesa de DTD y RTR.
+
+DTD: Door-to-Door
+RTR: Room-to-Room
 
 ### 1. La terminología que verás en los papers
 
@@ -302,5 +320,7 @@ Así de sencillo (y flexible) lo describe la literatura, y así lo puedes trasla
 [3]: https://docs.ogc.org/is/19-011r4/19-011r4.html?utm_source=chatgpt.com "OGC® IndoorGML 1.1"
 
 ## sobre las demas capas de mobilidad
+
+Aqui se supone que habria mas cosas? se quedo asi
 
 

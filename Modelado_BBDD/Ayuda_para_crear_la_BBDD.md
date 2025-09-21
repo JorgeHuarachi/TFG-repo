@@ -285,8 +285,7 @@ CREATE TABLE LECTURA_ACTUAL (
 );
 ```
 🔄 Simulación de inserciones (usando ON DUPLICATE para mantener actualizadas)
-sql
-Copiar código
+```sql
 -- Lectura inicial para sensor 1, variable 1 en ubicación 10
 INSERT INTO LECTURA_ACTUAL VALUES (1, 1, 1, 10, 22.0, '2025-05-19 10:00:00')
 ON DUPLICATE KEY UPDATE valor = VALUES(valor), datetime = VALUES(datetime), id_lectura = VALUES(id_lectura);
@@ -312,7 +311,7 @@ id_lectura	id_sensor	id_variable	id_ubicacion	valor	datetime
 3	1	2	10	65.0	2025-05-19 10:06:00
 4	2	1	20	24.8	2025-05-19 10:07:00
 5	2	2	20	60.0	2025-05-19 10:08:00
-
+```
 🔸 Como ves: solo hay una fila por cada combinación de sensor + variable + ubicación.
 
 ---
@@ -585,3 +584,30 @@ Dividirlo en rectangulos conectados.
 L: dos rectangulos con una conexion |_
 T: dos rectangulos con una conexion |-
 U: tres rectangulos con dos conexiones |_|
+
+---
+BD: PostgreSQL + PostGIS con la z, para tenerlo ya modelado pero trabajare en 2D.
+
+CRS: Voy a trabajar con un edificion en principio ficticio y creado por mi el SRID creo que es mejor que sea EPSG:3857 (me interesa algo compatible con web de cara al dashboard) de momento no ncesito coordenadas reales. No cambies el SRID ni uses otro CRS salvo que yo lo indique expresamente.
+
+Namespacing: dos esquemas de BD: indoorgml_core y indoorgml_nav, de momento esos mas adelanto los aumentaré.
+
+IDs: No quiero uuid, lo que voy a quere hacer es usar id numerico PK junto co un code alfa-numérico de forma que sea auto explicativo, para mostrar esto en dashboard y no el id numerico como clave primaria.
+
+Semántica: declaramos en ThematicLayer.semanticExtension = true para capas donde apliques Navigation. 
+
+id
+Tabla	PK interna	code ejemplo
+PrimalSpaceLayer	1	PR-01
+DualSpaceLayer	1	DU-01
+CellSpace	1	CS-0001
+CellBoundary	1	CB-0001-0002
+Node	1	ND-0001
+Edge	1	ED-0001-0002
+NavigableSpace	1	NS-0001
+NonNavigableSpace	1	NN-0001
+NavigableBoundary	1	NB-0001-0002
+NonNavigableBoundary	1	NNB-0001-0002
+TransferSpace	1	TS-0001
+ObjectSpace	1	OS-0001
+Route	1	RT-2025001 (año + secuencia)
