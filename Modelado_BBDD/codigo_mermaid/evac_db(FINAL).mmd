@@ -12,22 +12,27 @@ erDiagram
   nav_generalspace          ||--|| nav_navigablespace : "subclass of"
   edge                      ||--o{ node : "Connects"
 
-
-
   CellSpace {
-    uuid cell_id PK
-    int4 level_id FK
+    varchar cell_space_id PK
     text name
-    text category
-    bool navigable
+    text external_reference 
+    boolean poi
+    varchar id_primal_space_layer FK
     geometry geom
   }
   cellBoundary {
-    uuid boundary_id PK
+    varchar cell_boundary PK
+    text external_reference 
+    boolean is_virtual
+    varchar id_primal_space_layer FK
+    geometry geom
+  }
+  node {
+    uuid node_id PK
+    int4 layer_id FK
     int4 level_id FK
-    text type
-    uuid left_cell FK
-    uuid right_cell FK
+    uuid dual_cell FK
+    text role
     geometry geom
   }
 
@@ -53,14 +58,6 @@ erDiagram
     text category
   }
 
-  node {
-    uuid node_id PK
-    int4 layer_id FK
-    int4 level_id FK
-    uuid dual_cell FK
-    text role
-    geometry geom
-  }
   edge {
     uuid trans_id PK
     int4 layer_id FK

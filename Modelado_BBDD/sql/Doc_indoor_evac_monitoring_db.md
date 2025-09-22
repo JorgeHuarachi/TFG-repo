@@ -43,12 +43,16 @@ En este bloque 4 entidades son importantes para dar pie a el modulo de navegaci�
 - `Node`
 - `Edge`
 
-### `CellSpace`
-
-Esta entidad guardará toda la información geométrica de los espacios tanto navegables como no navegables y de esta de heredan dos ramas del modulo de navegacion en:
+**CellSpace:** Esta entidad guardará toda la información geométrica de los espacios tanto navegables como no navegables y de esta de heredan dos ramas del modulo de navegacion en:
 - `NavigableSpace`
 - `NonNavigableSpace`
 
-`CellSpace` almacena en su interior los poligonos que corresponden a los diferentes espacios dentro de un edifico en diferentes plantas (salas, puertas, paredes, ventanas, escaleras, rampas etc. aunque paredes no insertaran en nuestro caso)
+`CellSpace` almacena en su interior los poligonos que corresponden a los diferentes espacios dentro de un edifico en diferentes plantas (salas, puertas, paredes, ventanas, escaleras, rampas etc. aunque paredes no insertaran en nuestro caso).
+
+**CellBoundary:** Esta entidad guarda toda la informacino geometrica de los bbox (boundary box) ya sea que estan entre celdas o estan libres al exterior, es la frontera de cada uno de las celdas, aqui es intersante quedarse solo con las que conectan dos `CellBoundary` ya que esto me da directamente las relaciones entre celdas, util para la dualidad, de esta se heredan la ramas del modulo de navegación:
+- `NavigableBoundary`
+- `NonNavigableBoundary` 
+Para nosotros no es tan interesante modelar esto, con una tabla relacion entre las dos tabla `CellSpace` y `CellBoundary` ya se tiene la información de que `CellBondary` es navegable *(Da a una puerta)* o no *(da a una pared o no da a ningun sitio)*.
+
 
 
