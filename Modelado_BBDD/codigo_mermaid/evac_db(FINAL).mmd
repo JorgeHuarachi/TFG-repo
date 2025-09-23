@@ -13,28 +13,35 @@ erDiagram
   edge                      ||--o{ node : "Connects"
 
   CellSpace {
-    varchar cell_space_id PK
-    text name
-    text external_reference 
-    boolean poi
-    varchar id_primal_space_layer FK
-    geometry geom
+    varchar   id_cell_space PK
+    text      name
+    text      external_reference 
+    boolean   poi
+    varchar   id_primal_space_layer FK
+    geometry  geom
   }
   cellBoundary {
-    varchar cell_boundary PK
-    text external_reference 
-    boolean is_virtual
-    varchar id_primal_space_layer FK
-    geometry geom
+    varchar   id_cell_boundary PK
+    text      external_reference 
+    boolean   is_virtual
+    varchar   id_primal_space_layer FK
+    geometry  geom
   }
   node {
-    uuid node_id PK
-    int4 layer_id FK
-    int4 level_id FK
-    uuid dual_cell FK
-    text role
-    geometry geom
+    varchar   id_node PK
+    varchar   id_dual_space_layer FK
+    varchar   id_cell_space FK
+    geometry  geom
   }
+  edge {
+    varchar   id_edge PK
+    double    weight FK
+    varchar   from_node FK
+    varchar   to_node FK
+    varchar   id_dual_space_layer FK
+    geometry  geom
+  }
+
 
   nav_generalspace {
     uuid cell_id PK
@@ -56,16 +63,6 @@ erDiagram
     uuid cell_id PK
     text function
     text category
-  }
-
-  edge {
-    uuid trans_id PK
-    int4 layer_id FK
-    uuid from_node FK
-    uuid to_node FK
-    uuid boundary_id FK
-    float8 weight_m
-    geometry geom
   }
 
 

@@ -120,7 +120,7 @@ VALUES ('CS-019', 'Room-I', 'Room-I', 'P01', FALSE, 'PR-01',
 -- Puerta interna I-C (vertical)
 INSERT INTO indoorgml_core.cell_space
 VALUES ('CS-020', 'Door-I-C', 'Door-I-C', 'P01', FALSE, 'PR-01',
-  ST_GeomFromText('POLYGON Z((0 14 0, 1 14 0, 1 16 0, 0 16 0, 0 14 0))', 3857)
+  ST_GeomFromText('POLYGON Z((-1 14 0, 0 14 0, 0 16 0, -1 16 0, -1 14 0))', 3857)
 );
 
 -- Puerta exterior de I (lado izquierdo, sin conexión)

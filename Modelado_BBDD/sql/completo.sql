@@ -97,7 +97,8 @@ CREATE TABLE indoorgml_core.cellspace_cellboundary (
     id_cell_boundary VARCHAR(20) NOT NULL, -- atributo FK
 
     FOREIGN KEY (id_cell_space) REFERENCES indoorgml_core.cell_space(id_cell_space),          -- FK
-    FOREIGN KEY (id_cell_boundary) REFERENCES indoorgml_core.cell_boundary(id_cell_boundary) -- FK
+    FOREIGN KEY (id_cell_boundary) REFERENCES indoorgml_core.cell_boundary(id_cell_boundary), -- FK
+    CONSTRAINT uq_cs_cb UNIQUE (id_cell_space, id_cell_boundary) -- Evita duplicados
 );
 -------------- BLOQUE INDOORGML: NAVIGATION MODULE --------------
 
@@ -105,14 +106,13 @@ CREATE TABLE indoorgml_core.cellspace_cellboundary (
 
 CREATE TABLE indoorgml_core.node (
     id_node            VARCHAR(20) PRIMARY KEY, -- p.ej. ND-0001
-    id_dual             VARCHAR(20) NOT NULL,   -- atributo FK
+    id_dual            VARCHAR(20) NOT NULL,   -- atributo FK
     id_cell_space      VARCHAR(20) NOT NULL,    -- atributo FK
     geom               geometry(PointZ, 3857),  -- opcional si is_logical=true
   
     FOREIGN KEY (id_dual) REFERENCES indoorgml_core.dual_space_layer(id_dual),      -- FK
-    FOREIGN KEY (id_cell_space) REFERENCES indoorgml_core.cell_space(id_cell_space) -- FK
-    
-    CONSTRAINT uq_node_dual_cell UNIQUE (id_dual_layer, id_cell_space) -- Garantizamos mapeo 1:1 (por capa dual) entre CellSpace y Node
+    FOREIGN KEY (id_cell_space) REFERENCES indoorgml_core.cell_space(id_cell_space), -- FK
+    CONSTRAINT uq_node_dual_cell UNIQUE (id_dual, id_cell_space) -- 1:1 entre CellSpace y Node
 );
 
 -- EDGE --
@@ -120,17 +120,16 @@ CREATE TABLE indoorgml_core.node (
 CREATE TABLE indoorgml_core.edge (
     id_edge            VARCHAR(20) PRIMARY KEY, -- p.ej. EG-0001
     weight_m           DOUBLE PRECISION,        -- opcional
-    from_node          VARCHAR(20) NOT NULL,    -- atributos FK
-    to_node            VARCHAR(20) NOT NULL,    -- atributos FK
     id_dual            VARCHAR(20) NOT NULL,    -- atributo FK
     id_cell_boundary   VARCHAR(20) NULL,        -- atributo FK
+    from_node          VARCHAR(20) NOT NULL,    -- atributos FK
+    to_node            VARCHAR(20) NOT NULL,    -- atributos FK
     geom               geometry(LineStringZ, 3857), -- opcional si is_logical=true
     
-    FOREIGN KEY (id_dual) REFERENCES indoorgml_core.dual_space_layer(id_dual), -- FK
-    FOREIGN KEY (from_node) REFERENCES indoorgml_core.node(id_node),           -- FK
-    FOREIGN KEY (to_node) REFERENCES indoorgml_core.node(id_node),             -- FK
+    FOREIGN KEY (id_dual)          REFERENCES indoorgml_core.dual_space_layer(id_dual), -- FK
     FOREIGN KEY (id_cell_boundary) REFERENCES indoorgml_core.cell_boundary(id_cell_boundary), -- FK
-    
+    FOREIGN KEY (from_node)        REFERENCES indoorgml_core.node(id_node),           -- FK
+    FOREIGN KEY (to_node)          REFERENCES indoorgml_core.node(id_node),             -- FK
     CONSTRAINT ck_edge_from_to_diff CHECK (from_node <> to_node)
 );
 
@@ -317,6 +316,7 @@ CREATE OR REPLACE FUNCTION indoorgml_core.rebuild_cell_boundaries(
         SELECT idb, ST_Union(geom2d) FROM tmp_shared_lines GROUP BY idb;
 
         -- 1. Crear la tabla temporal tmp_uniq2 con un único contorno exterior por celda
+        DROP TABLE IF EXISTS tmp_uniq2;
         CREATE TEMP TABLE tmp_uniq2 ON COMMIT DROP AS
         WITH cell_bnd AS (
           SELECT cs.id_cell_space,
@@ -371,10 +371,197 @@ CREATE OR REPLACE FUNCTION indoorgml_core.rebuild_cell_boundaries(
         END;
         $$;
 
-
-
-
---------------------------------------------------------
+---- NODE --
+--
+--CREATE SEQUENCE IF NOT EXISTS indoorgml_core.seq_node START 1;
+--
+--CREATE OR REPLACE FUNCTION indoorgml_core.next_nd_id()
+--    RETURNS varchar LANGUAGE plpgsql AS $$
+--    DECLARE n bigint;
+--    BEGIN
+--      n := nextval('indoorgml_core.seq_node');
+--      RETURN 'ND-' || lpad(n::text, 4, '0');
+--    END $$;
+--
+--CREATE OR REPLACE FUNCTION indoorgml_core.rebuild_nodes_for_dual(
+--      p_dual_layer VARCHAR(20),   -- ej. 'DU-01'
+--      p_psl        VARCHAR(20),   -- ej. 'PR-01'
+--      p_z          NUMERIC DEFAULT 0
+--    ) RETURNS void LANGUAGE plpgsql AS $$
+--    DECLARE v_is_logical boolean;
+--    BEGIN
+--      -- Comprueba que DUAL y PRIMAL cuelgan del mismo THEME
+--      IF NOT EXISTS (
+--        SELECT 1
+--        FROM indoorgml_core.dual_space_layer d
+--        JOIN indoorgml_core.primal_space_layer p ON p.id_theme_layer = d.id_theme_layer
+--        WHERE d.id_dual = p_dual_layer AND p.id_primal = p_psl
+--      ) THEN
+--        RAISE EXCEPTION 'La Dual % no corresponde a la Primal % (theme mismatch)', p_dual_layer, p_psl;
+--      END IF;
+--
+--      SELECT is_logical INTO v_is_logical
+--      FROM indoorgml_core.dual_space_layer
+--      WHERE id_dual = p_dual_layer;
+--
+--      -- Inserta los nodes faltantes (1:1 por cell_space dentro de esa PRIMAL)
+--      INSERT INTO indoorgml_core.node (id_node, id_dual_layer, id_cell_space, geom)
+--      SELECT indoorgml_core.next_nd_id(),
+--             p_dual_layer,
+--             cs.id_cell_space,
+--             CASE WHEN v_is_logical
+--                  THEN NULL
+--                  ELSE ST_Force3D(ST_PointOnSurface(cs.geom), p_z)::geometry(PointZ,3857)
+--              END
+--      FROM indoorgml_core.cell_space cs
+--      LEFT JOIN indoorgml_core.node n
+--             ON n.id_dual_layer = p_dual_layer
+--            AND n.id_cell_space = cs.id_cell_space
+--      WHERE cs.id_primal_space_layer = p_psl
+--        AND n.id_node IS NULL;
+--    END $$;
+--
+--CREATE OR REPLACE FUNCTION indoorgml_core.trg_node_inside_when_geom()
+--    RETURNS trigger LANGUAGE plpgsql AS $$
+--    DECLARE v_is_logical boolean;
+--    BEGIN
+--      SELECT is_logical INTO v_is_logical
+--      FROM indoorgml_core.dual_space_layer
+--      WHERE id_dual = NEW.id_dual_layer;
+--
+--      IF NOT v_is_logical THEN
+--        IF NEW.geom IS NOT NULL THEN
+--          IF NOT EXISTS (
+--            SELECT 1
+--            FROM indoorgml_core.cell_space cs
+--            WHERE cs.id_cell_space = NEW.id_cell_space
+--              AND cs.geom IS NOT NULL
+--              AND ST_Covers(cs.geom, NEW.geom)
+--          ) THEN
+--            RAISE EXCEPTION 'Node % debe estar dentro de su CellSpace % en dual %',
+--              NEW.id_node, NEW.id_cell_space, NEW.id_dual_layer;
+--          END IF;
+--        END IF;
+--      END IF;
+--
+--      RETURN NEW;
+--    END $$;
+--
+---- EDGE --
+--
+--CREATE SEQUENCE IF NOT EXISTS indoorgml_core.seq_edge START 1;
+--
+--CREATE OR REPLACE FUNCTION indoorgml_core.next_eg_id()
+--    RETURNS varchar LANGUAGE plpgsql AS $$
+--    DECLARE n bigint;
+--    BEGIN
+--      n := nextval('indoorgml_core.seq_edge');
+--      RETURN 'EG-' || lpad(n::text, 4, '0');
+--    END $$;
+--
+--CREATE OR REPLACE FUNCTION indoorgml_core.rebuild_edges_from_boundaries(
+--      p_dual_layer VARCHAR(20),
+--      p_z          NUMERIC DEFAULT 0
+--    ) RETURNS void LANGUAGE plpgsql AS $$
+--    DECLARE v_is_directed boolean;
+--    DECLARE v_is_logical  boolean;
+--    BEGIN
+--      SELECT is_directed, is_logical INTO v_is_directed, v_is_logical
+--      FROM indoorgml_core.dual_space_layer
+--      WHERE id_dual = p_dual_layer;
+--
+--      -- Borrado limpio (solo la dual afectada)
+--      DELETE FROM indoorgml_core.edge e WHERE e.id_dual_layer = p_dual_layer;
+--
+--      WITH b2 AS (
+--        SELECT id_cell_boundary,
+--               MIN(id_cell_space) AS a,
+--               MAX(id_cell_space) AS b
+--        FROM indoorgml_core.cellspace_cellboundary
+--        GROUP BY id_cell_boundary
+--        HAVING COUNT(*) = 2
+--      ),
+--      nn AS (
+--        SELECT n.id_node, n.id_cell_space
+--        FROM indoorgml_core.node n
+--        WHERE n.id_dual_layer = p_dual_layer
+--      ),
+--      pairs AS (
+--        SELECT b2.id_cell_boundary, na.id_node AS nA, nb.id_node AS nB
+--        FROM b2
+--        JOIN nn na ON na.id_cell_space = b2.a
+--        JOIN nn nb ON nb.id_cell_space = b2.b
+--      )
+--      INSERT INTO indoorgml_core.edge (id_edge, id_dual_layer, from_node, to_node, id_cell_boundary, weight_m, geom)
+--      SELECT indoorgml_core.next_eg_id(),
+--             p_dual_layer,
+--             p.nA, p.nB,
+--             p.id_cell_boundary,
+--             NULL,
+--             CASE WHEN v_is_logical THEN NULL
+--                  ELSE (
+--                    SELECT ST_Force3D(ST_ShortestLine(n1.geom, n2.geom), p_z)::geometry(LineStringZ,3857)
+--                    FROM indoorgml_core.node n1, indoorgml_core.node n2
+--                    WHERE n1.id_node = p.nA AND n2.id_node = p.nB
+--                  )
+--              END
+--      FROM pairs p;
+--
+--      IF v_is_directed THEN
+--        INSERT INTO indoorgml_core.edge (id_edge, id_dual_layer, from_node, to_node, id_cell_boundary, weight_m, geom)
+--        SELECT indoorgml_core.next_eg_id(),
+--               p_dual_layer,
+--               p.nB, p.nA,
+--               p.id_cell_boundary,
+--               NULL,
+--               CASE WHEN v_is_logical THEN NULL
+--                    ELSE (
+--                      SELECT ST_Force3D(ST_ShortestLine(n2.geom, n1.geom), p_z)::geometry(LineStringZ,3857)
+--                      FROM indoorgml_core.node n1, indoorgml_core.node n2
+--                      WHERE n1.id_node = p.nA AND n2.id_node = p.nB
+--                    )
+--                END
+--        FROM pairs p;
+--      END IF;
+--    END $$;
+--
+--CREATE OR REPLACE FUNCTION indoorgml_core.trg_rebuild_all_after_cs()
+--    RETURNS trigger LANGUAGE plpgsql AS $$
+--    DECLARE
+--      v_level  TEXT;
+--      v_psl    VARCHAR(20);
+--      v_theme  VARCHAR(20);
+--      r_dual   record;
+--    BEGIN
+--      IF pg_trigger_depth() > 1 THEN
+--        RETURN NULL;
+--      END IF;
+--
+--      v_level := COALESCE(NEW.level, OLD.level);
+--      v_psl   := COALESCE(NEW.id_primal_space_layer, OLD.id_primal_space_layer);
+--
+--      -- 1) Rebuild boundaries (tuyo)
+--      PERFORM indoorgml_core.rebuild_cell_boundaries(v_level, v_psl, 0);
+--
+--      -- 2) Theme de esa PRIMAL
+--      SELECT p.id_theme_layer INTO v_theme
+--      FROM indoorgml_core.primal_space_layer p
+--      WHERE p.id_primal = v_psl;
+--
+--      -- 3) Por cada DUAL del theme: NODES -> EDGES
+--      FOR r_dual IN
+--        SELECT d.id_dual
+--        FROM indoorgml_core.dual_space_layer d
+--        WHERE d.id_theme_layer = v_theme
+--      LOOP
+--        PERFORM indoorgml_core.rebuild_nodes_for_dual(r_dual.id_dual, v_psl, 0);
+--        PERFORM indoorgml_core.rebuild_edges_from_boundaries(r_dual.id_dual, 0);
+--      END LOOP;
+--
+--      RETURN NULL;
+--    END $$;
+--
+----------------------------------------------------------
 ----------------------06 TRIGGERS---------------------
 --------------------------------------------------------
 -- CELLSPACE --
@@ -403,6 +590,23 @@ CREATE TRIGGER trg_rebuild_boundaries_after_cs
     FOR EACH ROW
     EXECUTE FUNCTION indoorgml_core.trg_rebuild_boundaries_after_cs();
 
+---- NODE --
+--
+--DROP TRIGGER IF EXISTS node_inside_when_geom ON indoorgml_core.node;
+--CREATE TRIGGER node_inside_when_geom
+--    BEFORE INSERT OR UPDATE OF geom, id_cell_space, id_dual_layer
+--    ON indoorgml_core.node
+--    FOR EACH ROW
+--    EXECUTE FUNCTION indoorgml_core.trg_node_inside_when_geom();
+--
+---- EGDE --
+--
+--DROP TRIGGER IF EXISTS ct_rebuild_all_after_cs ON indoorgml_core.cell_space;
+--CREATE CONSTRAINT TRIGGER ct_rebuild_all_after_cs
+--    AFTER INSERT OR UPDATE OR DELETE ON indoorgml_core.cell_space
+--    DEFERRABLE INITIALLY DEFERRED
+--    FOR EACH ROW
+--    EXECUTE FUNCTION indoorgml_core.trg_rebuild_all_after_cs();
 
 --------------------------------------------------------
 ----------------------07 INDICES---------------------
@@ -413,3 +617,13 @@ CREATE INDEX IF NOT EXISTS cell_space_geom_gix ON indoorgml_core.cell_space USIN
 CREATE INDEX IF NOT EXISTS cell_space_level_idx ON indoorgml_core.cell_space(level);
 -- CELLBOUNDARY --
 CREATE INDEX IF NOT EXISTS cell_boundary_geom_gix ON indoorgml_core.cell_boundary USING GIST(geom);
+---- NODE --
+--CREATE UNIQUE INDEX IF NOT EXISTS uq_node_dual_cell ON indoorgml_core.node (id_dual_layer, id_cell_space);
+--CREATE INDEX IF NOT EXISTS node_geom_gix ON indoorgml_core.node USING GIST (geom);
+--
+---- EDGE --
+--CREATE INDEX IF NOT EXISTS edge_geom_gix ON indoorgml_core.edge USING GIST (geom);
+--CREATE INDEX IF NOT EXISTS edge_from_idx ON indoorgml_core.edge(from_node);
+--CREATE INDEX IF NOT EXISTS edge_to_idx   ON indoorgml_core.edge(to_node);
+--CREATE UNIQUE INDEX IF NOT EXISTS ux_edge_undirected ON indoorgml_core.edge ( id_dual, LEAST(from_node, to_node),  GREATEST(from_node, to_node)) -- Evita duplicados en edges no dirigidos
+
