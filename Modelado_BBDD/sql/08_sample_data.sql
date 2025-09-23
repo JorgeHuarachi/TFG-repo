@@ -124,23 +124,3 @@ VALUES
     -- I ↔ A (puerta vertical en x=-1..0)
     ('CS-119','P2-Door-I-A','P2-Door-I-A','P02',FALSE,'PR-01', ST_GeomFromText('POLYGON Z((-1 4 0, 0 4 0, 0 5 0, -1 5 0, -1 4 0))',3857));
 
-Hola buenas, perdonar que no haya subido nada de momento, he estado liado y me ha tomado mas tiempo de que pense adoptar el estandar indoorGML, pero ya funcinoa como quiero.
-Si lo estoy creando en github todo, hay mucho codigo que eso va en los anexos entiendo.
-
-Como lo que he hecho es un poco lio, os dejo un resumen de lo que he hecho y los archivos que he modificado.
-He modelado por completo la base de datos donde guardo toda la información del edificio, tanto la geometrica como la semantica, siguiendo el estandar indoorGML, + un Modulo de navegación que estaba tambien el indoorGML he creado las tablas en SQL y he insertado datos de ejemplo (un edificio con dos plantas y varias habitaciones y puertas).
-Ademas de esta infomración se podria añadir informacion de sensores, rutas de evacuacion, etc. he dejado abierta la posibilidad de incluir escaleras, rampas, ascensores, etc. para la movilidad reducida.
-
-Estoy creando fisicamente la base de datos en postgreSQL + postgis.
-He creado funciones para generar cumplir con los requisitos de indoorGML,y otras que se generen las demás tablas a partir de unas inserción de CellSpace (Internamente en postgreSQL).
-En paralelo estoy elaborando un documento explicando todo el modelo de datos.
-
-Sobre lo de la interfaz, he estado mirando y no es tan sencillo para mi amora mismo, asique de momento estoy visualizando todo a partir de QGIS, voy a dejar una imagen de como se ve.
-Crear un dashboard lo veo complicado para mi ahora mismo.
-
-Sobre el borardor de la memoria, he estado escribiendo cosas en sitios diferentes pero nose que incluir o que no incluir.
--Docuemntacion del modelo de datos (explicando las tablas y relaciones)
--Explicacion del estandar indoorGML
--Explicacion de las funciones SQL que he creado (Sin pegarlas, solo explicando que hacen con un diagrama de flujo)
--Documentación de los bloques de la base de datos (core, navigation module, sensores, etc.)
-

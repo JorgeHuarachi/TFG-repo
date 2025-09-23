@@ -84,6 +84,7 @@ CREATE TABLE indoorgml_core.cell_boundary(
     is_virtual              BOOLEAN NOT NULL DEFAULT FALSE, -- False porque es real de momnto todo
     id_primal_space_layer   VARCHAR(20) NOT NULL,           -- atributo FK p.ej. PR-01 , PR-02
     geom                    GEOMETRY(MultiLineStringZ, 3857),    -- Dato geometrico (conjunto de 1D)
+    boundary_key        TEXT, --   
 
     FOREIGN KEY (id_primal_space_layer) REFERENCES indoorgml_core.primal_space_layer(id_primal), -- FK
     CONSTRAINT chk_cb_id_format CHECK (id_cell_boundary ~ '^CB-\d{3,}$')
@@ -109,7 +110,7 @@ CREATE TABLE indoorgml_core.node (
     id_dual            VARCHAR(20) NOT NULL,   -- atributo FK
     id_cell_space      VARCHAR(20) NOT NULL,    -- atributo FK
     geom               geometry(PointZ, 3857),  -- opcional si is_logical=true
-  
+
     FOREIGN KEY (id_dual) REFERENCES indoorgml_core.dual_space_layer(id_dual),      -- FK
     FOREIGN KEY (id_cell_space) REFERENCES indoorgml_core.cell_space(id_cell_space), -- FK
     CONSTRAINT uq_node_dual_cell UNIQUE (id_dual, id_cell_space) -- 1:1 entre CellSpace y Node
@@ -204,55 +205,82 @@ CREATE SEQUENCE IF NOT EXISTS indoorgml_core.seq_cell_boundary START 1;
     $$;
 
 CREATE OR REPLACE FUNCTION indoorgml_core.rebuild_cell_boundaries(  
-          p_level TEXT DEFAULT NULL,                -- limita a una planta; NULL = todas
-          p_psl   VARCHAR(20) DEFAULT NULL,         -- limita a una primal layer; NULL = todas
-          p_z     NUMERIC DEFAULT 0                 -- Z de salida (LineStringZ)
-        )
-        RETURNS void
-        LANGUAGE plpgsql
+      p_level TEXT DEFAULT NULL,                -- planta; NULL = todas
+      p_psl   VARCHAR(20) DEFAULT NULL,         -- primal; NULL = todas
+      p_z     NUMERIC DEFAULT 0                 -- Z de salida
+    )
+    RETURNS void
+    LANGUAGE plpgsql
     AS $$
     DECLARE
-      tol DOUBLE PRECISION := 0.001; -- tolerancia para SnapToGrid (m) para deduplicar
+      tol DOUBLE PRECISION := 0.001; -- tolerancia Snap/SnapToGrid (unidades del CRS)
     BEGIN
-        PERFORM setval('indoorgml_core.seq_cell_boundary', 1, false);
-        -- 1) Borrar boundaries/membresías SOLO de lo que vamos a recalcular
-        DELETE FROM indoorgml_core.cellspace_cellboundary cscb --cambiar nombre tabla
-        USING indoorgml_core.cell_space cs
-        WHERE cscb.id_cell_space = cs.id_cell_space
-          AND (p_level IS NULL OR cs.level = p_level)
-          AND (p_psl   IS NULL OR cs.id_primal_space_layer = p_psl);
-        DELETE FROM indoorgml_core.cell_boundary cb
-        WHERE NOT EXISTS (
-          SELECT 1 FROM indoorgml_core.cellspace_cellboundary m
-          WHERE m.id_cell_boundary = cb.id_cell_boundary
-        );
-        -- 2) Calcular líneas compartidas (boundaries internos) entre pares de celdas
-        DROP TABLE IF EXISTS tmp_shared_lines;
-        CREATE TEMP TABLE tmp_shared_lines(
-          ida varchar(20),
-          idb varchar(20),
-          geom2d geometry(MultiLineString, 3857)
-        ) ON COMMIT DROP;
-
-        INSERT INTO tmp_shared_lines(ida, idb, geom2d)
-        SELECT a.id_cell_space, b.id_cell_space,
-               ST_LineMerge(
-                 ST_CollectionExtract(
-                   ST_Intersection(ST_Force2D(a.geom), ST_Force2D(b.geom)), 2
-                 )
-               ) AS shared
-        FROM indoorgml_core.cell_space a
-        JOIN indoorgml_core.cell_space b
-          ON a.id_cell_space < b.id_cell_space
-         AND a.level = b.level
-         AND a.id_primal_space_layer = b.id_primal_space_layer
-         AND (p_level IS NULL OR a.level = p_level)
-         AND (p_psl   IS NULL OR a.id_primal_space_layer = p_psl)
-         AND a.geom && b.geom
-         AND ST_Relate(a.geom, b.geom, 'F***1****')  -- contacto 1D (borde)
-        WHERE NOT ST_IsEmpty(a.geom) AND NOT ST_IsEmpty(b.geom);
-
-        -- 3) Insertar boundaries internos (segmentos únicos) + membresías (2 celdas)
+      --------------------------------------------------------------------
+      -- 0) Limpiar SOLO membresías del ámbito afectado
+      --------------------------------------------------------------------
+      DELETE FROM indoorgml_core.cellspace_cellboundary cscb
+      USING indoorgml_core.cell_space cs
+      WHERE cscb.id_cell_space = cs.id_cell_space
+        AND (p_level IS NULL OR cs.level = p_level)
+        AND (p_psl   IS NULL OR cs.id_primal_space_layer = p_psl);
+    
+      -- Nota: NO borramos cell_boundary aquí; se borran huérfanos al final
+    
+      --------------------------------------------------------------------
+      -- 1) BORDES INTERNOS (tramos compartidos entre pares de celdas)
+      --------------------------------------------------------------------
+      DROP TABLE IF EXISTS tmp_shared_lines;
+      CREATE TEMP TABLE tmp_shared_lines(
+        ida varchar(20),
+        idb varchar(20),
+        geom2d geometry(MultiLineString, 3857)
+      ) ON COMMIT DROP;
+    
+      INSERT INTO tmp_shared_lines(ida, idb, geom2d)
+      SELECT a.id_cell_space, b.id_cell_space,
+             ST_LineMerge(
+               ST_CollectionExtract(
+                 ST_Intersection(ST_Force2D(a.geom), ST_Force2D(b.geom)), 2
+               )
+             ) AS shared
+      FROM indoorgml_core.cell_space a
+      JOIN indoorgml_core.cell_space b
+        ON a.id_cell_space < b.id_cell_space
+       AND a.level = b.level
+       AND a.id_primal_space_layer = b.id_primal_space_layer
+       AND (p_level IS NULL OR a.level = p_level)
+       AND (p_psl   IS NULL OR a.id_primal_space_layer = p_psl)
+       AND a.geom && b.geom
+       AND ST_Relate(a.geom, b.geom, 'F***1****')
+      WHERE NOT ST_IsEmpty(a.geom) AND NOT ST_IsEmpty(b.geom);
+    
+      -- Mapa boundary_key -> id_cell_boundary (para membresías)
+      DROP TABLE IF EXISTS tmp_cb_map;
+      CREATE TEMP TABLE tmp_cb_map(
+        boundary_key TEXT PRIMARY KEY,
+        id_cell_boundary VARCHAR(20)
+      ) ON COMMIT DROP;
+    
+      -- Candidatos internos persistentes
+      DROP TABLE IF EXISTS tmp_cand_int;
+      CREATE TEMP TABLE tmp_cand_int(
+        boundary_key TEXT PRIMARY KEY,
+        psl          VARCHAR(20),
+        geomz        geometry(MultiLineStringZ,3857),
+        ida          VARCHAR(20),
+        idb          VARCHAR(20)
+      ) ON COMMIT DROP;
+    
+      INSERT INTO tmp_cand_int(boundary_key, psl, geomz, ida, idb)
+      SELECT
+        md5(ST_AsBinary(ST_SnapToGrid(ST_LineMerge(ST_Force2D(g2)), tol))) AS boundary_key,
+        (SELECT cs.id_primal_space_layer
+           FROM indoorgml_core.cell_space cs
+          WHERE cs.id_cell_space = u.ida
+          LIMIT 1)                                                       AS psl,
+        ST_Multi(ST_Force3D(u.g2, p_z))::geometry(MultiLineStringZ,3857) AS geomz,
+        u.ida, u.idb
+      FROM (
         WITH dumped AS (
           SELECT ida, idb, (ST_Dump(geom2d)).geom AS g
           FROM tmp_shared_lines
@@ -269,107 +297,153 @@ CREATE OR REPLACE FUNCTION indoorgml_core.rebuild_cell_boundaries(
           FROM norm
           GROUP BY g2
         )
-        INSERT INTO indoorgml_core.cell_boundary(id_cell_boundary, external_reference, is_virtual, id_primal_space_layer, geom)
-        SELECT indoorgml_core.next_cb_id(),
-               NULL, FALSE,
-               (SELECT cs.id_primal_space_layer FROM indoorgml_core.cell_space cs WHERE cs.id_cell_space = u.ida LIMIT 1),
-               ST_Force3D(u.g2, p_z)::geometry(LineStringZ, 3857)
-        FROM uniq u;
+        SELECT * FROM uniq
+      ) u;
+    
+      -- *** SOLUCIÓN MÍNIMA: UPDATE + INSERT-solo-nuevos (no gasta secuencia en existentes) ***
+    
+      -- 1.A) Actualiza límites internos existentes (por boundary_key)
+      UPDATE indoorgml_core.cell_boundary cb
+      SET id_primal_space_layer = c.psl,
+          geom                  = c.geomz
+      FROM tmp_cand_int c
+      WHERE cb.boundary_key = c.boundary_key;
+    
+      -- 1.B) Inserta SOLO límites internos nuevos
+      INSERT INTO indoorgml_core.cell_boundary
+        (id_cell_boundary, external_reference, is_virtual, id_primal_space_layer, geom, boundary_key)
+      SELECT indoorgml_core.next_cb_id(), NULL, FALSE, c.psl, c.geomz, c.boundary_key
+      FROM tmp_cand_int c
+      LEFT JOIN indoorgml_core.cell_boundary cb USING(boundary_key)
+      WHERE cb.boundary_key IS NULL;
+    
+      -- 1.C) Refresca el mapa (clave -> ID)
+      DELETE FROM tmp_cb_map;
+      INSERT INTO tmp_cb_map(boundary_key, id_cell_boundary)
+      SELECT c.boundary_key, cb.id_cell_boundary
+      FROM tmp_cand_int c
+      JOIN indoorgml_core.cell_boundary cb USING(boundary_key);
+    
+      -- Membresías internos (dos filas por boundary)
+      INSERT INTO indoorgml_core.cellspace_cellboundary(id_cell_boundary, id_cell_space)
+      SELECT m.id_cell_boundary, c.ida
+      FROM tmp_cand_int c
+      JOIN tmp_cb_map m USING(boundary_key);
+    
+      INSERT INTO indoorgml_core.cellspace_cellboundary(id_cell_boundary, id_cell_space)
+      SELECT m.id_cell_boundary, c.idb
+      FROM tmp_cand_int c
+      JOIN tmp_cb_map m USING(boundary_key);
+    
+      --------------------------------------------------------------------
+      -- 2) BORDES EXTERIORES (contorno exclusivo de cada celda)
+      --------------------------------------------------------------------
+      DROP TABLE IF EXISTS tmp_shared_by_cell;
+      CREATE TEMP TABLE tmp_shared_by_cell(
+        id_cell_space varchar(20),
+        geom2d geometry(MultiLineString, 3857)
+      ) ON COMMIT DROP;
+    
+      INSERT INTO tmp_shared_by_cell(id_cell_space, geom2d)
+      SELECT ida, ST_Union(geom2d) FROM tmp_shared_lines GROUP BY ida
+      UNION ALL
+      SELECT idb, ST_Union(geom2d) FROM tmp_shared_lines GROUP BY idb;
+    
+      DROP TABLE IF EXISTS tmp_uniq2;
+      CREATE TEMP TABLE tmp_uniq2 ON COMMIT DROP AS
+      WITH cell_bnd AS (
+        SELECT cs.id_cell_space,
+               ST_Force2D(ST_Boundary(cs.geom)) AS b2,
+               cs.id_primal_space_layer AS psl
+        FROM indoorgml_core.cell_space cs
+        WHERE (p_level IS NULL OR cs.level = p_level)
+          AND (p_psl   IS NULL OR cs.id_primal_space_layer = p_psl)
+      ),
+      diff AS (
+        SELECT c.id_cell_space, c.psl,
+               CASE
+                 WHEN s.geom2d IS NULL THEN c.b2
+                 ELSE ST_Difference(c.b2, ST_UnaryUnion(s.geom2d))
+               END AS g
+        FROM cell_bnd c
+        LEFT JOIN tmp_shared_by_cell s USING(id_cell_space)
+      ),
+      merged AS (
+        SELECT id_cell_space, psl,
+               ST_LineMerge(ST_Union(g)) AS g_merged
+        FROM diff
+        WHERE g IS NOT NULL AND NOT ST_IsEmpty(g)
+        GROUP BY id_cell_space, psl
+      ),
+      norm2 AS (
+        SELECT id_cell_space, psl,
+               ST_SnapToGrid(g_merged, tol) AS g2
+        FROM merged
+        WHERE GeometryType(g_merged) IN ('LINESTRING','MULTILINESTRING')
+          AND ST_Length(g_merged) > 0
+      )
+      SELECT id_cell_space, psl, g2
+      FROM norm2;
+    
+      -- Candidatos exteriores persistentes
+      DROP TABLE IF EXISTS tmp_cand_ext;
+      CREATE TEMP TABLE tmp_cand_ext(
+        boundary_key  TEXT PRIMARY KEY,
+        id_cell_space VARCHAR(20),
+        psl           VARCHAR(20),
+        geomz         geometry(MultiLineStringZ,3857)
+      ) ON COMMIT DROP;
+    
+      INSERT INTO tmp_cand_ext(boundary_key, id_cell_space, psl, geomz)
+      SELECT
+        md5(ST_AsBinary(ST_SnapToGrid(ST_LineMerge(ST_Force2D(u.g2)), tol))) AS boundary_key,
+        u.id_cell_space,
+        u.psl,
+        ST_Multi(ST_Force3D(u.g2, p_z))::geometry(MultiLineStringZ,3857)     AS geomz
+      FROM tmp_uniq2 u;
+    
+      -- 2.A) Actualiza exteriores existentes
+      UPDATE indoorgml_core.cell_boundary cb
+      SET id_primal_space_layer = c.psl,
+          geom                  = c.geomz
+      FROM tmp_cand_ext c
+      WHERE cb.boundary_key = c.boundary_key;
+    
+      -- 2.B) Inserta SOLO exteriores nuevos
+      INSERT INTO indoorgml_core.cell_boundary
+        (id_cell_boundary, external_reference, is_virtual, id_primal_space_layer, geom, boundary_key)
+      SELECT indoorgml_core.next_cb_id(), NULL, FALSE, c.psl, c.geomz, c.boundary_key
+      FROM tmp_cand_ext c
+      LEFT JOIN indoorgml_core.cell_boundary cb USING(boundary_key)
+      WHERE cb.boundary_key IS NULL;
+    
+      -- 2.C) Añade/actualiza en el mapa (acumula con internos)
+      INSERT INTO tmp_cb_map(boundary_key, id_cell_boundary)
+      SELECT c.boundary_key, cb.id_cell_boundary
+      FROM tmp_cand_ext c
+      JOIN indoorgml_core.cell_boundary cb USING(boundary_key)
+      ON CONFLICT (boundary_key) DO NOTHING;
+    
+      -- Membresías exteriores (una fila por boundary)
+      INSERT INTO indoorgml_core.cellspace_cellboundary(id_cell_boundary, id_cell_space)
+      SELECT m.id_cell_boundary, c2.id_cell_space
+      FROM tmp_cand_ext c2
+      JOIN tmp_cb_map m USING(boundary_key);
+    
+      --------------------------------------------------------------------
+      -- 3) LIMPIEZA FINAL: borrar boundaries huérfanos (no referenciados)
+      --------------------------------------------------------------------
+      DELETE FROM indoorgml_core.cell_boundary cb
+      WHERE NOT EXISTS (
+        SELECT 1 FROM indoorgml_core.cellspace_cellboundary x
+        WHERE x.id_cell_boundary = cb.id_cell_boundary
+      );
+    
+    END;
+    $$;
 
-        -- membresías (dos filas por boundary interno)
-        INSERT INTO indoorgml_core.cellspace_cellboundary(id_cell_boundary, id_cell_space)
-        SELECT cb.id_cell_boundary, u.ida
-        FROM (
-          SELECT DISTINCT ON (md5(ST_AsBinary(g2))) g2, ida, idb
-          FROM (
-            SELECT ida, idb, ST_SnapToGrid(ST_Force2D((ST_Dump(geom2d)).geom), tol) AS g2
-            FROM tmp_shared_lines
-            WHERE geom2d IS NOT NULL
-          ) q
-        ) u
-        JOIN indoorgml_core.cell_boundary cb
-          ON ST_Equals(cb.geom, ST_Force3D(u.g2, p_z));
 
-        INSERT INTO indoorgml_core.cellspace_cellboundary(id_cell_boundary, id_cell_space)
-        SELECT cb.id_cell_boundary, u.idb
-        FROM (
-          SELECT DISTINCT ON (md5(ST_AsBinary(g2))) g2, ida, idb
-          FROM (
-            SELECT ida, idb, ST_SnapToGrid(ST_Force2D((ST_Dump(geom2d)).geom), tol) AS g2
-            FROM tmp_shared_lines
-            WHERE geom2d IS NOT NULL
-          ) q
-        ) u
-        JOIN indoorgml_core.cell_boundary cb
-          ON ST_Equals(cb.geom, ST_Force3D(u.g2, p_z));
 
-        -- 4) Contorno exterior (boundaries con 1 sola celda)
-        DROP TABLE IF EXISTS tmp_shared_by_cell;
-        CREATE TEMP TABLE tmp_shared_by_cell(
-          id_cell_space varchar(20),
-          geom2d geometry(MultiLineString, 3857)
-        ) ON COMMIT DROP;
-
-        INSERT INTO tmp_shared_by_cell(id_cell_space, geom2d)
-        SELECT ida, ST_Union(geom2d) FROM tmp_shared_lines GROUP BY ida
-        UNION ALL
-        SELECT idb, ST_Union(geom2d) FROM tmp_shared_lines GROUP BY idb;
-
-        -- 1. Crear la tabla temporal tmp_uniq2 con un único contorno exterior por celda
-        DROP TABLE IF EXISTS tmp_uniq2;
-        CREATE TEMP TABLE tmp_uniq2 ON COMMIT DROP AS
-        WITH cell_bnd AS (
-          SELECT cs.id_cell_space,
-                 ST_Force2D(ST_Boundary(cs.geom)) AS b2,
-                 cs.id_primal_space_layer AS psl
-          FROM indoorgml_core.cell_space cs
-          WHERE (p_level IS NULL OR cs.level = p_level)
-            AND (p_psl   IS NULL OR cs.id_primal_space_layer = p_psl)
-        ),
-        diff AS (
-          SELECT c.id_cell_space, c.psl,
-                 CASE
-                   WHEN s.geom2d IS NULL THEN c.b2
-                   ELSE ST_Difference(c.b2, ST_UnaryUnion(s.geom2d))
-                 END AS g
-          FROM cell_bnd c
-          LEFT JOIN tmp_shared_by_cell s USING(id_cell_space)
-        ),
-        merged AS (
-          -- Unir todos los segmentos exteriores de cada celda
-          SELECT id_cell_space, psl,
-                 ST_LineMerge(ST_Union(g)) AS g_merged
-          FROM diff
-          WHERE g IS NOT NULL AND NOT ST_IsEmpty(g)
-          GROUP BY id_cell_space, psl
-        ),
-        norm AS (
-          SELECT id_cell_space, psl,
-                 ST_SnapToGrid(g_merged, tol) AS g2
-          FROM merged
-          WHERE GeometryType(g_merged) IN ('LINESTRING','MULTILINESTRING')
-            AND ST_Length(g_merged) > 0
-        )
-        SELECT id_cell_space, psl, g2
-        FROM norm;
-
-        -- 2. Insertar boundaries exteriores (una sola celda)
-        INSERT INTO indoorgml_core.cell_boundary(
-            id_cell_boundary, external_reference, is_virtual, id_primal_space_layer, geom
-        )
-        SELECT indoorgml_core.next_cb_id(), NULL, FALSE, psl,
-               ST_Force3D(g2, p_z)::geometry(MultiLineStringZ, 3857)
-        FROM tmp_uniq2;
-
-        -- 3. Insertar membresías para boundaries exteriores (una fila por boundary)
-        INSERT INTO indoorgml_core.cellspace_cellboundary(id_cell_boundary, id_cell_space)
-        SELECT cb.id_cell_boundary, u.id_cell_space
-        FROM tmp_uniq2 u
-        JOIN indoorgml_core.cell_boundary cb
-          ON ST_Equals(cb.geom, ST_Force3D(u.g2, p_z));
-
-        END;
-        $$;
 
 ---- NODE --
 --
@@ -617,6 +691,8 @@ CREATE INDEX IF NOT EXISTS cell_space_geom_gix ON indoorgml_core.cell_space USIN
 CREATE INDEX IF NOT EXISTS cell_space_level_idx ON indoorgml_core.cell_space(level);
 -- CELLBOUNDARY --
 CREATE INDEX IF NOT EXISTS cell_boundary_geom_gix ON indoorgml_core.cell_boundary USING GIST(geom);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cell_boundary_key   ON indoorgml_core.cell_boundary (boundary_key);
+
 ---- NODE --
 --CREATE UNIQUE INDEX IF NOT EXISTS uq_node_dual_cell ON indoorgml_core.node (id_dual_layer, id_cell_space);
 --CREATE INDEX IF NOT EXISTS node_geom_gix ON indoorgml_core.node USING GIST (geom);
