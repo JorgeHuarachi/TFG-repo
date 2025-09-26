@@ -3,8 +3,8 @@
 Agente: start -> goal con:
  - filtro de movilidad (WALK/RAMP, opcional GENERAL como WALK)
  - filtro de seguridad por score (>= S_MIN)
- - ruta mínima Dijkstra (se recalcula continuamente)
- - animación con recoloreo dinámico y HUD
+ - ruta mínima Dijkstra (recalcula al llegar a nodo y si cambian condiciones)
+ - animación con recoloreo dinámico, HUD y colorbar
 
 Requisitos:
   pip install psycopg2-binary networkx numpy matplotlib pillow pandas
@@ -18,7 +18,7 @@ import psycopg2
 import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib import cm
+from matplotlib import colormaps as cmaps  # <- evita deprecación get_cmap()
 
 # ------------------- CONFIG -------------------
 
@@ -30,19 +30,26 @@ START_NODE = "ND-020"
 GOAL_NODE  = "ND-019"
 
 # Filtro movilidad
-ALLOWED_LOCOMOTIONS = ("WALK", "RAMP")
+ALLOWED_LOCOMOTIONS   = ("WALK", "RAMP")
 TREAT_GENERAL_AS_WALK = False   # si True, ns.kind='GENERAL' cuenta como permitido
 
 # Filtro seguridad
-S_MIN = 0.30                     # umbral de seguridad por celda
-POLL_SCORES_EVERY = 1.0          # s simulados entre lecturas (colores/score)
-RELAX_ON_BLOCK = True            # si no hay ruta con S_MIN, intenta con 0.0
+S_MIN                 = 0.30     # umbral de seguridad por celda
+POLL_SCORES_EVERY     = 1.0      # s entre lecturas de score (y recoloreo)
+RELAX_ON_BLOCK        = True     # si no hay ruta con S_MIN, intenta con 0.0
+
+# Replanificación
+RECOMPUTE_ON_NODE_ONLY      = True    # recalcular sólo al llegar a un nodo
+RECOMPUTE_MIN_INTERVAL_S    = 2.0     # no recalcular más a menudo que esto
+RECOMPUTE_ON_ALLOWED_CHANGE = True    # dispara replan si cambia el conjunto permitido
+ALLOWED_CHANGE_EPS          = 0.05    # cambio mínimo de score para considerar “cambio relevante”
 
 # Animación
-FRAMES_PER_EDGE = 25             # frames para cruzar una arista
-FPS = 10
-SHOW_NODE_LABELS = False
-DRAW_VISITED_EDGES = True
+FRAMES_PER_EDGE     = 25       # frames para cruzar una arista
+FPS                 = 10
+SHOW_NODE_LABELS    = False    # dibuja IDs de nodos
+SHOW_NUMERIC_SCORES = False    # dibuja el score numérico sobre cada nodo (puede saturar)
+DRAW_VISITED_EDGES  = True
 
 # Salidas
 OUT_DIR  = "out"
@@ -135,7 +142,7 @@ def allowed_by_security(G, node2cell, scores, s_min):
 
 def color_nodes(nodelist, node2cell, scores, s_min, mob_ok_set):
     """Colores por score; gris si movilidad no permitida o score < s_min."""
-    cmap = cm.get_cmap("RdYlGn")
+    cmap = cmaps["RdYlGn"]
     colors = []
     for n in nodelist:
         s = scores.get(node2cell.get(n), 1.0)
@@ -148,9 +155,9 @@ def color_nodes(nodelist, node2cell, scores, s_min, mob_ok_set):
     return colors
 
 
-def changed_cells(prev, curr, s_min, max_items=6):
+def changed_cells(prev, curr, s_min, eps=0.2, max_items=6):
     """
-    Lista corta de celdas cuyo estado SAFE/DANGER ha cambiado o variación >0.2.
+    Lista corta de celdas cuyo estado SAFE/DANGER ha cambiado o variación >= eps.
     Devuelve texto para HUD.
     """
     out = []
@@ -159,14 +166,14 @@ def changed_cells(prev, curr, s_min, max_items=6):
         p = prev.get(cs, 1.0)
         c = curr.get(cs, 1.0)
         flip = (p >= s_min) != (c >= s_min)
-        big  = abs(c - p) >= 0.2
+        big  = abs(c - p) >= eps
         if flip or big:
-            out.append((cs, c))
-    out.sort(key=lambda t: abs(t[1]-prev.get(t[0],1.0)), reverse=True)
+            out.append((cs, c, p))
+    out.sort(key=lambda t: abs(t[1]-t[2]), reverse=True)
     out = out[:max_items]
     if not out:
         return "Δcells: —"
-    return "Δcells: " + ", ".join(f"{cs}({v:.2f})" for cs, v in out)
+    return "Δcells: " + ", ".join(f"{cs}({v:.2f})" for cs, v, _ in out)
 
 
 def sim():
@@ -215,6 +222,12 @@ def sim():
     # nodes coloreados por score actual
     scat = ax.scatter(xs, ys, s=420, edgecolors="#243447",
                       c=color_nodes(nodelist, node2cell, scores, s_min, mob_ok))
+    # colorbar para scores
+    sm = plt.cm.ScalarMappable(cmap=cmaps["RdYlGn"], norm=plt.Normalize(vmin=0, vmax=1))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.02)
+    cbar.set_label("score de seguridad (0–1)")
+
     # path restante (rojo) y visitado (granate)
     rem_lines = []
     vis_lines = []
@@ -232,17 +245,25 @@ def sim():
     # agente
     agent_dot, = ax.plot([], [], "o", ms=10, color="#1b9e77", zorder=3)
     # labels opcionales
-    labels = {}
+    id_labels = {}
     if SHOW_NODE_LABELS:
         for n in nodelist:
-            labels[n] = ax.text(pos[n][0], pos[n][1], n, fontsize=7, ha="center", va="center")
+            id_labels[n] = ax.text(pos[n][0], pos[n][1], n, fontsize=7, ha="center", va="center")
+
+    score_labels = {}
+    if SHOW_NUMERIC_SCORES:
+        # textos con score numérico (se actualizan al poll)
+        for n in nodelist:
+            s = scores.get(node2cell.get(n), 1.0)
+            score_labels[n] = ax.text(pos[n][0], pos[n][1]-0.6, f"{s:.2f}", fontsize=7,
+                                      ha="center", va="center", color="black")
 
     hud = ax.text(0.02, 0.98, "", transform=ax.transAxes, va="top", ha="left",
                   bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85))
 
     ax.set_aspect("equal")
     ax.set_xticks([]); ax.set_yticks([])
-    ax.set_title("Agente con recalculo continuo (movilidad + seguridad)")
+    ax.set_title("Agente con recalculo controlado (movilidad + seguridad)")
     plt.tight_layout()
 
     # --------------- ESTADO SIM ---------------
@@ -252,38 +273,74 @@ def sim():
     recomputes = 0
     prev_scores = scores.copy()
     poll_each_frames = max(1, int(POLL_SCORES_EVERY * FPS))
+    min_frames_between_recompute = max(1, int(RECOMPUTE_MIN_INTERVAL_S * FPS))
+    last_recompute_frame = -min_frames_between_recompute
+    last_allowed_set = allowed.copy()
 
     # posición inicial
     x0, y0 = pos[path[0]]
     agent_dot.set_data([x0], [y0])
 
+    # Para este script, blit=False simplifica cuando hay muchos artistas
     def update(_):
-        nonlocal frames, step_in_edge, cur_i, path, scores, prev_scores, recomputes, G_ok, allowed
+        nonlocal frames, step_in_edge, cur_i, path, scores, prev_scores, recomputes
+        nonlocal G_ok, allowed, last_recompute_frame, last_allowed_set
 
-        # 1) refresca scores periódicamente + recolor
+        # 1) refresca scores periódicamente + recolor (y etiquetas numéricas si toca)
         if frames % poll_each_frames == 0:
             prev_scores = scores
             with connect() as c2:
                 scores = fetch_scores(c2)
             scat.set_color(color_nodes(nodelist, node2cell, scores, s_min, mob_ok))
+            if SHOW_NUMERIC_SCORES:
+                for n in nodelist:
+                    s = scores.get(node2cell.get(n), 1.0)
+                    score_labels[n].set_text(f"{s:.2f}")
 
-        # 2) (re)calcula SIEMPRE la ruta desde el nodo más cercano del path actual
-        #    - si estamos a mitad de arista, tomamos el nodo destino como punto de replanteo
-        recomputes += 1
-        anchor = path[cur_i] if step_in_edge == 0 else path[cur_i + 1]
-        G_ok, allowed = build_allowed_graph(scores, s_min)
-        try:
-            new_path = nx.shortest_path(G_ok, anchor, GOAL_NODE, weight="weight")
-            # sustituye el sufijo del path por el nuevo plan
-            path = path[:cur_i] + new_path if step_in_edge == 0 else path[:cur_i+1] + new_path
-            draw_remaining(path[cur_i + (1 if step_in_edge > 0 else 0):])
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
-            # no hay ruta ahora mismo: mantenemos la visual; el agente evita avanzar
-            hud.set_text(f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
-                         f"ruta bloqueada; esperando cambios…\n"
-                         f"{changed_cells(prev_scores, scores, s_min)}")
-            frames += 1
-            return agent_dot, hud, *rem_lines, *vis_lines
+            # si queremos disparar replan por cambio de permitido, calculamos allowed_now
+            if RECOMPUTE_ON_ALLOWED_CHANGE and RECOMPUTE_ON_NODE_ONLY and step_in_edge == 0:
+                # allowed con el umbral actual
+                G_tmp, allowed_now = build_allowed_graph(scores, s_min)
+                # detecta cambios relevantes (no miramos sólo dif. de conjuntos, también “margen” por eps)
+                # aquí hacemos diff puro; si quieres eps real por celda, compáralo con prev_scores en otro paso
+                changed = (allowed_now != last_allowed_set)
+                allowed = allowed_now
+                G_ok = G_tmp
+                if changed and (frames - last_recompute_frame >= min_frames_between_recompute):
+                    # recomputa ruta desde el nodo actual
+                    anchor = path[cur_i]
+                    try:
+                        path = path[:cur_i] + nx.shortest_path(G_ok, anchor, GOAL_NODE, weight="weight")
+                        draw_remaining(path[cur_i:])
+                        recomputes += 1
+                        last_recompute_frame = frames
+                        last_allowed_set = allowed_now
+                    except (nx.NetworkXNoPath, nx.NodeNotFound):
+                        # no hay ruta ahora mismo: se muestra en HUD y el agente espera en nodo
+                        hud.set_text(f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
+                                     f"ruta bloqueada; esperando cambios…\n"
+                                     f"{changed_cells(prev_scores, scores, s_min)}")
+                        frames += 1
+                        return
+
+        # 2) replan periódico (sólo al llegar a nodo)
+        if RECOMPUTE_ON_NODE_ONLY and step_in_edge == 0:
+            if frames - last_recompute_frame >= min_frames_between_recompute:
+                # recalcula desde el nodo actual con allowed/scores que tenemos ahora
+                G_ok, allowed = build_allowed_graph(scores, s_min)
+                anchor = path[cur_i]
+                try:
+                    path = path[:cur_i] + nx.shortest_path(G_ok, anchor, GOAL_NODE, weight="weight")
+                    draw_remaining(path[cur_i:])
+                    recomputes += 1
+                    last_recompute_frame = frames
+                    last_allowed_set = allowed.copy()
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    hud.set_text(f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
+                                 f"ruta bloqueada; esperando cambios…\n"
+                                 f"{changed_cells(prev_scores, scores, s_min)}")
+                    frames += 1
+                    return
 
         # 3) avanzar por la arista actual si existe
         if cur_i >= len(path) - 1:
@@ -293,7 +350,7 @@ def sim():
             hud.set_text(f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
                          f"FIN @ {path[-1]}\n{changed_cells(prev_scores, scores, s_min)}")
             frames += 1
-            return agent_dot, hud, *rem_lines, *vis_lines
+            return
 
         a = path[cur_i]
         b = path[cur_i + 1]
@@ -322,9 +379,9 @@ def sim():
             cur_i += 1
 
         frames += 1
-        return agent_dot, hud, *rem_lines, *vis_lines
 
-    anim = FuncAnimation(fig, update, frames=100000, interval=1000.0/FPS, blit=True)
+    # OJO: con muchos artistas, mejor blit=False
+    anim = FuncAnimation(fig, update, frames=100000, interval=1000.0/FPS, blit=False)
     try:
         anim.save(GIF_PATH, writer="pillow", dpi=120, fps=FPS)
     except Exception as ex:
@@ -348,6 +405,7 @@ def sim():
         "dist_m": round(dist, 3),
         "path": "->".join(path)
     }
+    os.makedirs(OUT_DIR, exist_ok=True)
     new = not os.path.exists(CSV_PATH)
     with open(CSV_PATH, "a", encoding="utf-8") as f:
         if new:
