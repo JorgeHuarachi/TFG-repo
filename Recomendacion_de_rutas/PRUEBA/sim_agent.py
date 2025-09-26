@@ -1,177 +1,362 @@
-# sim_agent.py
-import time
-from pathlib import Path
-import psycopg2
+# -*- coding: utf-8 -*-
+"""
+Agente: start -> goal con:
+ - filtro de movilidad (WALK/RAMP, opcional GENERAL como WALK)
+ - filtro de seguridad por score (>= S_MIN)
+ - ruta mínima Dijkstra (se recalcula continuamente)
+ - animación con recoloreo dinámico y HUD
+
+Requisitos:
+  pip install psycopg2-binary networkx numpy matplotlib pillow pandas
+"""
+
+import os
+from datetime import datetime
+
 import numpy as np
+import psycopg2
 import networkx as nx
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.animation import FuncAnimation
+from matplotlib import cm
 
-from graph_utils import (
-    get_conn, build_filtered_graph, find_exit_nodes, shortest_to_any_target,
-    SCORE_UMBRAL, ALLOWED_LOCOMOTIONS
-)
+# ------------------- CONFIG -------------------
 
-DUAL = "DU-01"
-LEVEL = "P01"
-SRC_NODE = "ND-020"
-SCORE_UMBRAL_LOCAL = 0.6
-ALLOWED_LOCOMOTIONS_LOCAL = ("WALK","RAMP")
-V_MPS = 1.2
-REFRESH_S = 1.0
+DSN = dict(host="localhost", dbname="SIMULAR", user="postgres", password="DB032122", port=5432)
 
-OUT_DIR = Path("out")
-OUT_DIR.mkdir(exist_ok=True, parents=True)
-OUT_CSV = OUT_DIR / "run_agent.csv"
-OUT_GIF = OUT_DIR / "run_agent.gif"
+DUAL_ID    = "DU-01"
+LEVEL      = "P01"
+START_NODE = "ND-020"
+GOAL_NODE  = "ND-019"
 
-def build_scene(conn):
-    G_full, G_masked, meta = build_filtered_graph(
-        conn, DUAL, LEVEL,
-        score_umbral=SCORE_UMBRAL_LOCAL,
-        allowed_locomotions=ALLOWED_LOCOMOTIONS_LOCAL,
-        undirected=True
-    )
-    exits = find_exit_nodes(conn, DUAL, LEVEL, include_windows=False)
-    return G_full, G_masked, meta, exits
+# Filtro movilidad
+ALLOWED_LOCOMOTIONS = ("WALK", "RAMP")
+TREAT_GENERAL_AS_WALK = False   # si True, ns.kind='GENERAL' cuenta como permitido
 
-def run_and_animate():
-    conn = get_conn()
-    G_full, G, meta, exits = build_scene(conn)
+# Filtro seguridad
+S_MIN = 0.30                     # umbral de seguridad por celda
+POLL_SCORES_EVERY = 1.0          # s simulados entre lecturas (colores/score)
+RELAX_ON_BLOCK = True            # si no hay ruta con S_MIN, intenta con 0.0
 
-    node_ids = meta["node_ids"]
-    pos = meta["positions"]
-    if SRC_NODE not in G:
-        raise RuntimeError(f"Origen {SRC_NODE} no está en el grafo filtrado (revisa SCORE_UMBRAL o SRC_NODE).")
+# Animación
+FRAMES_PER_EDGE = 25             # frames para cruzar una arista
+FPS = 10
+SHOW_NODE_LABELS = False
+DRAW_VISITED_EDGES = True
 
-    # Ruta inicial a salidas normales
-    path = shortest_to_any_target(G, SRC_NODE, exits)
+# Salidas
+OUT_DIR  = "out"
+GIF_PATH = os.path.join(OUT_DIR, "agent.gif")
+CSV_PATH = os.path.join(OUT_DIR, "run_agent.csv")
 
-    # Si no hay, prueba modo emergencia (ventanas)
-    if path is None:
-        print("[WARN] Sin ruta a salidas normales; probando ventanas…")
-        exits2 = find_exit_nodes(conn, DUAL, LEVEL, include_windows=True)
-        path = shortest_to_any_target(G, SRC_NODE, exits2)
-        if path is None:
-            raise RuntimeError("No hay ruta ni con ventanas (baja umbral o revisa datos).")
+# ------------------------------------------------
+
+
+def connect():
+    return psycopg2.connect(**DSN)
+
+
+def fetch_graph_with_mobility(conn, dual_id, level, allowed_locomotions, treat_general_as_walk):
+    """
+    Carga nodos/edges y marca si cada nodo pasa el filtro de movilidad.
+    """
+    with conn.cursor() as cur:
+        # NODOS + flag movilidad
+        cur.execute(
+            """
+            SELECT
+              n.id_node,
+              cs.id_cell_space,
+              ST_X(n.geom) AS x,
+              ST_Y(n.geom) AS y,
+              CASE
+                WHEN ns.locomotion::text = ANY(%s) THEN TRUE
+                WHEN %s::boolean IS TRUE AND ns.locomotion IS NULL AND ns.kind = 'GENERAL' THEN TRUE
+                ELSE FALSE
+              END AS mob_ok
+            FROM indoorgml_core.node n
+            JOIN indoorgml_core.cell_space cs ON cs.id_cell_space = n.id_cell_space
+            LEFT JOIN indoorgml_navigation.navigable_space ns ON ns.id_cell_space = cs.id_cell_space
+            WHERE n.id_dual = %s
+              AND (%s::text IS NULL OR cs.level = %s)
+            ORDER BY n.id_node
+            """,
+            (list(allowed_locomotions), treat_general_as_walk, dual_id, level, level)
+        )
+        rn = cur.fetchall()
+        if not rn:
+            raise RuntimeError("No hay nodos para esa dual/level.")
+        node_ids   = [r[0] for r in rn]
+        node2cell  = {r[0]: r[1] for r in rn}
+        pos        = {r[0]: (float(r[2]), float(r[3])) for r in rn if r[2] is not None and r[3] is not None}
+        mob_ok_set = {r[0] for r in rn if r[4]}
+
+        # EDGES
+        cur.execute(
+            """
+            SELECT e.from_node, e.to_node, e.weight_m
+            FROM indoorgml_core.edge e
+            JOIN indoorgml_core.node na ON na.id_node = e.from_node
+            JOIN indoorgml_core.node nb ON nb.id_node = e.to_node
+            JOIN indoorgml_core.cell_space csa ON csa.id_cell_space = na.id_cell_space
+            JOIN indoorgml_core.cell_space csb ON csb.id_cell_space = nb.id_cell_space
+            WHERE e.id_dual = %s
+              AND (%s::text IS NULL OR (csa.level = %s AND csb.level = %s))
+            """,
+            (dual_id, level, level, level)
+        )
+        re = cur.fetchall()
+
+    G = nx.Graph()
+    G.add_nodes_from(node_ids)
+    for u, v, w in re:
+        if u in pos and v in pos and w and w > 0:
+            G.add_edge(u, v, weight=float(w))
+
+    return G, pos, node2cell, mob_ok_set
+
+
+def fetch_scores(conn):
+    """cell_space -> score (si falta, tratamos como 1.0)"""
+    with conn.cursor() as cur:
+        cur.execute("SELECT id_cell_space, score FROM iot.v_cell_score_latest;")
+        rows = cur.fetchall()
+    return {cs: float(s) for cs, s in rows}
+
+
+def allowed_by_security(G, node2cell, scores, s_min):
+    ok = set()
+    for n in G.nodes():
+        s = scores.get(node2cell.get(n), 1.0)
+        if s >= s_min:
+            ok.add(n)
+    return ok
+
+
+def color_nodes(nodelist, node2cell, scores, s_min, mob_ok_set):
+    """Colores por score; gris si movilidad no permitida o score < s_min."""
+    cmap = cm.get_cmap("RdYlGn")
+    colors = []
+    for n in nodelist:
+        s = scores.get(node2cell.get(n), 1.0)
+        if (n not in mob_ok_set) or (s < s_min):
+            colors.append((0.7, 0.7, 0.7, 0.35))
         else:
-            exits = exits2
+            s_clamped = max(0.0, min(1.0, s))
+            r, g, b, _ = cmap(s_clamped)
+            colors.append((r, g, b, 0.95))
+    return colors
 
-    # Prepara animación
-    fig, ax = plt.subplots(figsize=(8, 6))
-    # dibuja grafo base
-    xy = np.array([pos[n] for n in G.nodes if n in pos])
-    ax.scatter(xy[:,0], xy[:,1], s=20, alpha=0.8)
+
+def changed_cells(prev, curr, s_min, max_items=6):
+    """
+    Lista corta de celdas cuyo estado SAFE/DANGER ha cambiado o variación >0.2.
+    Devuelve texto para HUD.
+    """
+    out = []
+    keys = set(prev.keys()) | set(curr.keys())
+    for cs in keys:
+        p = prev.get(cs, 1.0)
+        c = curr.get(cs, 1.0)
+        flip = (p >= s_min) != (c >= s_min)
+        big  = abs(c - p) >= 0.2
+        if flip or big:
+            out.append((cs, c))
+    out.sort(key=lambda t: abs(t[1]-prev.get(t[0],1.0)), reverse=True)
+    out = out[:max_items]
+    if not out:
+        return "Δcells: —"
+    return "Δcells: " + ", ".join(f"{cs}({v:.2f})" for cs, v in out)
+
+
+def sim():
+    os.makedirs(OUT_DIR, exist_ok=True)
+
+    # --- GRAFO BASE + MOVILIDAD ---
+    with connect() as conn:
+        G, pos, node2cell, mob_ok = fetch_graph_with_mobility(
+            conn, DUAL_ID, LEVEL, ALLOWED_LOCOMOTIONS, TREAT_GENERAL_AS_WALK
+        )
+        scores = fetch_scores(conn)
+
+    if START_NODE not in G or GOAL_NODE not in G:
+        raise RuntimeError("START/GOAL no están en el grafo.")
+
+    nodelist = list(pos.keys())
+    xs = np.array([pos[n][0] for n in nodelist])
+    ys = np.array([pos[n][1] for n in nodelist])
+
+    # helper para construir grafo permitido por movilidad+seguridad
+    def build_allowed_graph(scores_now, s_min):
+        allowed_sec = allowed_by_security(G, node2cell, scores_now, s_min)
+        allowed = (mob_ok & allowed_sec)
+        return G.subgraph(allowed).copy(), allowed
+
+    # primer grafo y ruta (relaja si hace falta)
+    s_min = S_MIN
+    for attempt in (1, 2):
+        G_ok, allowed = build_allowed_graph(scores, s_min)
+        try:
+            path = nx.shortest_path(G_ok, START_NODE, GOAL_NODE, weight="weight")
+            break
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            if RELAX_ON_BLOCK and attempt == 1:
+                print("[WARN] sin ruta con s_min -> relajo a 0.0")
+                s_min = 0.0
+            else:
+                raise
+
+    # --------------- DIBUJO BASE ---------------
+    fig, ax = plt.subplots(figsize=(9, 7))
+    # edges
     for u, v in G.edges():
         if u in pos and v in pos:
-            ax.plot([pos[u][0], pos[v][0]], [pos[u][1], pos[v][1]], lw=0.8, alpha=0.5)
+            ax.plot([pos[u][0], pos[v][0]], [pos[u][1], pos[v][1]], lw=1.2, color="#B0B0B0", alpha=0.6, zorder=0)
+    # nodes coloreados por score actual
+    scat = ax.scatter(xs, ys, s=420, edgecolors="#243447",
+                      c=color_nodes(nodelist, node2cell, scores, s_min, mob_ok))
+    # path restante (rojo) y visitado (granate)
+    rem_lines = []
+    vis_lines = []
 
-    # artista ruta (línea roja)
-    line_path, = ax.plot([], [], lw=2.5, color="red")
-    # agente (punto)
-    agent_dot, = ax.plot([], [], marker="o", ms=8, color="red")
+    def draw_remaining(pnodes):
+        for l in rem_lines: l.remove()
+        rem_lines.clear()
+        for a, b in zip(pnodes[:-1], pnodes[1:]):
+            if a in pos and b in pos:
+                ln, = ax.plot([pos[a][0], pos[b][0]], [pos[a][1], pos[b][1]],
+                              lw=3.0, color="#ff5252", alpha=0.95, zorder=2)
+                rem_lines.append(ln)
 
-    ax.set_title("Agente y ruta dinámica")
-    ax.axis("equal"); ax.set_xticks([]); ax.set_yticks([])
+    draw_remaining(path)
+    # agente
+    agent_dot, = ax.plot([], [], "o", ms=10, color="#1b9e77", zorder=3)
+    # labels opcionales
+    labels = {}
+    if SHOW_NODE_LABELS:
+        for n in nodelist:
+            labels[n] = ax.text(pos[n][0], pos[n][1], n, fontsize=7, ha="center", va="center")
 
-    # Estado de simulación
-    t = 0.0
-    cur = SRC_NODE
-    cur_i = 0
-    def route_xy(path_nodes):
-        xs = [pos[n][0] for n in path_nodes if n in pos]
-        ys = [pos[n][1] for n in path_nodes if n in pos]
-        return xs, ys
+    hud = ax.text(0.02, 0.98, "", transform=ax.transAxes, va="top", ha="left",
+                  bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85))
 
-    xs, ys = route_xy(path)
-    line_path.set_data(xs, ys)
-    x0, y0 = pos[cur]
-    agent_dot.set_data([x0], [y0])   # <-- listas, no escalares
+    ax.set_aspect("equal")
+    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_title("Agente con recalculo continuo (movilidad + seguridad)")
+    plt.tight_layout()
 
-    # CSV log
-    f = OUT_CSV.open("w", encoding="utf-8")
-    f.write("t,cur_node,path_len\n")
+    # --------------- ESTADO SIM ---------------
+    cur_i = 0                   # índice de nodo del path
+    step_in_edge = 0            # frame dentro de la arista
+    frames = 0
+    recomputes = 0
+    prev_scores = scores.copy()
+    poll_each_frames = max(1, int(POLL_SCORES_EVERY * FPS))
 
-    # variables para avance
-    next_node = path[1] if len(path) > 1 else path[0]
-    seg_len = G[cur][next_node]["length"]
-    seg_time = seg_len / V_MPS
-    seg_elapsed = 0.0
-    last_replan = 0.0
+    # posición inicial
+    x0, y0 = pos[path[0]]
+    agent_dot.set_data([x0], [y0])
 
-    def step(dt):
-        nonlocal t, cur, cur_i, next_node, seg_len, seg_time, seg_elapsed, last_replan, G, exits, path
-        t += dt
-        seg_elapsed += dt
+    def update(_):
+        nonlocal frames, step_in_edge, cur_i, path, scores, prev_scores, recomputes, G_ok, allowed
 
-        # replan periódica
-        if t - last_replan >= REFRESH_S:
-            last_replan = t
-            # reconstruir grafo por si cambió score
-            G_full2, G2, meta2, exits2 = build_scene(conn)
-            G = G2
-            exits = exits2
-            # replan desde nodo actual
-            new_path = shortest_to_any_target(G, cur, exits)
-            if new_path is None:
-                # probar ventanas
-                exits3 = find_exit_nodes(conn, DUAL, LEVEL, include_windows=True)
-                new_path = shortest_to_any_target(G, cur, exits3)
-                if new_path is not None:
-                    exits = exits3
-            if new_path is not None:
-                path[:] = new_path  # sustituye
-                cur_i = 0
-                if len(path) > 1:
-                    next_node = path[1]
-                    seg_len = G[cur][next_node]["length"]
-                    seg_time = seg_len / V_MPS
-                    seg_elapsed = 0.0
-                xs, ys = route_xy(path)
-                line_path.set_data(xs, ys)
+        # 1) refresca scores periódicamente + recolor
+        if frames % poll_each_frames == 0:
+            prev_scores = scores
+            with connect() as c2:
+                scores = fetch_scores(c2)
+            scat.set_color(color_nodes(nodelist, node2cell, scores, s_min, mob_ok))
 
-        # si ya en destino
-        if cur == path[-1]:
-            return
+        # 2) (re)calcula SIEMPRE la ruta desde el nodo más cercano del path actual
+        #    - si estamos a mitad de arista, tomamos el nodo destino como punto de replanteo
+        recomputes += 1
+        anchor = path[cur_i] if step_in_edge == 0 else path[cur_i + 1]
+        G_ok, allowed = build_allowed_graph(scores, s_min)
+        try:
+            new_path = nx.shortest_path(G_ok, anchor, GOAL_NODE, weight="weight")
+            # sustituye el sufijo del path por el nuevo plan
+            path = path[:cur_i] + new_path if step_in_edge == 0 else path[:cur_i+1] + new_path
+            draw_remaining(path[cur_i + (1 if step_in_edge > 0 else 0):])
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            # no hay ruta ahora mismo: mantenemos la visual; el agente evita avanzar
+            hud.set_text(f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
+                         f"ruta bloqueada; esperando cambios…\n"
+                         f"{changed_cells(prev_scores, scores, s_min)}")
+            frames += 1
+            return agent_dot, hud, *rem_lines, *vis_lines
 
-        # avanza por el segmento actual (interpolación simple)
-        if seg_time <= 1e-6:
-            alpha = 1.0
-        else:
-            alpha = min(1.0, seg_elapsed / seg_time)
+        # 3) avanzar por la arista actual si existe
+        if cur_i >= len(path) - 1:
+            # llegó
+            x, y = pos[path[-1]]
+            agent_dot.set_data([x], [y])
+            hud.set_text(f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
+                         f"FIN @ {path[-1]}\n{changed_cells(prev_scores, scores, s_min)}")
+            frames += 1
+            return agent_dot, hud, *rem_lines, *vis_lines
 
-        xA, yA = pos[cur]
-        xB, yB = pos[next_node]
-        x = xA + alpha * (xB - xA)
-        y = yA + alpha * (yB - yA)
-        agent_dot.set_data([x], [y])  # listas
+        a = path[cur_i]
+        b = path[cur_i + 1]
+        x0, y0 = pos[a]; x1, y1 = pos[b]
+        t = step_in_edge / float(FRAMES_PER_EDGE)
+        x = x0 + t * (x1 - x0)
+        y = y0 + t * (y1 - y0)
+        agent_dot.set_data([x], [y])
 
-        if alpha >= 1.0:
-            # llegó a next_node
-            cur = next_node
+        # HUD
+        hud.set_text(
+            f"t={frames/FPS:.1f}s  s_min={s_min:.2f}  recomputes={recomputes}\n"
+            f"{a}→{b} | score({node2cell[a]})={scores.get(node2cell[a],1.0):.2f}\n"
+            f"{changed_cells(prev_scores, scores, s_min)}"
+        )
+
+        # avanza “frame”
+        step_in_edge += 1
+        if step_in_edge >= FRAMES_PER_EDGE:
+            # llega a b
+            step_in_edge = 0
+            # pinta como visitado
+            if DRAW_VISITED_EDGES:
+                ln, = ax.plot([x0, x1], [y0, y1], lw=3.0, color="#8b1b1b", alpha=0.9, zorder=1)
+                vis_lines.append(ln)
             cur_i += 1
-            f.write(f"{t:.2f},{cur},{len(path)}\n")
-            if cur == path[-1]:
-                return
-            next_node = path[cur_i + 1]
-            seg_len = G[cur][next_node]["length"]
-            seg_time = seg_len / V_MPS
-            seg_elapsed = 0.0
 
-    def update(frame):
-        step(0.1)  # 0.1 s por frame
-        return line_path, agent_dot
+        frames += 1
+        return agent_dot, hud, *rem_lines, *vis_lines
 
-    anim = FuncAnimation(fig, update, frames=600, interval=50, blit=False)
+    anim = FuncAnimation(fig, update, frames=100000, interval=1000.0/FPS, blit=True)
     try:
-        anim.save(OUT_GIF, writer=PillowWriter(fps=20))
-        print(f"[OK] GIF guardado → {OUT_GIF}")
-    except Exception as e:
-        print(f"[WARN] No se pudo guardar GIF: {e}. Abriendo ventana…")
-        plt.show()
+        anim.save(GIF_PATH, writer="pillow", dpi=120, fps=FPS)
+    except Exception as ex:
+        print(f"[WARN] error guardando GIF: {ex}; guardo PNG")
+        fig.savefig(GIF_PATH.replace(".gif", ".png"), dpi=120)
+    plt.close(fig)
 
-    f.close()
-    conn.close()
+    # CSV resumen (ruta final y stats)
+    try:
+        dist = nx.path_weight(G, path, weight="weight")
+    except Exception:
+        dist = 0.0
+    row = {
+        "ts": datetime.utcnow().isoformat(),
+        "level": LEVEL,
+        "start": START_NODE,
+        "goal": GOAL_NODE,
+        "s_min": s_min,
+        "recomputes": recomputes,
+        "nodes_in_path_final": len(path),
+        "dist_m": round(dist, 3),
+        "path": "->".join(path)
+    }
+    new = not os.path.exists(CSV_PATH)
+    with open(CSV_PATH, "a", encoding="utf-8") as f:
+        if new:
+            f.write(",".join(row.keys()) + "\n")
+        f.write(",".join(str(v) for v in row.values()) + "\n")
+
+    print(f"[DONE] GIF: {GIF_PATH}")
+    print(f"[DONE] CSV: {CSV_PATH}")
+
 
 if __name__ == "__main__":
-    run_and_animate()
+    sim()

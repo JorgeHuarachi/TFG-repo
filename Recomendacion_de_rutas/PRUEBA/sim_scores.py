@@ -6,7 +6,7 @@ import random
 import psycopg2
 from graph_utils import get_conn
 
-# Escenario: degrada CS-003 entre t0 y t1, luego recupera
+# Escenario: degrada CS-001 entre t0 y t1, luego recupera
 DT = 1.0  # segundos entre “ticks”
 TARGET_CELLS = {
     "CS-001": dict(t0=5, t1=90, min_score=0.10, rec_score=0.85),
