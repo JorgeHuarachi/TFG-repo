@@ -1,4 +1,7 @@
 # Boceto de wireframe: Recomendación de rutas
+**ACTUALIZACION**:
+Hacer un *DashBoard* a este punto lo veo complicado, todo lo que he hevo lo visualizo con **QGIS** o **matplotlib**.
+Asique de momento me sirvo de Vistas, capas y las herramientas de personalización en **QGIS**.
 
 ## Contexto y objetivo
 
@@ -31,3 +34,4 @@ He dejado el link para poder verlo directamente desde la web donde la he hecho p
 Lo que sigue entiendo que sería revisar el wireframe, en una reunión o con comentarios. Realizar los cambios que se requieran, añadir o quitar cosas.
 
 Yo pienso que quizas es ambicioso, o quizas muy elaborado, ya que de diseño web no se casi nada, pero mas que nada supongo que esto es para mostrar la funcionalodad de la recomendación de rutas.
+

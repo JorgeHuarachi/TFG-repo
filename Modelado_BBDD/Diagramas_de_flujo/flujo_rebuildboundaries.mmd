@@ -1,0 +1,51 @@
+%% rebuild_cell_boundaries() - Diagrama de flujo
+%% Reconstrucción de límites (cellBoundary) a partir de cellSpace
+flowchart TB
+    A(["INSERT/UPDATE/DELETE<br> en<br> cell_space"]) --> B["DELETE<br/><br/>Borrar relaciones antiguas<br/>(cellspace ↔ boundary)"]
+
+    B --> C["INSERT<br/><br/>Calcular bordes internos<br/>Detectar paredes compartidas"]
+    C --> D["GENERATE KEY<br/><br/>Generar claves únicas<br/>(boundary_key)"]
+    D --> E{"¿Ya existía<br/>el límite interno?"}
+
+    E -- "Sí" --> F["UPDATE<br/><br/>Actualizar límite existente"]
+    E -- "No" --> G["INSERT<br/><br/>Insertar nuevo límite interno"]
+
+    F --> H["INSERT<br/><br/>Crear relaciones<br/>(2 habitaciones ↔ 1 pared)"]
+    G --> H
+
+    H --> I["INSERT<br/><br/>Calcular bordes externos<br/>Contorno exclusivo de cada celda"]
+    I --> J{"¿Ya existía<br/>el límite externo?"}
+
+    J -- "Sí" --> K["UPDATE<br/><br/>Actualizar límite externo"]
+    J -- "No" --> L["INSERT<br/><br/>Insertar nuevo límite externo"]
+
+    K --> M["INSERT<br/><br/>Crear relación<br/>(1 habitación ↔ 1 pared exterior)"]
+    L --> M
+
+    M --> N["DELETE<br/><br/>Limpieza final<br/>Eliminar paredes huérfanas"]
+    N --> Z(["Fin del proceso<br/>Modelo consistente"])
+
+    %% Estilos
+    classDef startend fill:#E3F2FD,stroke:#1E88E5,color:#0D47A1,stroke-width:1px
+    classDef process fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:1px
+    classDef decision fill:#FFF3E0,stroke:#FB8C00,color:#E65100,stroke-width:1px
+    classDef update fill:#E0F7FA,stroke:#00838F,color:#004D40,stroke-width:1px
+    classDef insert fill:#F1F8E9,stroke:#7CB342,color:#33691E,stroke-width:1px
+    classDef clean fill:#FFEBEE,stroke:#E53935,color:#B71C1C,stroke-width:1px
+    classDef ok fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:2px
+
+    A:::startend
+    B:::clean
+    C:::insert
+    D:::process
+    E:::decision
+    F:::update
+    G:::insert
+    H:::insert
+    I:::insert
+    J:::decision
+    K:::update
+    L:::insert
+    M:::insert
+    N:::clean
+    Z:::ok

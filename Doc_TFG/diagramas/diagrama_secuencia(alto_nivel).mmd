@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant TTN as TTN (LoRaWAN)
+    participant WH as Webhook
+    participant CEP as CEP Engine
+    participant DB as Base de Datos
+    participant ROUTE as Motor de Rutas
+    participant APP as Cliente/App
+
+    TTN->>WH: Uplink JSON (T1)
+    WH->>CEP: Evento decodificado
+    CEP->>DB: Insert/Update estado (T2)
+    APP->>ROUTE: Solicitud de ruta (T3)
+    ROUTE->>DB: Consulta grafo actualizado
+    DB-->>ROUTE: Nodos + aristas con seguridad
+    ROUTE-->>APP: Ruta recomendada (T4)

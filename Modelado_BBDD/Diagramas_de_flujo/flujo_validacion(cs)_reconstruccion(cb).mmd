@@ -1,0 +1,32 @@
+%% Diagrama de flujo de la logica de validacion y reconstruccion de cellboundary
+flowchart TD
+    A(["INSERT/UPDATE/DELETE<br> en<br> cell_space"]) --> B{"CHECK geom  <br> ¿Es la geometria<br> valida?"}
+    
+    %% CONSTRAIN; Para evitar geometrías invalidas.
+    B -- No --> G["ERROR / ROLLBACK"] 
+    B -- Sí --> C{"no_overlap_function()**<br><br>¿Existe solape <br>en el mismo nivel?"}
+    
+    %% FUNCTION + CONSTRAINT TRIGGER; Comprueba que no hay solape 2D en un mismo divel
+    C -- Sí --> E["ERROR / ROLLBACK"]
+    C -- No --> D["TRIGGER<br> llama a<br> build_boundary_function()**"]
+
+    %% Actualiza y crea las cellboundary, diferenciandola ademas en aquellas que conectan celdas de aquellas que no.
+    D --> F["Actualiza / crea cell_boundary<br>y<br> relaciones <br>CellSpace-CellBoundary"]
+    F --> Z(["Commit OK"])
+
+     A:::input
+     B:::decision
+     C:::decision
+     E:::error
+     G:::error
+     D:::trigger
+     F:::data
+     Z:::ok
+    classDef input   fill:#E3F2FD,stroke:#1E88E5,color:#0D47A1,stroke-width:1px
+    classDef process fill:#E8EAF6,stroke:#3949AB,color:#1A237E,stroke-width:1px
+    classDef decision fill:#FFF3E0,stroke:#FB8C00,color:#E65100,stroke-width:1px
+    classDef trigger fill:#E0F2F1,stroke:#00796B,color:#004D40,stroke-width:1px
+    classDef data    fill:#F1F8E9,stroke:#7CB342,color:#1B5E20,stroke-width:1px
+    classDef ok      fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:1px
+    classDef error   fill:#FFEBEE,stroke:#E53935,color:#B71C1C,stroke-width:1px
+

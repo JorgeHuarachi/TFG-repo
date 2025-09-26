@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant TTN as TTN (LoRaWAN)
+    participant WH as Webhook (Flask Endpoint)
+    participant DEC as Decodificación
+    participant CEP as CEP Engine
+    participant DB as Base de Datos
+
+    TTN->>WH: Uplink JSON (T1)
+    WH->>DEC: Payload recibido
+    DEC->>CEP: Evento decodificado (T2)
+    CEP->>DB: Insert/Update estado
+    note right of DB: Actualización de celdas IndoorGML

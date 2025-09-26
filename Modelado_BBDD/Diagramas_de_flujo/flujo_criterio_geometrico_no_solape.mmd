@@ -1,0 +1,15 @@
+%% criterio geometrico para dacidir si las nuevas geometrias son validas dentro de una misma planta
+flowchart TD
+
+  S(["INSERT/UPDATE/DELETE<br> en<br> cell_space"]):::input --> F["Busca conflictos entre geometrias de la misma planta"]:::process
+  F --> G{"Tipo de intersección"}:::decision
+  G -- "0D (punto)" --> OK1["Permitido"]:::ok
+  G -- "1D (borde)" --> OK2["Permitido"]:::ok
+  G -- "2D (área)"  --> KO["Prohibido: lanza excepción"]:::error
+
+  %% ===== Estilos =====
+  classDef input   fill:#E3F2FD,stroke:#1E88E5,color:#0D47A1,stroke-width:1px;
+  classDef process fill:#E8EAF6,stroke:#3949AB,color:#1A237E,stroke-width:1px;
+  classDef decision fill:#FFF3E0,stroke:#FB8C00,color:#E65100,stroke-width:1px;
+  classDef ok      fill:#E8F5E9,stroke:#43A047,color:#1B5E20,stroke-width:1px;
+  classDef error   fill:#FFEBEE,stroke:#E53935,color:#B71C1C,stroke-width:1px;
