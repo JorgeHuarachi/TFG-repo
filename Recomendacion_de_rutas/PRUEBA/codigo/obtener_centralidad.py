@@ -11,6 +11,11 @@ from matplotlib.lines import Line2D
 # YO LO ENTIENDO COMO ALGO ASI COMO LA ROBUSTEZ ESTRUCTURAL DE LA RED EN CASO DE DEJAR DE TENER ARISTAS DISPONIBLES
 # PARA MI SERIA COMO UNA CENTRALIDAD DE NODOS BASADO EN CAMINOS MINIMOS RESTRINGIDOS POR EL TIEMPO
 
+INTERVAL_MS = 80           # ms por frame en antalla
+SAVE_GIF = True
+OUT_GIF  = "cetralidad_obtencion.gif"
+
+
 def Agrupacion(camino):
     """Agrupa en conjuntos de tamaño 2 una lista de tamaño mayor a 2, esto se
     hace porque necesito tenermo en ese formati y no como una sola lista.
@@ -454,7 +459,17 @@ def Caminos_diferentes(G_costes,G_seguridades,posiciones,destinos,f_tolerancia,f
         G_frame, camino,aristas_quitadas, title, coste, origen, destino, coste_max = caminos_animacion[frame]
         Visualizar(G_frame, posiciones, camino,aristas_quitadas, ax, title, coste,  origen, destino,coste_max)
     
-    ani = FuncAnimation(fig, update, frames=len(caminos_animacion), interval=3000, repeat=True)
+    ani = FuncAnimation(fig, update, frames=len(caminos_animacion), interval=INTERVAL_MS, repeat=True)
+    
+    if SAVE_GIF:
+        try:
+            fps = max(1, int(round(1000.0 / INTERVAL_MS)))
+            ani.save(OUT_GIF, writer="pillow", fps=fps)
+            print(f"[OK] Guardado GIF: {OUT_GIF} (fps={fps})")
+        except Exception as e:
+            print(f"[AVISO] No se pudo guardar GIF: {e}")
+            
+            
     plt.show()
     
     return centralidad_evacuacion_diferentes, centralidad_evacuacion2_diferentes
