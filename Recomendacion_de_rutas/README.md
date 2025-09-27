@@ -1,1 +1,1 @@
-![Evacuación inteligente](centralidad_obtencion.gif)
+![Evacuación inteligente](cetralidad_obtencion.gif)
