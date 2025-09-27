@@ -526,7 +526,7 @@ centralidades, centralidades2 = Caminos_diferentes(
 # plt.show()
 
 ##################################################################################################################################
-# A PARTIR DE AQUI PASO A PENSAR CON ESTOS VALORES DE CENTRALIDAD COMO PONDERO ALOS NODOS
+# A PARTIR DE AQUI PASO A PENSAR CON ESTOS VALORES DE CENTRALIDAD PASO FINAL, BUSQUEDA DE CAMINO CON MAYOR SUMA DE CENTRALIDADES 1, SI HAY VARIOS DE MAYOR CENTRALIDAD 2
 
 """ G_post = nx.from_numpy_array(matriz_costes)
 

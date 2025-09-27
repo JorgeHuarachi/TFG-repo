@@ -1,0 +1,23 @@
+flowchart LR
+  %% F-4.1 · Carril real
+  classDef done fill:#E8F7EE,stroke:#10B981,color:#065F46;
+  classDef planned fill:#FFF7E6,stroke:#F59E0B,color:#7C2D12;
+
+  subgraph Leyenda
+    LOK("✔ Implementado ..")
+    LPL("🔧 Planificado / preparado ..")
+  end
+  LOK --- LPL
+
+  LRW("🔧 LoRaWAN ..")
+  TTN("🔧 TTN (The Things Network) ..")
+  WH("🔧 Webhook HTTP(S) ..")
+  MW("🔧 Middleware (Flask) ..")
+  DB("✔ DB/CEP (PostGIS + triggers) ..")
+  RT("✔ Rutas (Dijkstra / A*) ..")
+  CL("🔧 Clientes ..")
+
+  LRW --> TTN --> WH --> MW --> DB --> RT --> CL
+
+  class LRW,TTN,WH,MW,CL planned
+  class DB,RT done

@@ -121,7 +121,7 @@ Esto te da topologías robustas y consultas rápidas; si más adelante quieres 3
 ---
 
 ### 2) Reglas topológicas (invariantes “de oro”)
-
+v
 Estas reglas mantienen tu modelo limpio y hacen triviales las consultas:
 
 1. **Walls vs Spaces**
@@ -150,47 +150,7 @@ Estas reglas mantienen tu modelo limpio y hacen triviales las consultas:
    * En cada planta, son un `space` especial de tipo circulación (así los tratas igual que un pasillo).
    * La **conexión vertical** se modela como **aristas** entre la instancia del elemento en planta `n` y su contraparte en planta `n±1`.
 
----
 
-### 3) Esquema de datos (DDL mínimo)
-
-```sql
--- Salas / espacios
-CREATE TABLE spaces (
-  id        serial PRIMARY KEY,
-  floor_id  int NOT NULL,
-  name      text,
-  kind      text DEFAULT 'room',          -- 'room','corridor','stair','ramp','lobby', etc.
-  z_base_m  numeric,                      -- cota suelo
-  z_top_m   numeric,                      -- altura libre
-  geom      geometry(Polygon, 25830) NOT NULL
-);
-CREATE INDEX spaces_gix ON spaces USING GIST (geom);
-
--- Muros con espesor (un muro puede ser MultiPolygon si te viene mejor)
-CREATE TABLE walls (
-  id        serial PRIMARY KEY,
-  floor_id  int NOT NULL,
-  geom      geometry(MultiPolygon, 25830) NOT NULL
-);
-CREATE INDEX walls_gix ON walls USING GIST (geom);
-
--- Huecos: puertas y ventanas (mismo tipo geométrico, distinto uso)
-CREATE TABLE openings (
-  id        serial PRIMARY KEY,
-  floor_id  int NOT NULL,
-  kind      text NOT NULL CHECK (kind IN ('door','window')),
-  sill_m    numeric,     -- altura alféizar (ventana) o umbral (puerta)
-  head_m    numeric,     -- dintel
-  width_m   numeric,     -- opcional
-  geom      geometry(Polygon, 25830) NOT NULL
-);
-CREATE INDEX openings_gix ON openings USING GIST (geom);
-```
-
-> Puedes mantener `stairs/ramps` en `spaces.kind` o en tablas separadas. Mantenerlos como `spaces` simplifica mucho.
-
----
 
 ### 4) Ventanas: cómo integrarlas
 
@@ -201,110 +161,7 @@ CREATE INDEX openings_gix ON openings USING GIST (geom);
   * Ventanas a **exterior**: el opening no toca un segundo `space` → el “otro lado” es `exterior`.
   * Ventanas **interiores**: el opening toca dos `spaces` (adyacencia visual/sonora entre ellos).
 
-Consultas típicas:
 
-```sql
--- Ventanas de una sala
-SELECT o.*
-FROM openings o
-JOIN spaces s ON s.floor_id=o.floor_id
-WHERE o.kind='window' AND ST_Touches(o.geom, s.geom) AND s.id=:room_id;
-
--- ¿Esa ventana da a exterior o a otra sala?
-WITH hits AS (
-  SELECT o.id AS win_id, s.id AS room_id
-  FROM openings o JOIN spaces s
-    ON o.kind='window' AND s.floor_id=o.floor_id AND ST_Touches(o.geom, s.geom)
-)
-SELECT win_id,
-       CASE WHEN COUNT(*)=1 THEN 'exterior'
-            WHEN COUNT(*)=2 THEN 'interior'
-       END AS target
-FROM hits
-GROUP BY win_id;
-```
-
----
-
-### 5) Puertas y conectividad horizontal (misma planta)
-
-Derivamos pares de salas conectadas por **puertas** (sin solapes, solo contacto de bordes):
-
-```sql
--- 1) Comprobar: cada opening está cubierto por exactamente un muro
-WITH cover AS (
-  SELECT o.id
-  FROM openings o JOIN walls w
-    ON o.floor_id=w.floor_id AND ST_CoveredBy(o.geom, w.geom)
-  GROUP BY o.id
-  HAVING COUNT(*)=1
-)
--- 2) Contacto opening–space (longitud de borde compartido)
-, touch AS (
-  SELECT o.id AS opening_id, o.kind, s.id AS space_id,
-         ST_Length(ST_Intersection(ST_Boundary(o.geom), ST_Boundary(s.geom))) AS contact_len
-  FROM openings o
-  JOIN spaces  s ON s.floor_id=o.floor_id
-  WHERE ST_Touches(o.geom, s.geom)
-)
--- 3) Conectividad por puertas: exactamente dos espacios con contacto suficiente
-CREATE MATERIALIZED VIEW space_connectivity AS
-SELECT t1.opening_id AS door_id,
-       LEAST(t1.space_id, t2.space_id)  AS space_a,
-       GREATEST(t1.space_id, t2.space_id) AS space_b
-FROM touch t1
-JOIN touch t2 ON t1.opening_id=t2.opening_id AND t1.space_id<t2.space_id
-JOIN openings o ON o.id=t1.opening_id AND o.kind='door'
-JOIN cover    c ON c.id=o.id
-WHERE t1.contact_len>0.02 AND t2.contact_len>0.02;  -- >2 cm (ajusta tolerancia)
-```
-
----
-
-### 6) Escaleras y rampas (conexión vertical)
-
-#### En el plano (2D)
-
-* Modela **escaleras** y **rampas** como `spaces.kind IN ('stair','ramp')` en **cada planta**.
-* Las conexiones **entre plantas** se representan en una tabla de **aristas verticales**:
-
-```sql
-CREATE TABLE vertical_edges (
-  id serial PRIMARY KEY,
-  kind text NOT NULL CHECK (kind IN ('stair','ramp','elevator')),
-  from_space_id int NOT NULL,  -- space de planta N (p.ej. ojo de escalera / rellano)
-  to_space_id   int NOT NULL,  -- space de planta N±1
-  rise_m        numeric,       -- subida (Δz)
-  run_m         numeric,       -- desarrollo horizontal (rampa)
-  cost_s        numeric        -- coste de paso (tiempo) para enrutar
-);
-```
-
-**Cómo poblarla automáticamente:**
-
-* Para cada `stair/ramp` en planta N y su homóloga en N±1, enlázalas si sus **proyecciones se solapan** (misma “caja” en planta) y las cotas casan (`z_top_m` con `z_base_m` del nivel superior).
-* El `cost_s` puedes calcularlo con una función:
-
-  * escalera: `cost = t_espera + (n_peldaños * tiempo_por_peldaño)`.
-  * rampa: `cost = run_m / velocidad_media` y además calcula **pendiente** `slope = rise_m / run_m`.
-
-Ejemplo de extracción (muy simplificada):
-
-```sql
--- Encontrar solapes verticales entre espacios 'stair' de plantas consecutivas
-WITH stairs AS (
-  SELECT id, floor_id, geom, z_base_m, z_top_m
-  FROM spaces WHERE kind='stair'
-)
-INSERT INTO vertical_edges (kind, from_space_id, to_space_id, rise_m, cost_s)
-SELECT 'stair', a.id, b.id, (b.z_base_m - a.z_base_m) AS rise_m,
-       GREATEST(0.0, (b.z_base_m - a.z_base_m)) * 1.2  -- 1.2 s por peldaño ~ 0.17 m
-FROM stairs a
-JOIN stairs b
-  ON b.floor_id = a.floor_id + 1
- AND ST_Intersects(a.geom, b.geom)
-WHERE b.z_base_m > a.z_base_m;
-```
 
 ### Enrutamiento (multiplanta)
 
@@ -345,6 +202,3 @@ Si quieres “elevar” tu 2D:
 * **Ventanas** ⇒ adyacencia **visual/ventilación** (a otra sala o exterior).
 * **Escaleras/Rampas** ⇒ trátalas como `spaces` de circulación y crea **aristas verticales** entre plantas; con **pgRouting** resuelves rutas multiplanta.
 
-Si quieres, te dejo un **script completo** con las vistas materializadas, triggers de validación (para que no se inserte una puerta fuera de un muro) y un ejemplo mínimo con 2 plantas, una escalera y una rampa.
-
----

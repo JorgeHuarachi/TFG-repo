@@ -22,10 +22,10 @@ from matplotlib import colormaps as cmaps  # <- evita deprecación get_cmap()
 
 # ------------------- CONFIG -------------------
 
-DSN = dict(host="localhost", dbname="SIMULAR", user="postgres", password="DB032122", port=5432)
+DSN = dict(host="localhost", dbname="SIMULACION", user="postgres", password="DB032122", port=5432)
 
 DUAL_ID    = "DU-01"
-LEVEL      = "P01"
+LEVEL      = "P00"
 START_NODE = "ND-020"
 GOAL_NODE  = "ND-019"
 

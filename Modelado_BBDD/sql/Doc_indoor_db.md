@@ -1,6 +1,7 @@
 # Documantación sobre la base de datos ``indoor_evac_monitoring_db``
 ---
 *``COSAS PENDIENTES``*
+- ESTO HACERLO DIRECTAMENTE NE WORD, SEGUIR LA ESTRUCTURA? O HACER ESTA.
 - Alinear el modeloado al estandar de OGC IndoorGML **(Ended)**.
 - pasar todo a ingles **(InPriçocess)**.
 - imcluir imagenes de figuras **(TBD)**. 

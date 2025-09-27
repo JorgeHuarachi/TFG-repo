@@ -17,13 +17,13 @@ from sim_scores import build_score_fn  # <-- API estable
 # --------------------- Config BD ---------------------
 DB_CFG = dict(
     host="localhost",
-    dbname="SIMULAR",      # <--- cámbialo si procede
+    dbname="simulacion",      # <--- cámbialo si procede
     user="postgres",
     password="DB032122"
 )
 
 DUAL_ID = "DU-01"
-LEVEL   = "P01"           # o None para todos los niveles
+LEVEL   = "P00"           # o None para todos los niveles
 UNDIRECTED = True
 
 # (Opcional) movilidad
@@ -32,12 +32,13 @@ ALLOWED_LOCOMOTIONS   = ("WALK", "RAMP")
 TREAT_GENERAL_AS_WALK = False
 
 # Simulación/visualización
-SOURCE_NODE = "ND-020"        # si None, usa el primer nodo ordenado
-TAU = 0.60                # umbral de seguridad (0..1)
-DT  = 0.50                # segundos simulados por frame
-N_FRAMES = 400
-EMA_ALPHA = 0.30          # suavizado; None para desactivar
-SAVE_GIF = False
+SOURCE_NODE = "ND-009"      # si None, usa el primer nodo ordenado
+TAU = 0.60                  # umbral de seguridad (0..1)
+INTERVAL_MS = 80           # ms por frame en antalla
+DT  = 0.50                  # segundos simulados por frame
+N_FRAMES = 200
+EMA_ALPHA = 0.30            # suavizado; None para desactivar
+SAVE_GIF = True
 OUT_GIF  = "route_dynamics.gif"
 
 # (Opcional) salidas manuales (si la BD no las tiene marcadas)
@@ -179,35 +180,91 @@ def main():
         emergency_nodes = {source}
 
     # -------------- Escenario de scores dinámicos --------------
-    # Edita aquí: por cada nodo, lista de ventanas (ramp/triangle/hold)
-    # ("ramp", t0, dur, v_from, v_to) — baja/sube lineal
-    # ("triangle", t0, dur, v_min, v_max) — baja y sube simétrico
-    # ("hold", t0, dur, v) — valor constante un intervalo
     SCENARIO = {
-    # ND-011: baja primero (temprano)
-    # 10..35 s: 1.0 -> 0.50 (rampa descendente)
-    "ND-011": [
-        ("ramp", 10.0, 25.0, 1.00, 0.50)
-    ],
-
-    # ND-010: baja después de ND-011
-    # 40..60 s: 1.0 -> 0.40 (rampa descendente)
-    "ND-010": [
-        ("ramp", 40.0, 20.0, 1.00, 0.40)
-    ],
-    # ND-018: baja y luego sube
-    # Arranca DESPUÉS de que ND-010 termina (ND-010 acaba en t=60 s); añadimos margen de 5 s.
-    # 65..80 s: 1.0 -> 0.50 (rampa descendente)
-    # 85..100 s: 0.50 -> 1.0 (rampa ascendente)
-    "ND-018": [
-        ("ramp", 65.0, 15.0, 1.00, 0.50),
-        ("ramp", 85.0, 15.0, 0.50, 1.00)
-        # Si quieres dejar explícito que se mantiene arriba, podrías añadir:
-        # ("hold", 100.0, 999.0, 1.0)  # ya fuera de horizonte, sólo documental
-    ],
+    "ND-001": [("triangle", 16.38, 23.78, 0.78, 1.00)],
+    "ND-002": [("triangle", 16.10, 16.88, 0.84, 1.00)],
+    "ND-003": [("triangle", 18.05, 30.72, 0.41, 1.00)],
+    "ND-004": [("triangle", 14.02, 22.42, 0.81, 1.00)],
+    "ND-005": [("triangle", 18.05, 31.46, 0.57, 1.00)],
+    "ND-006": [("triangle", 12.33, 24.16, 0.38, 1.00)],
+    "ND-007": [("triangle", 22.87, 27.63, 0.73, 1.00)],
+    "ND-008": [("triangle", 16.24, 31.83, 0.80, 1.00)],
+    "ND-009": [("triangle", 23.96, 18.89, 0.58, 1.00)],
+    "ND-010": [("triangle", 13.15, 18.09, 0.69, 1.00)],
+    "ND-011": [("triangle", 25.30, 34.35, 0.51, 1.00)],
+    "ND-012": [("triangle", 20.25, 24.39, 0.44, 1.00)],
+    "ND-013": [("triangle", 17.34, 24.51, 0.46, 1.00)],
+    "ND-014": [("triangle", 26.91, 23.74, 0.77, 1.00)],
+    "ND-015": [("triangle", 28.34, 21.25, 0.77, 1.00)],
+    "ND-016": [("triangle", 29.63, 20.14, 0.48, 1.00)],
+    "ND-017": [("triangle", 22.54, 24.46, 0.84, 1.00)],
+    "ND-018": [("triangle", 31.29, 20.42, 0.64, 1.00)],
+    "ND-019": [("triangle", 28.24, 31.87, 0.81, 1.00)],
+    "ND-020": [("triangle", 32.66, 24.27, 0.80, 1.00)],
+    "ND-021": [("triangle", 34.91, 18.91, 0.57, 1.00)],
+    "ND-022": [("triangle", 38.66, 23.13, 0.73, 1.00)],
+    "ND-023": [("triangle", 36.82, 34.09, 0.50, 1.00)],
+    "ND-024": [("triangle", 41.21, 18.13, 0.53, 1.00)],
+    "ND-025": [("triangle", 39.32, 16.33, 0.57, 1.00)],
+    "ND-026": [("triangle", 39.90, 21.26, 0.65, 1.00)],
+    "ND-027": [("triangle", 44.33, 21.68, 0.49, 1.00)],
+    "ND-028": [("triangle", 39.98, 27.63, 0.47, 1.00)],
+    "ND-029": [("triangle", 42.87, 24.39, 0.79, 1.00)],
+    "ND-030": [("triangle", 44.53, 27.31, 0.84, 1.00)],
+    "ND-031": [("triangle", 43.29, 34.51, 0.62, 1.00)],
+    "ND-032": [("triangle", 49.28, 28.06, 0.48, 1.00)],
+    "ND-033": [("triangle", 48.23, 31.36, 0.44, 1.00)],
+    "ND-034": [("triangle", 51.16, 21.28, 0.71, 1.00)],
+    "ND-035": [("triangle", 49.97, 26.74, 0.64, 1.00)],
+    "ND-036": [("triangle", 51.42, 20.76, 0.79, 1.00)],
+    "ND-037": [("triangle", 50.34, 23.61, 0.54, 1.00)],
+    "ND-038": [("triangle", 55.23, 30.53, 0.63, 1.00)],
+    "ND-039": [("triangle", 58.14, 15.64, 0.67, 1.00)],
+    "ND-040": [("triangle", 58.66, 27.92, 0.80, 1.00)],
+    "ND-041": [("triangle", 55.20, 18.71, 0.49, 1.00)],
+    "ND-042": [("triangle", 60.61, 22.67, 0.39, 1.00)],
+    "ND-043": [("triangle", 56.85, 29.24, 0.76, 1.00)],
+    "ND-044": [("triangle", 62.11, 22.99, 0.58, 1.00)],
+    "ND-045": [("triangle", 61.85, 23.67, 0.52, 1.00)],
+    "ND-046": [("triangle", 62.43, 20.12, 0.63, 1.00)],
+    "ND-047": [("triangle", 67.96, 28.28, 0.54, 1.00)],
+    "ND-048": [("triangle", 62.35, 23.67, 0.40, 1.00)],
+    "ND-049": [("triangle", 68.32, 27.75, 0.70, 1.00)],
+    "ND-050": [("triangle", 66.49, 25.34, 0.61, 1.00)],
+    "ND-051": [("triangle", 66.35, 22.52, 0.69, 1.00)],
+    "ND-052": [("triangle", 67.33, 23.91, 0.79, 1.00)],
+    "ND-053": [("triangle", 66.23, 25.65, 0.78, 1.00)],
+    "ND-054": [("triangle", 70.83, 17.68, 0.39, 1.00)],
+    "ND-055": [("triangle", 72.06, 34.57, 0.47, 1.00)],
+    "ND-056": [("triangle", 70.90, 19.75, 0.48, 1.00)],
+    "ND-057": [("triangle", 72.26, 25.31, 0.67, 1.00)],
+    "ND-058": [("triangle", 71.50, 23.31, 0.72, 1.00)],
+    "ND-059": [("triangle", 75.64, 18.45, 0.39, 1.00)],
+    "ND-060": [("triangle", 74.32, 22.93, 0.59, 1.00)],
+    "ND-061": [("triangle", 74.68, 30.83, 0.48, 1.00)],
+    "ND-062": [("triangle", 74.84, 29.40, 0.83, 1.00)],
+    "ND-063": [("triangle", 78.21, 23.22, 0.52, 1.00)],
+    "ND-064": [("triangle", 77.36, 19.26, 0.68, 1.00)],
+    "ND-065": [("triangle", 77.43, 23.83, 0.47, 1.00)],
+    "ND-066": [("triangle", 80.95, 28.19, 0.83, 1.00)],
+    "ND-067": [("triangle", 78.49, 26.87, 0.80, 1.00)],
+    "ND-068": [("triangle", 83.35, 19.46, 0.71, 1.00)],
+    "ND-069": [("triangle", 68.03, 19.59, 0.42, 1.00)],
+    "ND-070": [("triangle", 79.58, 17.44, 0.60, 1.00)],
+    "ND-071": [("triangle", 80.79, 26.62, 0.45, 1.00)],
+    "ND-072": [("triangle", 83.48, 29.31, 0.72, 1.00)],
+    "ND-073": [("triangle", 73.65, 17.48, 0.81, 1.00)],
+    "ND-074": [("triangle", 78.86, 21.02, 0.59, 1.00)],
+    "ND-075": [("triangle", 84.04, 31.29, 0.49, 1.00)],
+    "ND-076": [("triangle", 89.17, 15.50, 0.63, 1.00)],
+    "ND-077": [("triangle", 85.45, 17.12, 0.42, 1.00)],
+    "ND-078": [("triangle", 82.95, 33.41, 0.65, 1.00)],
+    "ND-079": [("triangle", 92.00, 15.68, 0.58, 1.00)],
+    "ND-080": [("triangle", 90.68, 15.36, 0.40, 1.00)],
+    "ND-081": [("triangle", 92.00, 15.68, 0.47, 1.00)],
+    "ND-082": [("triangle", 88.49, 22.56, 0.78, 1.00)],
 }
  
-
     # Construye la función de scores (vector) y el reset (todo a 1.0)
     score_fn, reset_scores = build_score_fn(
         node_ids=node_ids,
@@ -313,14 +370,14 @@ def main():
 
     anim = FuncAnimation(
         fig, animate, init_func=init, frames=N_FRAMES,
-        interval=80, blit=False, repeat=False
+        interval=INTERVAL_MS, blit=False, repeat=False
     )
 
     if SAVE_GIF:
         try:
-            fps = max(1, int(round(1.0 / max(DT, 0.1))))
+            fps = max(1, int(round(1000.0 / INTERVAL_MS)))
             anim.save(OUT_GIF, writer="pillow", fps=fps)
-            print(f"[OK] Guardado GIF: {OUT_GIF}")
+            print(f"[OK] Guardado GIF: {OUT_GIF} (fps={fps})")
         except Exception as e:
             print(f"[AVISO] No se pudo guardar GIF: {e}")
 

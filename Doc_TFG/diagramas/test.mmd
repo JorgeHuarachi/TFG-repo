@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+
+  participant SIM as "Simulador de scores .."
+  participant DB as "DB/CEP (PostGIS + triggers) .."
+  participant RT as "Motor de rutas (Dijkstra / A*) .."
+  participant CL as "Cliente .."
+
+  SIM->>DB: "Upsert de score por celda .."
+  DB-->>SIM: "ACK / triggers de actualización .."
+  DB-->>RT: "Evento CEP: celda actualizada .."
+  RT->>DB: "Leer IndoorGML + estados .."
+  RT-->>CL: "Publicar ruta óptima + métricas .."
+
+  alt "Cambio significativo de score .."
+    RT->>CL: "Notificar replanificación de ruta .."
+  else "Sin cambios relevantes .."
+    RT-->>CL: "Mantener ruta vigente .."
+  end
+
+  opt "Simulaciones por lotes / estrés .."
+    SIM->>DB: "Inyectar serie de scores sintéticos .."
+    RT->>DB: "Recalcular periódicamente (ventana) .."
+    RT-->>CL: "Emitir actualizaciones incrementales .."
+  end
+
+  Note over SIM,CL: "Trazabilidad y privacidad mínima: guardar JSON crudo y sólo IDs .."

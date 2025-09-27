@@ -23,7 +23,7 @@ CREATE SCHEMA IF NOT EXISTS indoorgml_navigation; --HECHO CON EXITO
 CREATE TYPE indoorgml_core.theme_layer_value AS ENUM ('PHYSICAL','VIRTUAL','TAGS','UNKNOWN');
 
 CREATE TYPE indoorgml_navigation.nav_space_kind AS ENUM ('GENERAL','TRANSFER');--*CAMBIAR NOMBRE SNO ME GUSATN***********nav_space_kind
-CREATE TYPE indoorgml_navigation.locomotion_access_type AS ENUM ('WALK','STAIRS','ELEVATOR','ESCALATOR','RAMP','OTHER'); --locomotion_access_type locomotion_access_type
+CREATE TYPE indoorgml_navigation.locomotion_access_type AS ENUM ('WALK','STAIRS','ELEVATOR','ESCALATOR','RAMP','JUMP','OTHER'); --locomotion_access_type locomotion_access_type
 --------------------------------------------------------
 ----------------------02 TABLES------------------------
 --------------------------------------------------------
@@ -67,7 +67,7 @@ CREATE TABLE indoorgml_core.dual_space_layer (
 
 CREATE TABLE indoorgml_core.cell_space(
     id_cell_space           VARCHAR(20) PRIMARY KEY,        -- p.ej. CS-001, CS-002, ...
-    name                    TEXT NOT NULL,                  -- p.ej. SPACE-001, SPACE-002, ... ¡!****CAMBIO DE NOMBRE, DEJAR SEMANTICA PARA MODULO NAVEGACAION****
+    name                    TEXT NOT NULL,                  -- p.ej. P01-SPACE-OO1, ...
     external_reference      TEXT,                           -- De momento creacion propia  
     level                   TEXT,                           -- p.ej. P00, P01, ... 
     poi                     BOOLEAN NOT NULL DEFAULT FALSE, -- (Salida de emergencia)
@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS indoorgml_navigation.nav_space_function (
 
 -- Semillas: GENERAL
 INSERT INTO indoorgml_navigation.nav_space_function(code,label,kind,default_locomotion) VALUES
+('SPACE','Space','GENERAL','WALK'),
 ('ADMIN','Administration','GENERAL','WALK'),
 ('STORAGE','Storage','GENERAL','WALK'),
 ('OFFICE','Office','GENERAL','WALK'),
@@ -161,14 +162,16 @@ INSERT INTO indoorgml_navigation.nav_space_function(code,label,kind,default_loco
 ('ESCALATOR','Escalator','TRANSFER','ESCALATOR'),
 ('RAMP','Ramp','TRANSFER','RAMP'),
 ('LOBBY','Transfer Lobby','TRANSFER','WALK'),
-('DOOR','Door','TRANSFER','WALK')
+('DOOR','Door','TRANSFER','WALK'),
+('WINDOW','Window','TRANSFER','JUMP')
+
 ON CONFLICT (code) DO NOTHING;
 
 -- NAVIGABLE SPACE --
 CREATE TABLE IF NOT EXISTS indoorgml_navigation.navigable_space (
   id_cell_space      VARCHAR(20) PRIMARY KEY REFERENCES indoorgml_core.cell_space(id_cell_space) ON DELETE CASCADE,
   kind               indoorgml_navigation.nav_space_kind NOT NULL DEFAULT 'GENERAL',
-  function_code      VARCHAR(40) REFERENCES indoorgml_navigation.nav_space_function(code),
+  function_code      VARCHAR(40) REFERENCES indoorgml_navigation.nav_space_function(code), -- LO PUEDO MODIFICAR EN QGIS
   locomotion         indoorgml_navigation.locomotion_access_type,
   category           TEXT,
   is_emergency_exit  BOOLEAN NOT NULL DEFAULT FALSE,
