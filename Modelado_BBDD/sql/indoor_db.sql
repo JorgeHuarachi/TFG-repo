@@ -1,7 +1,7 @@
 
 -------------- Creación de la base de datos si no esta creada --------------
 
---CREATE DATABASE IF NOT EXISTS evac_db;
+-- CREATE DATABASE IF NOT EXISTS indoor_db;
 
 -------------- Extensiones necesarias para trabajar con geometrías --------------
 

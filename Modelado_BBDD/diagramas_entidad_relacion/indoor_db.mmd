@@ -1,0 +1,67 @@
+erDiagram
+
+%% --- BLOQUE 1: IndoorGML espacios y caracteristicas ---
+
+  nav_navigablespace        ||--|| CellSpace : "subclass of"
+  cellBoundary              o{--|| CellSpace : "Delimited by"
+  node                      ||--|| CellSpace  : "Duality"
+  nav_nonnavigableboundary  ||--|| cellBoundary : "subclass of"
+  nav_navigableboundary     ||--|| cellBoundary : "subclass of"
+  edge                      o{--o{ cellBoundary : "Duality"
+  nav_transferspace         ||--|| nav_navigablespace : "subclass of"
+  nav_generalspace          ||--|| nav_navigablespace : "subclass of"
+  edge                      ||--o{ node : "Connects"
+
+  CellSpace {
+    varchar   id_cell_space PK
+    text      name
+    text      external_reference 
+    boolean   poi
+    varchar   id_primal_space_layer FK
+    geometry  geom
+  }
+  cellBoundary {
+    varchar   id_cell_boundary PK
+    text      external_reference 
+    boolean   is_virtual
+    varchar   id_primal_space_layer FK
+    geometry  geom
+  }
+  node {
+    varchar   id_node PK
+    varchar   id_dual_space_layer FK
+    varchar   id_cell_space FK
+    geometry  geom
+  }
+  edge {
+    varchar   id_edge PK
+    double    weight FK
+    varchar   from_node FK
+    varchar   to_node FK
+    varchar   id_dual_space_layer FK
+    geometry  geom
+  }
+
+
+  nav_generalspace {
+    uuid cell_id PK
+    text function
+  }
+  nav_navigableboundary {
+    uuid boundary_id PK
+    bool boundary_orientation
+    text function
+  }
+  nav_navigablespace {
+    uuid cell_id PK
+    text locomotion_type
+  }
+  nav_nonnavigableboundary {
+    uuid boundary_id PK
+  }
+  nav_transferspace {
+    uuid cell_id PK
+    text function
+    text category
+  }
+

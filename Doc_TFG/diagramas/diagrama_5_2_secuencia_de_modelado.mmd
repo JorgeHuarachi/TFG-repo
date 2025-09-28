@@ -1,0 +1,27 @@
+%%{init: { 'theme': 'default', 'config': { 'fit': true } }}%%
+
+flowchart LR
+  %% === Proceso principal ===
+  subgraph P["Proceso de modelado de base de datos **Indoor_db*"]
+    R["Requisitos"] --> C["Modelo conceptual"]
+    C --> L["Modelo lógico<br/>(mapeo relacional)"]
+    L --> F["Modelo físico<br/>(PostgreSQL/PostGIS)"]
+    F --> A["Automatización<br/>(funciones & triggers)"]
+  end
+
+  %% === Estándar (alineación transversal) ===
+  %%S["IndoorGML 2.0"] -. alineación .-> C
+  S["IndoorGML 2.0"] -. alineación .-> L
+
+  %% === Salidas operativas ===
+  A --> O1["Grafo navegable"]
+  A --> O2["Consistencia de datos"]
+
+  %% === Estilos ===
+  class R,C,L,F,A phase;
+  class S standard;
+  class O1,O2 output;
+
+  classDef phase fill:#1f77b4,stroke:#0E4F7A,color:#ffffff,stroke-width:2px;
+  classDef standard fill:#9467bd,stroke:#5E3B8C,color:#ffffff,stroke-width:2px;
+  classDef output fill:#ff7f0e,stroke:#A35200,color:#ffffff,stroke-width:2px;

@@ -1,0 +1,24 @@
+%%{init: { 'theme': 'default', 'config': { 'fit': true } }}%%
+
+flowchart LR
+  %% Bloques principales
+  CS[CellSpace<br/>Primal] --> V1[Validación<br/>geom/topo]
+  V1 --> CB[CellBoundary<br/>Primal]
+  CB --> AUTO[Automatización<br/>functions & triggers]
+  AUTO --> DUAL[Dual: Node/Edge<br/>Grafo navegable]
+
+  %% Referencias/controles
+  note1{{"ST_IsValid<br/>ST_Relate (DE-9IM)<br/>filtro &&"}}
+  V1 --- note1
+  note2{{"SnapToGrid tol=0.001<br/>limpieza de huérfanos"}}
+  AUTO --- note2
+
+  %% Estilos
+  classDef primal fill:#1f77b4,stroke:#0E4F7A,color:#fff,stroke-width:2px;
+  classDef check fill:#2ca02c,stroke:#1A6E1A,color:#fff,stroke-width:2px;
+  classDef auto fill:#ff7f0e,stroke:#A35200,color:#fff,stroke-width:2px;
+  classDef dual fill:#9467bd,stroke:#5E3B8C,color:#fff,stroke-width:2px;
+  class CS,CB primal
+  class V1 check
+  class AUTO auto
+  class DUAL dual

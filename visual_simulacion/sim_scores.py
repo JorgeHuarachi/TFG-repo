@@ -43,7 +43,7 @@ def ema(prev: float, new: float, alpha: float) -> float:
     # alpha in (0,1]; más grande = responde más rápido (menos suave)
     return alpha * new + (1.0 - alpha) * prev
 
-# ---------- API principal ----------
+# ---------- principal ----------
 # Formatos admitidos por ventana (por nodo):
 #  - ("hold", t0, dur, v)
 #  - ("ramp", t0, dur, v_from, v_to)

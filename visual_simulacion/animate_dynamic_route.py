@@ -27,9 +27,9 @@ LEVEL   = "P00"           # o None para todos los niveles
 UNDIRECTED = True
 
 # (Opcional) movilidad
-APPLY_MOBILITY_FILTER = False
+APPLY_MOBILITY_FILTER = True
 ALLOWED_LOCOMOTIONS   = ("WALK", "RAMP")
-TREAT_GENERAL_AS_WALK = False
+TREAT_GENERAL_AS_WALK = True
 
 # Simulación/visualización
 SOURCE_NODE = "ND-009"      # si None, usa el primer nodo ordenado
@@ -38,7 +38,7 @@ INTERVAL_MS = 80           # ms por frame en antalla
 DT  = 0.50                  # segundos simulados por frame
 N_FRAMES = 200
 EMA_ALPHA = 0.30            # suavizado; None para desactivar
-SAVE_GIF = True
+SAVE_GIF = False
 OUT_GIF  = "route_dynamics.gif"
 
 # (Opcional) salidas manuales (si la BD no las tiene marcadas)

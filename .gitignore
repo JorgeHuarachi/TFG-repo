@@ -1,0 +1,14 @@
+# Archivos temporales
+*.log
+*.tmp
+
+# Configuración local
+.vscode/
+.env
+
+# Compilados / cachés
+__pycache__/
+*.pyc
+
+# Archivos especificos
+Doc_TFG/BORRAR*.md
