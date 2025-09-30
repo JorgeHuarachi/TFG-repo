@@ -1,0 +1,14 @@
+flowchart LR
+  classDef step fill:#e8f5e9,stroke:#1b5e20,stroke-width:1.4px,color:#1b5e20;
+  classDef io   fill:#e3f2fd,stroke:#0d47a1,stroke-width:1.4px,color:#0d47a1;
+  classDef warn fill:#fff3e0,stroke:#e65100,stroke-width:1.4px,color:#e65100;
+
+  A["Lecturas scores"]:::io --> B["Máscaras<br>movilidad + S_min"]:::step
+  B --> C["Grafo filtrado"]:::step
+  C --> D{"¿Existe Ruta a salida?"}
+  D -- Sí --> E["Ruta base\nDijkstra/A*"]:::step
+  D -- No --> W["Activar nodos <br>VENTANA/CONDUCTO<br>(último recurso)"]:::warn --> E
+  E --> F["Robustez R\n(edge deletion / k-paths)"]:::step
+  E --> G["Agilidad (centralidad\norientada a evacuación)"]:::step
+  F --> H["Salida JSON\npath,time,risk,R,agilidad,\nrazonamiento"]:::io
+  G --> H

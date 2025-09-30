@@ -1,0 +1,19 @@
+flowchart LR
+  A["Perfil seleccionado"]:::node --> B{"Filtro de movilidad<br/>(General,PMR,Op)"}:::gate
+  A --> C{Filtro de seguridad<br>}:::gate
+  B --> D["G_filtrado"]:::node
+  C --> D
+  D --> E["Calculo de ruta<br/>(Dijkstra/A*/Custom)"]:::core
+  E --> F{"¿Ruta aceptable?<br/>(tolerancia)"}:::gate
+  F -- Sí --> G["Ruta recomendada"]:::succ
+  F -- No --> H{Salida de emergencia<br>¿Es accesible?}:::warn
+  H --Sí --> E
+  H -- No --> I["Activar *último recurso*<br/>(ventana/conducto,otros)"]:::alt
+  I --> E
+
+  classDef node fill:#f5f7ff,stroke:#3b82f6,color:#111827,stroke-width:1.5px;
+  classDef gate fill:#fff7ed,stroke:#f59e0b,color:#111827,stroke-width:1.5px;
+  classDef core fill:#eefdf3,stroke:#22c55e,color:#111827,stroke-width:1.5px;
+  classDef succ fill:#dcfce7,stroke:#16a34a,color:#111827,stroke-width:1.5px;
+  classDef warn fill:#fffbeb,stroke:#f59e0b,color:#111827,stroke-width:1.5px;
+  classDef alt fill:#fef2f2,stroke:#ef4444,color:#111827,stroke-width:1.5px;

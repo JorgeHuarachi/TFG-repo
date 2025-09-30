@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph PRIMAL[PrimalSpaceLayer]
+    CS1([CellSpace A])
+    CS2([CellSpace B])
+    CB1{{CellBoundary AB}}
+  end
+  subgraph DUAL[DualSpaceLayer]
+    N1((State A))
+    N2((State B))
+    E1[[Transition AB]]
+  end
+  CS1 -- toca --> CB1
+  CS2 -- toca --> CB1
+  CS1 -. Poincaré .-> N1
+  CS2 -. Poincaré .-> N2
+  CB1 -. Poincaré .-> E1
+  classDef primal fill:#e8f1ff,stroke:#5b8def,stroke-width:1px;
+  classDef dual fill:#eefbea,stroke:#36a269,stroke-width:1px;
+  class PRIMAL primal
+  class DUAL dual

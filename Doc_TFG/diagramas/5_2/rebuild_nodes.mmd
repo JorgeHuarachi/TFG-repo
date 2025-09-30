@@ -1,0 +1,43 @@
+flowchart LR
+    CALL(["..rebuild_nodes_for_dual(dual, psl, z).."]) --> TCHK{"..Dual y Primal<br>mismo theme?.."}
+    TCHK -- "..No.." --> ERR(["..ERROR:<br>theme mismatch.."])
+    TCHK -- "..Sí.." --> ISLOG{"..Dual es lógica?.."}
+    ISLOG -- "..Sí.." --> L1["..por cada CellSpace de psl.."]
+    L1 --> L2["..id_node := node_id_from_cellspace(cs).."]
+    L2 --> L3["..geom := NULL.."]
+    L3 --> UPSERT_L["..UPSERT en node<br>(uq_node_dual_cell).."]
+    ISLOG -- "..No.." --> N1["..por cada CellSpace de psl.."]
+    N1 --> N2["..cen := ST_Centroid(cs).."]
+    N2 --> INSIDE{"..ST_Covers(cs, cen)?.."}
+    INSIDE -- "..Sí.." --> G1["..geom := ST_Force3D(cen, z).."]
+    G1 --> UPSERT_N["..UPSERT en node<br>(uq_node_dual_cell).."]
+    INSIDE -- "..No.." --> G2["..geom := ST_Force3D(PointOnSurface(cs), z).."]
+    G2 --> UPSERT_N
+    UPSERT_L --> ONEONE["..1:1 Node↔CellSpace<br>(índice único).."]
+    UPSERT_N --> ONEONE
+    ONEONE -.-> EDGE_TRG["..ct_rebuild_edges_after_node →<br>rebuild_edges_from_boundaries(..).."]
+
+     CALL:::start
+     TCHK:::decision
+     ERR:::cleanup
+     ISLOG:::decision
+     L1:::process
+     L2:::data
+     L3:::process
+     UPSERT_L:::process
+     N1:::process
+     N2:::process
+     INSIDE:::decision
+     G1:::process
+     G2:::process
+     UPSERT_N:::process
+     ONEONE:::data
+     EDGE_TRG:::note
+    classDef start fill:#777,stroke:#444,color:#fff,stroke-width:2px
+    classDef process fill:#ff7f0e,stroke:#A35200,color:#fff,stroke-width:2px
+    classDef data fill:#1f77b4,stroke:#0E4F7A,color:#fff,stroke-width:2px
+    classDef decision fill:#2ca02c,stroke:#1A6E1A,color:#fff,stroke-width:2px
+    classDef cleanup fill:#9467bd,stroke:#5E3B8C,color:#fff,stroke-width:2px
+    classDef note fill:#9c7bd9,stroke:#5E3B8C,color:#fff,stroke-width:1px
+
+

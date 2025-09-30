@@ -1,0 +1,14 @@
+flowchart LR
+    A["Grafo base G(V,E)\nIndoorGML Dual"]:::base --> B["Aplicar máscara de movilidad\nlocomotion permitida"]:::mov
+    B --> C["Aplicar máscara de seguridad\nscore >= S_min"]:::seg
+    C -->|¿Existe camino a EXIT?| D{Sí}:::ok
+    C -->|No| E["Ampliar objetivos con WINDOW/VENTANA\n(last_resort=true, risk=1.0)"]:::fallback
+    E -->|¿Existe camino ahora?| D
+    D --> F["Grafo filtrado G_f\ny conjunto de objetivos"]:::res
+
+    classDef base fill:#e8f1ff,stroke:#1e3a8a,stroke-width:2px;
+    classDef seg fill:#fde68a,stroke:#b45309,stroke-width:2px;
+    classDef mov fill:#d1fae5,stroke:#065f46,stroke-width:2px;
+    classDef ok fill:#bbf7d0,stroke:#15803d,stroke-width:2px;
+    classDef fallback fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,stroke-dasharray: 5 3;
+    classDef res fill:#f3e8ff,stroke:#6b21a8,stroke-width:2px;

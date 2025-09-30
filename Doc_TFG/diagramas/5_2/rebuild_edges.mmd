@@ -1,0 +1,52 @@
+flowchart TB
+  %% --- INICIO (triggers que llaman a la función) ---
+  T1(["..ct_rebuild_edges_after_cscb<br/>(cambian memberships).." ]):::start
+  T2(["..ct_rebuild_edges_after_node<br/>(cambian nodes).."]):::start
+  CALL(["..rebuild_edges_from_boundaries(dual).." ]):::start
+  T1 --> CALL
+  T2 --> CALL
+
+  %% --- ÁMBITO ---
+  SCOPE["..filtrar boundaries de la Dual afectada.."]:::data
+  CALL --> SCOPE
+
+  %% --- SELECCIÓN CANDIDATOS ---
+  CAND["..tomar solo boundaries con<br/>exactamente 2 celdas.."]:::process
+  SCOPE --> CAND
+
+  %% --- PARA CADA BOUNDARY ---
+  PULLN["..obtener Node A / Node B<br/>(por id_dual + id_cell_space).."]:::process
+  CAND --> PULLN
+
+  HAVEG{"..¿ambos Node existen?.."}:::decision
+  PULLN --> HAVEG
+  SKIP(["..omitir boundary.." ]):::cleanup
+  HAVEG -- "..No.." --> SKIP
+
+  ORDER["..ordenar par con<br/>LEAST/GREATEST.."]:::process
+  HAVEG -- "..Sí.." --> ORDER
+
+  GEOMW{"..¿geom de ambos Node?.."}:::decision
+  ORDER --> GEOMW
+  MGL["..geom := ST_MakeLine(A,B).."]:::process
+  WGT["..weight_m := ST_Distance(A,B).."]:::process
+  NOGEOM["..sin geometría/weight<br/>(Dual lógica o geom faltante).."]:::note
+
+  GEOMW -- "..Sí.." --> MGL --> WGT
+  GEOMW -- "..No.." --> NOGEOM
+
+  UPSERT["..UPSERT edge (por boundary y par no dirigido).."]:::process
+  MGL --> UPSERT
+  WGT --> UPSERT
+  NOGEOM --> UPSERT
+
+  END(["..fin.." ]):::start
+  UPSERT --> END
+
+  %% --- ESTILOS ---
+  classDef start fill:#777,stroke:#444,color:#fff,stroke-width:2px;
+  classDef process fill:#ff7f0e,stroke:#A35200,color:#fff,stroke-width:2px;
+  classDef data fill:#1f77b4,stroke:#0E4F7A,color:#fff,stroke-width:2px;
+  classDef decision fill:#2ca02c,stroke:#1A6E1A,color:#fff,stroke-width:2px;
+  classDef cleanup fill:#9467bd,stroke:#5E3B8C,color:#fff,stroke-width:2px;
+  classDef note fill:#9c7bd9,stroke:#5E3B8C,color:#fff,stroke-width:1px;
