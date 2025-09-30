@@ -14,6 +14,7 @@
 from __future__ import annotations # permite anotaciones de tipos como strings (futuras)
 from typing import Dict, List, Tuple, Callable, Optional
 import numpy as np # trabajamos con vectores/arrays numéricos
+import math
 
 ScoreArray = np.ndarray  # vector float32/float64 con orden de node_ids
 
@@ -185,6 +186,88 @@ def build_score_fn(
         return out  
     # Devolvemos la pareja (función de evaluación, función de reseteo)
     return score_at, reset
+
+# ---------------------------------------------------------------------
+# Generadores de escenarios (opcional): incendio radial y frente lineal
+# ---------------------------------------------------------------------
+
+def make_fire_scenario_radial(
+    node_ids,
+    positions,
+    center_node: str,
+    t0: float = 10.0,          # inicio del evento
+    spread_speed: float = 0.8, # s por metro (tiempo que tarda el frente en llegar)
+    dip: float = 0.5,          # score mínimo durante el impacto (0..1)
+    recover: float = 30.0      # duración total del "triangle" (baja y sube)
+) -> Dict[str, List[Window]]:
+    """
+    Incendio radial: para cada nodo calcula su distancia al centro, y
+    programa una ventana 'triangle' que baja de 1.0 a 'dip' y regresa a 1.0.
+    El inicio se retrasa según la distancia (t0 + dist * spread_speed).
+
+    Requisitos:
+      - 'positions' debe contener posiciones (x,y) para los nodos.
+      - Si un nodo no tiene posición, se ignora (quedará con DEFAULT_SCORE).
+
+    Retorna: scenario dict {node_id -> [("triangle", start, recover, dip, 1.0)]}
+    """
+    if center_node not in positions:
+        raise ValueError("center_node no está en 'positions'")
+
+    cx, cy = positions[center_node]
+    scenario: Dict[str, List[Window]] = {}
+    for nid in node_ids:
+        pos = positions.get(nid)
+        if not pos:
+            continue
+        x, y = pos
+        dist = math.hypot(x - cx, y - cy)
+        start = t0 + dist * spread_speed
+        scenario.setdefault(nid, []).append(("triangle", float(start), float(recover), float(dip), 1.0))
+    return scenario
+
+def make_linear_front_scenario(
+    node_ids,
+    positions,
+    p0_node: str,              # nodo que marca el origen de la línea
+    p1_node: str,              # nodo que marca la dirección de avance
+    t0: float = 10.0,          # comienzo
+    speed: float = 0.8,        # s por metro de avance proyectado
+    dip: float = 0.5,          # mínimo de score
+    recover: float = 25.0      # duración del triangle
+) -> Dict[str, List[Window]]:
+    """
+    Frente lineal: proyecta cada nodo sobre la recta p0->p1, y
+    programa un 'triangle' cuyo inicio es t0 + proyección*speed.
+    Nodos "detrás" de p0 reciben inicio ~ t0 (clamp a 0).
+
+    Retorna: scenario dict {node_id -> [("triangle", start, recover, dip, 1.0)]}
+    """
+    if p0_node not in positions or p1_node not in positions:
+        raise ValueError("p0_node/p1_node no están en 'positions'")
+
+    x0, y0 = positions[p0_node]
+    x1, y1 = positions[p1_node]
+    vx, vy = (x1 - x0), (y1 - y0)
+    denom = vx*vx + vy*vy
+    if denom <= 0:
+        raise ValueError("p0_node y p1_node no definen una dirección válida")
+
+    scenario: Dict[str, List[Window]] = {}
+    for nid in node_ids:
+        pos = positions.get(nid)
+        if not pos:
+            continue
+        x, y = pos
+        # proyección escalar del vector p0->nodo sobre p0->p1
+        px, py = (x - x0), (y - y0)
+        s = (px*vx + py*vy) / denom  # s<0: detrás de p0; s>1: más allá de p1
+        # solo permitimos avance hacia "delante"
+        s_clamped = max(0.0, s)
+        start = t0 + s_clamped * speed * math.sqrt(denom)  # escala con la longitud de p0->p1
+        scenario.setdefault(nid, []).append(("triangle", float(start), float(recover), float(dip), 1.0))
+    return scenario
+
 
 # ---------- Ejemplo rápido ----------
 # El bloque siguiente muestra cómo probar el módulo de forma aislada desde CLI:

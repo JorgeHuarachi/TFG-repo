@@ -12,6 +12,10 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib.animation import FuncAnimation
+from dataclasses import dataclass
+import math 
+import csv, time
+from networkx.algorithms.centrality import betweenness_centrality_subset
 
 from sim_scores import build_score_fn  # <-- API estable
 
@@ -39,11 +43,42 @@ INTERVAL_MS = 80                    # Milisegundos por frame en la animación (G
 DT  = 0.50                          # Segundos simulados por frame (t = frame * DT)
 N_FRAMES = 200                      # Número total de frames (duración de la sim)
 EMA_ALPHA = 0.30                    # Suavizado EMA de scores; None para desactivar
-SAVE_GIF = False                    # Guardar GIF al final (requiere pillow)
+SAVE_GIF = True                    # Guardar GIF al final (requiere pillow)
 OUT_GIF  = "route_dynamics.gif"     # Nombre de archivo GIF
 
 # (Opcional) salidas manuales (si la BD no las tiene marcadas)
 EMERGENCY_EXIT_NODE_IDS: Set[str] = set()  # e.g., {"ND-021","ND-030"}
+#-----------------------------------------
+BETA_RISK = 0.0  # 0.0 = sin penalización; p.ej. 0.3 para dar peso al riesgo
+#-----------------------------------------
+RECALC_CENTRALITY_ON_CHANGE = False   # True para habilitar
+SHOW_AGILITY_IN_TITLE = False         # True para mostrar suma de centralidad en el título
+#-----------------------------------------
+@dataclass
+class ProfileCfg:
+    name: str
+    tau: float
+    allowed_locomotions: tuple
+    treat_general_as_walk: bool
+
+PROFILES = {
+    "GENERAL": ProfileCfg("GENERAL", tau=0.60, allowed_locomotions=("WALK","RAMP"), treat_general_as_walk=True),
+    "PMR":     ProfileCfg("PMR",     tau=0.75, allowed_locomotions=("RAMP",),      treat_general_as_walk=False),
+}
+
+ACTIVE_PROFILE = PROFILES["GENERAL"]  # cambia a "PMR" cuando quiera un Perfil de Movilidad Reducida
+
+#-----------------------------------------
+@dataclass
+class AlgoCfg:
+    name: str                 # "dijkstra" | "astar" | "yen_ksp"
+    params: dict
+
+# Elige algoritmo aquí (por defecto no cambia nada):
+ALGORITHM = AlgoCfg(name="dijkstra", params={})
+# Ejemplos alternativos (cuando quieras cambiar):
+# ALGORITHM = AlgoCfg(name="astar", params={"heuristic": "euclidean"})
+# ALGORITHM = AlgoCfg(name="yen_ksp", params={"k": 3})
 
 # --------------------- Carga del grafo desde PostGIS ---------------------
 def fetch_graph_from_db(
@@ -171,9 +206,10 @@ def main():
         level=LEVEL,
         undirected=UNDIRECTED,
         apply_mobility=APPLY_MOBILITY_FILTER,
-        allowed_locomotions=ALLOWED_LOCOMOTIONS,
-        treat_general_as_walk=TREAT_GENERAL_AS_WALK
+        allowed_locomotions=ACTIVE_PROFILE.allowed_locomotions,
+        treat_general_as_walk=ACTIVE_PROFILE.treat_general_as_walk
     )
+
     conn.close()
     # -------------------- Unpack datos del grafo --------------------
     node_ids =  data["node_ids"]       # lista de ids de nodos (ordenado)
@@ -342,6 +378,43 @@ def main():
         path_line.set_data([], [])                   # limpio la línea de ruta
         title_text.set_text("t=0.0s | coste=–")      # título inicial
         return nodes_artist, path_line, title_text   # devuelve artistas a blitear
+    
+    
+    def _euclidean_h(positions, goal):
+        def h(n):
+            if n not in positions or goal not in positions:
+                return 0.0
+            (x1, y1), (x2, y2) = positions[n], positions[goal]
+            return math.hypot(x1 - x2, y1 - y2)
+        return h
+
+    def shortest_path_with_algo(G, src, dst, positions, algo_cfg: AlgoCfg, weight="weight"):
+        name, p = algo_cfg.name, algo_cfg.params
+        if name == "dijkstra":
+            path = nx.shortest_path(G, src, dst, weight=weight)
+            cost = nx.path_weight(G, path, weight=weight)
+            return path, cost
+        elif name == "astar":
+            heur = p.get("heuristic", "euclidean")
+            h = _euclidean_h(positions, dst) if heur == "euclidean" else (lambda _: 0.0)
+            path = nx.astar_path(G, src, dst, heuristic=h, weight=weight)
+            cost = nx.path_weight(G, path, weight=weight)
+            return path, cost
+        elif name == "yen_ksp":
+            k = int(p.get("k", 3))
+            best_path, best_cost = None, float("inf")
+            for i, pth in enumerate(nx.shortest_simple_paths(G, src, dst, weight=weight)):
+                c = nx.path_weight(G, pth, weight=weight)
+                if c < best_cost:
+                    best_path, best_cost = pth, c
+                if i + 1 >= k:
+                    break
+            if best_path is None:
+                raise nx.NetworkXNoPath
+            return best_path, best_cost
+        else:
+            raise ValueError(f"Algoritmo no soportado: {name}")
+
 
     # ------------------ Ruta a la "mejor" salida ------------------
     def best_exit_path(H: nx.Graph, src: str, exits: Set[str]) -> Tuple[Optional[List[str]], float]:
@@ -350,14 +423,28 @@ def main():
         for ex in exits:
             if src in H and ex in H: # ambos nodos deben existir en el subgrafo seguro
                 try:
-                    p = nx.shortest_path(H, src, ex, weight="weight") # Dijkstra (weight)
-                    c = nx.path_weight(H, p, weight="weight")         # suma de pesos
+                    p, c = shortest_path_with_algo(H, src, ex, positions, ALGORITHM, weight="weight")
                     if c < best_cost:
                         best_cost, best_path = c, p
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
                     continue # ignora salidas no alcanzables
         return best_path, best_cost
-    
+    # ----------
+    C_ev = {}                      # cache centralidad actual
+    prev_safe_set = set()          # safe_nodes del frame anterior
+
+    def recalc_centrality_if_needed(H: nx.Graph, safe_nodes: List[str], source: str, exits: set):
+        global C_ev, prev_safe_set
+        if not RECALC_CENTRALITY_ON_CHANGE:
+            return
+        safe_set = set(safe_nodes)
+        if safe_set != prev_safe_set:
+            try:
+                C_ev = betweenness_centrality_subset(H, sources={source}, targets=exits, normalized=True)
+            except Exception:
+                C_ev = {}
+            prev_safe_set = safe_set
+
     # ------------------ Función por frame ------------------
     def animate(frame):
         nonlocal prev_scores
@@ -368,13 +455,29 @@ def main():
 
 
         # --- Filtrado por seguridad (y movilidad si hay máscara) ---
-        safe_nodes = [node_ids[i] for i in range(len(node_ids)) if float(scores[i]) >= TAU]
+        safe_nodes = [node_ids[i] for i in range(len(node_ids)) if float(scores[i]) >= ACTIVE_PROFILE.tau]
         if mobility_mask is not None:
             # Aplica filtro de movilidad (solo nodos permitidos por locomotion/kind)
             safe_nodes = [n for n in safe_nodes if mobility_mask.get(n, False)]
             
         # Construye subgrafo seguro (copia materializada para operar sin vistas)
         H = G.subgraph(safe_nodes).copy()
+        # --- Penalización de riesgo en aristas (bi-criterio) ---
+        if BETA_RISK > 0.0:
+            scores_by_id = {node_ids[i]: float(scores[i]) for i in range(len(node_ids))}
+            for u, v, d in H.edges(data=True):
+                su = scores_by_id.get(u, 1.0)
+                sv = scores_by_id.get(v, 1.0)
+                ru, rv = (1.0 - su), (1.0 - sv)
+                r_edge = max(ru, rv)  # conservador; alternativa: 0.5*(ru+rv) o 1 - min(su,sv)
+                base = float(d.get("weight", 1.0))  # hoy: metros (interpretable como tiempo base)
+                d["weight"] = base * (1.0 + BETA_RISK * r_edge)
+                
+        recalc_centrality_if_needed(H, safe_nodes, source, emergency_nodes)
+        
+        if SHOW_AGILITY_IN_TITLE:
+            agility = sum(float(C_ev.get(n, 0.0)) for n in path[1:-1])
+            title_text.set_text(f"t={t:.1f}s | coste={cost:.2f} | nodos={len(path)} | A={agility:.3f}")
 
         # --- Ruta al "mejor" exit en el subgrafo H ---
         path, cost = best_exit_path(H, source, emergency_nodes)
@@ -388,8 +491,21 @@ def main():
             # Si no hay ruta, limpia y muestra aviso
             path_line.set_data([], [])
             title_text.set_text(f"t={t:.1f}s | sin ruta")
-
+            
+        # --- logging CSV ---
+        epoch_ms = int(time.time() * 1000)
+        path_len = len(path) if path else 0
+        note = "no_path" if not path else ""
+        csv_w.writerow([epoch_ms, frame, f"{t:.2f}", ALGORITHM.name, ACTIVE_PROFILE.name,
+                        len(safe_nodes), path_len, f"{cost:.3f}", len(emergency_nodes), note])
+        csv_f.flush()
         return nodes_artist, path_line, title_text  # artistas que se redibujan
+    
+    LOG_CSV_PATH = "run_metrics.csv"
+    csv_f = open(LOG_CSV_PATH, "w", newline="", encoding="utf-8")
+    csv_w = csv.writer(csv_f)
+    csv_w.writerow(["epoch_ms","frame","t","algo","profile","safe_nodes","path_len","cost","exit_count","note"])
+
     
     # ------------------ Lanza la animación ------------------
     anim = FuncAnimation(
@@ -408,6 +524,10 @@ def main():
 
     plt.tight_layout()  # ajusta márgenes
     plt.show()          # muestra la ventana de la animación
+    try:
+        csv_f.close()
+    except Exception:
+        pass
 
 # Punto de entrada si ejecutas el script directamente (python animate_dynamic_route.py)
 if __name__ == "__main__":
