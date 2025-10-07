@@ -30,6 +30,8 @@ from typing import Optional, Iterable, Dict, Tuple, Set
 import psycopg2, networkx as nx
 
 
+
+
 ALLOWED_LOCOMOTIONS = ("WALK","RAMP")
 WINDOW_FUNCS = ("WINDOW","VENTANA")   # para “último recurso”
 SCORE_UMBRAL = 0.6

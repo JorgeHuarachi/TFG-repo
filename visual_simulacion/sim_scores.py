@@ -12,7 +12,7 @@
 # que luego pueden usarse para colorear, filtrar o penalizar rutas.
 # -----------------------------------------------------------------------------
 from __future__ import annotations # permite anotaciones de tipos como strings (futuras)
-from typing import Dict, List, Tuple, Callable, Optional
+from typing import Dict, List, Tuple, Callable, Optional, Union
 import numpy as np # trabajamos con vectores/arrays numéricos
 import math
 
@@ -109,38 +109,50 @@ def build_score_fn(
         if nid in idx:
             norm_scenario[idx[nid]] = list(windows)
 
-    def eval_window(w: Window, t: float) -> Optional[float]:
-        """
-        Evalúa una única ventana 'w' en el tiempo 't'.
-        Devuelve un float si la ventana aplica en ese instante o None si no aplica.
-        """
-        kind = w[0].lower() # tipo: hold/ramp/triangle
-        
+    # Evalúa una sola ventana en el instante t. Devuelve:
+    # - un float en [0,1] si la ventana "aplica" en t
+    # - None si la ventana no afecta en t (fuera de su intervalo)
+    def eval_window(w, t: float):
+        kind = w[0]
+
         if kind == "hold":
-            # ("hold", t0, dur, v): constante v dentro del intervalo [t0, t0+dur]
-            _, t0, dur, v = w
-            if t < t0 or t > (t0 + dur):
+            # ("hold", start, dur, val)
+            _, start, dur, val = w
+            if t < start or t > start + dur:
                 return None
-            return float(v)
+            return float(val)
+
         elif kind == "ramp":
-            # ("ramp", t0, dur, v_from, v_to): rampa de v_from a v_to entre t0 y t0+dur
-            _, t0, dur, v_from, v_to = w
-            if t < t0:
-                return None   # aún no empezó la rampa
-            if t >= t0 + dur:
-                return float(v_to) # rampa terminada: valor final
-            return ramp(t, t0, dur, float(v_from), float(v_to))
+            # ("ramp", start, dur, target)
+            # Interpola 1.0 -> target SOLO durante [start, start+dur].
+            _, start, dur, target = w
+            if t < start or t > start + dur:
+                return None            # <<--- CAMBIO CLAVE: fuera del intervalo, no "pinta"
+            if dur <= 0.0:
+                return float(target)
+            alpha = (t - start) / float(dur)  # 0..1
+            start_val = 1.0
+            return (1.0 - alpha) * start_val + alpha * float(target)
+    
         elif kind == "triangle":
-             # ("triangle", t0, dur, vmin, vmax): baja a vmin y sube a vmax en 'dur'
-            _, t0, dur, vmin, vmax = w
-            if t < t0:
-                return None # aún no empezó el triángulo
-            if t >= t0 + dur:
-                return float(vmax) # triángulo terminado: valor final (tope)
-            return triangle(t, t0, dur, float(vmin), float(vmax))
+            # ("triangle", start, dur, low, high)  -> baja de high a low y vuelve a high
+            _, start, dur, low, high = w
+            if t < start or dur <= 0.0 or t > start + dur:
+                return None
+            mid = start + dur / 2.0
+            if t <= mid:
+                # tramo de bajada: high -> low
+                a = (t - start) / (dur / 2.0)  # 0..1
+                return float(high) + a * (float(low) - float(high))
+            else:
+                # tramo de subida: low -> high
+                a = (t - mid) / (dur / 2.0)    # 0..1
+                return float(low) + a * (float(high) - float(low))
+
         else:
-            # Tipo de ventana no reconocido -> ignorar
+            # ventana desconocida -> ignora
             return None
+
 
     def reset() -> ScoreArray:
         """Crea un vector de longitud n lleno con el valor 'default'."""
@@ -159,8 +171,8 @@ def build_score_fn(
             wins = norm_scenario.get(i_node) # ventanas de este nodo (si hay)
             if not wins:
                 continue  # sin ventanas -> se mantiene default (1.0)
-            
             if combine == "last":
+            
                 # Toma el último valor válido (no None) entre las ventanas
                 val = None
                 for w in wins:
@@ -268,21 +280,64 @@ def make_linear_front_scenario(
         scenario.setdefault(nid, []).append(("triangle", float(start), float(recover), float(dip), 1.0))
     return scenario
 
+# ---------------------------------------------------------------------
+# Generador de escenario por SECUENCIA MANUAL (fases con grupos en paralelo)
+# con soporte de formas: "triangle" (por defecto) o "ramp_hold"
+# ---------------------------------------------------------------------
+from typing import Dict, List, Union, Tuple
 
-# ---------- Ejemplo rápido ----------
-# El bloque siguiente muestra cómo probar el módulo de forma aislada desde CLI:
-# - Define una lista de node_ids y un escenario con ventanas de tipo ramp/triangle.
-# - Genera score_at y reset via build_score_fn.
-# - Simula tiempos t=0..60 con paso 10 y aplica EMA encadenando prev_scores.
-#
-#if __name__ == "__main__":
-#    node_ids = ["ND-001","ND-002","ND-003","ND-004"]
-#    scenario = {
-#        "ND-002": [("ramp", 10, 20, 1.0, 0.3), ("hold", 30, 10, 0.3), ("ramp", 40, 20, 0.3, 0.9)],
-#        "ND-003": [("triangle", 35, 30, 0.5, 1.0)]
-#    }
-#    score_at, reset = build_score_fn(node_ids, scenario, default=1.0, ema_alpha=0.25, combine="min")
-#    s = reset()
-#    for t in range(0, 70, 10):
-#        s = score_at(t, prev_scores=s)
-#        print(t, dict(zip(node_ids, [round(float(x),3) for x in s.tolist()])))
+def make_manual_sequence_scenario(
+    node_ids,
+    groups: List[Union[str, List[str]]],
+    t0: float = 5.0,            # arranque Fase 0
+    phase_step: float = 6.0,    # separación entre fases (s)
+    dip: float = 0.5,           # score mínimo [0..1]
+    recover: float = 25.0,      # (solo triangle) duración total baja+sube
+    id_prefix: str = "",        # si en BD tienes prefijo, ej. "ND-"
+    # --- NUEVO ---
+    shape: str = "triangle",    # "triangle" | "ramp_hold"
+    ramp_down: float = 6.0,     # (ramp_hold) duración de bajada a dip
+    hold_dur: float = 12.0,     # (ramp_hold) duración de meseta en dip
+    ramp_up: float = 8.0        # (ramp_hold) duración de subida a 1.0
+) -> Dict[str, List[Window]]:
+    """
+    groups: lista de fases; cada fase es un str (nodo) o list[str] (paralelo).
+    Ejemplo:
+      ["050","007",["029","045","030"],"006",["028","044","049"],"012",["032","054","033"]]
+
+    shape:
+      - "triangle": crea una sola ventana Triangle (start, recover, dip -> 1.0).
+      - "ramp_hold": crea 3 ventanas: ramp down -> hold -> ramp up.
+
+    Notas:
+      - Si un ID no existe en node_ids, se ignora silenciosamente.
+      - Con "ramp_hold", el 'recover' no se usa; la duración total es ramp_down+hold_dur+ramp_up.
+    """
+    scenario: Dict[str, List[Window]] = {}
+    node_set = set(map(str, node_ids))
+
+    use_triangle = (shape == "triangle")
+    use_ramp_hold = (shape == "ramp_hold")
+
+    for k, g in enumerate(groups):
+        start = float(t0 + k * phase_step)
+        ids = g if isinstance(g, list) else [g]
+        for nid in ids:
+            nid = f"{id_prefix}{nid}" if id_prefix else str(nid)
+            if nid not in node_set:
+                # ID no presente en node_ids -> lo ignoramos
+                continue
+            if use_triangle:
+                # baja a dip y sube a 1.0 en 'recover' segundos
+                scenario.setdefault(nid, []).append(("triangle", start, float(recover), float(dip), 1.0))
+            elif use_ramp_hold:
+                # ramp down: 1.0 -> dip
+                scenario.setdefault(nid, []).append(("ramp",  start,            float(ramp_down), float(dip)))
+                # hold en dip
+                scenario[nid].append(("hold",  start + float(ramp_down),        float(hold_dur),  float(dip)))
+                # ramp up: dip -> 1.0
+                scenario[nid].append(("ramp",  start + float(ramp_down) + float(hold_dur), float(ramp_up), 1.0))
+            else:
+                raise ValueError(f"shape no soportado: {shape}")
+
+    return scenario

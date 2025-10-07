@@ -1,7 +1,5 @@
 # 📚 Bibliografía Organizada: Recursos para Modelado Indoor, Bases de Datos Espaciales, Rutas y Evacuación
 
-He compilado **todos los recursos del texto proporcionado**, eliminando duplicados excesivos pero asegurándome de no omitir ninguno. Cada fuente única se menciona como máximo en **dos grupos temáticos** (incluso si aparecía más veces en el input), para evitar repeticiones innecesarias mientras se mantiene la cobertura completa. Los grupos están ordenados lógicamente: desde estándares base hasta herramientas prácticas. He usado la información extraída de las fuentes (títulos completos, autores, años, etc.) para mayor precisión.
-
 Cada recurso incluye:
 - **Descripción breve**: Por qué sirve en el contexto (basado en resúmenes y anotaciones originales).
 - **Qué mirar**: Secciones clave o elementos prácticos (adaptado de descripciones proporcionadas).
