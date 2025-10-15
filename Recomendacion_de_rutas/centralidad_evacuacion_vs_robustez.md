@@ -71,8 +71,8 @@ La **agilidad de una ruta** se define como la media o producto de las centralida
 - Desde un nodo, busca rutas alternativas eficientes hacia salidas.  
 - Cuenta cuántas rutas disímiles existen dentro de la tolerancia.  
 
-👉 **Similitud**: ambos procesos son **iterativos** y consisten en “simular fallos y buscar alternativas”.  
-👉 **Diferencia**: cambia la **unidad de análisis** (aristas de una ruta vs nodos del grafo).
+**Similitud**: ambos procesos son **iterativos** y consisten en “simular fallos y buscar alternativas”.  
+**Diferencia**: cambia la **unidad de análisis** (aristas de una ruta vs nodos del grafo).
 
 ---
 
