@@ -4,7 +4,7 @@
 
 # Configuración local
 .vscode/
-.env
+.venv/
 
 # Compilados / cachés
 __pycache__/
