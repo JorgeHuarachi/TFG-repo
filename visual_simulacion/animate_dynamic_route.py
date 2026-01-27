@@ -236,7 +236,7 @@ from sim_scores import build_score_fn, make_manual_sequence_scenario
 # --------------------- Config BD ---------------------
 DB_CFG = dict(
     host="localhost",
-    dbname="simulacion",      # <--- Nombre de la base de datos
+    dbname="simulacion",      # Nombre de la base de datos
     user="postgres",
     password="DB032122"
 )

@@ -1,0 +1,1 @@
+En este apartado solo voy a dejar reflejado el proceso seguido para construir el edificio.
