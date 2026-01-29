@@ -252,12 +252,12 @@ TREAT_GENERAL_AS_WALK = True                 # Si un nodo carece de locomotion y
 
 # Simulación/visualización
 SOURCE_NODE = "ND-009"              # Origen fijo (si None, usa el primer nodo)
-TAU = 0.60                          # Umbral de seguridad: nodos con score >= TAU son transitables
+TAU = 0.60                          # Umbral de SEGURIDAD: nodos con score >= TAU son transitables *se puede confundir con ACTIVE_PROFILE.tau*
 INTERVAL_MS = 80                    # Milisegundos por frame en la animación (GIF)
 DT  = 0.50                          # Segundos simulados por frame (t = frame * DT)
-N_FRAMES = 350                      # Número total de frames (duración de la sim)
-EMA_ALPHA = 0.30                    # Suavizado EMA de scores; None para desactivar
-SAVE_GIF = True                    # Guardar GIF al final (requiere pillow)
+N_FRAMES = 350                      # Número total de frames (duración de la simulación)
+EMA_ALPHA = 0.30                    # Suavizado EMA de scores; None para desactivar (ESTO SERA UTIL SI SE TIENEN SCORES MUY VARIABLES)
+SAVE_GIF = True                     # Guardar GIF al final (requiere pillow)
 OUT_GIF  = "route_dynamics.gif"     # Nombre de archivo GIF
 
 # (Opcional) salidas manuales (si la BD no las tiene marcadas)
@@ -288,16 +288,26 @@ RECALC_CENTRALITY_ON_CHANGE = False   # True para habilitar
 SHOW_AGILITY_IN_TITLE = False         # True para mostrar suma de centralidad en el título
 
 # ============== CATALOGO PERFILES DE MOVILIDAD ========
-@dataclass
-class ProfileCfg:
-    name: str
-    tau: float
-    allowed_locomotions: tuple
-    treat_general_as_walk: bool
+@dataclass             # Esta linea lo que hace es importar la funcionalidad de dataclass para definir clases de datos de manera más sencilla.
+class ProfileCfg:                 # Define una clase llamada ProfileCfg que contendrá la configuración de un perfil de movilidad. 
+    name: str                     # Nombre del perfil (por ejemplo, "GENERAL" o "PMR").
+    tau: float                    # Umbral de seguridad asociado al perfil. del tipo float (por ejemplo, 0.60 o 0.75).
+    allowed_locomotions: tuple    # Tupla de cadenas que representan las locomociones permitidas para este perfil (por ejemplo, ("WALK","RAMP")).
+    treat_general_as_walk: bool   # Booleano que indica si los nodos sin locomoción específica se tratan como caminables (True o False).
     
 PROFILES = {
-    "GENERAL": ProfileCfg("GENERAL", tau=0.60, allowed_locomotions=("WALK","RAMP"), treat_general_as_walk=True),
-    "PMR":     ProfileCfg("PMR",     tau=0.75, allowed_locomotions=("RAMP",),      treat_general_as_walk=False),
+    "GENERAL": ProfileCfg(                      # Perfil de movilidad general
+        "GENERAL", 
+        tau=0.60,                               # se asume que la mayoría de las personas pueden caminar necesitando un umbral de seguridad moderado.
+        allowed_locomotions=("WALK","RAMP"),    # se asume que la mayoría de las personas pueden caminar y usar rampas.
+        treat_general_as_walk=True              # se asume que los nodos sin locomoción específica se tratan como caminables.
+        ), 
+    "PMR": ProfileCfg(                          # Perfil movilidad reducida
+        "PMR",
+        tau=0.75,                               # se asume que las personas con movilidad reducida necesitan un umbral de seguridad más alto.
+        allowed_locomotions=("RAMP",),          # se asume que las personas con movilidad reducida solo pueden usar rampas.     
+        treat_general_as_walk=False             # se asume que los nodos sin locomoción específica no se tratan como caminables.
+        ), 
 }
 # ===================== PERFIL / MOVILIDAD =================
 # Perfil activo (umbral τ y reglas de movilidad). Debes tenerlos definidos como dataclasses/tuplas.
@@ -305,16 +315,16 @@ PROFILES = {
 #   ProfileCfg(name="GENERAL", tau=0.60)
 #   ProfileCfg(name="PMR",     tau=0.75)
 
-ACTIVE_PROFILE = PROFILES["GENERAL"]  # cambia a "PMR" cuando quiera un Perfil de Movilidad Reducida
+ACTIVE_PROFILE = PROFILES["GENERAL"]  # En este caso usamos el perfil "GENERAL", cambiar a "PMR" cuando quiera un Perfil de Movilidad Reducida
 # (Opcional) Flags de movilidad si los usas en graph_utils:
-# TREAT_GENERAL_AS_WALK = True
+# TREAT_GENERAL_AS_WALK = True # Esta repetido arriba, aqui lo dejo comentado para evitar confusión
 
-# ============== ALGORITMOS CATALOGO ========
+# ============== CATALOGO DE ALGORITMOS ========
 
-@dataclass
-class AlgoCfg:
-    name: str                 # "dijkstra" | "astar" | "yen_ksp"
-    params: dict
+@dataclass      # Esta línea importa la funcionalidad de dataclass para definir clases de datos de manera más sencilla.
+class AlgoCfg:              # Define una clase llamada AlgoCfg que contendrá la configuración de un algoritmo de ruta.
+    name: str               # Nombre del algoritmo de ruta. del tipo str. "dijkstra" | "astar" | "yen_ksp"
+    params: dict            # Parámetros adicionales específicos del algoritmo. del tipo dict.
 
 # ================ ALGORITMO DE RUTA (SELECCIÓN) ===========
 # Objeto AlgoCfg(name, params). Soportados:
@@ -323,8 +333,8 @@ class AlgoCfg:
 #   - "yen_ksp"    -> params={"k": 3}
 ALGORITHM = AlgoCfg(name="astar", params={"heuristic": "euclidean"})
 
-# ===================== ESCENARIO / SCORES =================
-# Tipo de evento que genera las "ventanas" de score dinámico:
+# ===================== ESCENARIO / SCORES  =================
+# Tipo de evento que genera las "ventanas" de score que simulan un evento dinámico.
 #   "none" | "fire_radial" | "linear_front" | "manual_sequence"
 EVENT_KIND = "manual_sequence"
 
@@ -332,14 +342,14 @@ EVENT_PARAMS = {
     
     "groups": [
         
-        "050",                    # Fase 0: cae ND-050
-        "007",                    # Fase 1: cae ND-007
-        ["029", "045", "030"],    # Fase 2: caen EN PARALELO ND-029, ND-045, ND-030
-        {"006","030"},             # Fase 3
+        "050",                                        # Fase 0: cae ND-050
+        "007",                                        # Fase 1: cae ND-007
+        ["029", "045", "030"],                        # Fase 2: caen EN PARALELO ND-029, ND-045, ND-030
+        {"006","030"},                                # Fase 3
         ["028", "044", "049","032", "054", "033"],    # Fase 4 (paralelo)
-        "012",                    # Fase 5
-        "033",                    # Fase 8
-        ["055", "034", "056"]     # Fase 9 (paralelo)        
+        "012",                                        # Fase 5
+        "033",                                        # Fase 8
+        ["055", "034", "056"]                         # Fase 9 (paralelo)        
     ],
     
     "t0": 10.0,             # Inicio de la primer fase
@@ -348,15 +358,15 @@ EVENT_PARAMS = {
     "recover": 30.0,        # Duración total de triangle   (SE IGNORA CON SI USAS ramp_holde)
     "id_prefix": "ND-",     # p.ej. "ND-" si tus nodos reales son "ND-050"
     
-    # ---- NUEVO: forma de la ventana ----
+    # ---- forma de la ventana ----
     "shape": "ramp_hold",  # "triangle" (default) o "ramp_hold"
     "ramp_down": 6.0,      # rampam de bajada en segnundos
     "hold_dur": 80.0,      # Meseta (hold)
     "ramp_up": 8.0         # Subida de la rapma en segundos
 }
 
-# ===================== PLOTS / RESUMEN ====================
-SHOW_ANIMATION = True          # False => no animación, solo cómputo + gráficos finales
+# ===================== PLOTS / RESUMEN / RESULTADOS ====================
+SHOW_ANIMATION = True            # False => no animación, solo cómputo + gráficos finales
 SHOW_SUMMARY_PLOTS = False       # mostrar gráficos estáticos al finalizar
 
 PLOT_OPTS = {
@@ -376,7 +386,7 @@ PLOT_OPTS = {
     "legend_loc": "upper right",   # esquina del panel superior
 
     "save_path": None,             # p.ej. "summary_plot.png"
-    "dpi": 150
+    "dpi": 150                     # Es es para que la resolución de la imagen guardada sea buena
 }
 
 
@@ -395,12 +405,14 @@ def fetch_graph_from_db(
     treat_general_as_walk: bool = False                     # ¿Contar GENERAL sin locomotion como WALK?
 ) -> Dict:
     with conn.cursor() as cur:
-        # Nodos con coord XY
+        #---------------- Nodos con coordenadas (X,Y) ----------------
         cur.execute(
             """
-            SELECT
-              n.id_node, n.id_cell_space,
-              ST_X(n.geom) AS x, ST_Y(n.geom) AS y
+            SELECT 
+            n.id_node, 
+            n.id_cell_space, 
+            ST_X(n.geom) AS x, 
+            ST_Y(n.geom) AS y
             FROM indoorgml_core.node n
             JOIN indoorgml_core.cell_space cs ON cs.id_cell_space = n.id_cell_space
             WHERE n.id_dual = %s
