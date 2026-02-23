@@ -1,0 +1,486 @@
+{
+    "configuracion": {
+        "ancho": 50,
+        "alto": 30
+    },
+    "hitos": {
+        "Puerta_1": [
+            5.0,
+            22.25
+        ],
+        "Puerta_2": [
+            5.0,
+            16.0
+        ],
+        "Puerta_3": [
+            25.5,
+            21.75
+        ],
+        "Puerta_4": [
+            29.25,
+            24.0
+        ],
+        "Puerta_5": [
+            12.0,
+            24.0
+        ],
+        "Puerta_6": [
+            33.0,
+            27.25
+        ],
+        "Puerta_7": [
+            33.0,
+            15.75
+        ],
+        "Puerta_8": [
+            29.5,
+            9.0
+        ],
+        "Puerta_9": [
+            17.0,
+            9.0
+        ],
+        "Puerta_10": [
+            9.0,
+            4.75
+        ],
+        "Puerta_11": [
+            28.0,
+            2.25
+        ],
+        "Puerta_12": [
+            41.0,
+            19.0
+        ],
+        "SALIDA_1": [
+            49.0,
+            18.5
+        ],
+        "Habitacion_1": [
+            2.25,
+            19.25
+        ],
+        "Habitacion_2": [
+            19.0,
+            14.25
+        ],
+        "Habitacion_3": [
+            29.25,
+            21.75
+        ],
+        "Habitacion_4": [
+            29.25,
+            26.75
+        ],
+        "Habitacion_5": [
+            37.0,
+            19.25
+        ],
+        "Habitacion_6": [
+            45.0,
+            19.25
+        ],
+        "Habitacion_7": [
+            38.5,
+            4.5
+        ],
+        "Habitacion_8": [
+            18.5,
+            4.5
+        ],
+        "Habitacion_9": [
+            4.25,
+            4.5
+        ],
+        "Habitacion_10": [
+            15.25,
+            26.75
+        ],
+        "Habitacion_11": [
+            15.25,
+            21.75
+        ]
+    },
+    "conexiones": [
+        [
+            "Puerta_1",
+            "Habitacion_1"
+        ],
+        [
+            "Puerta_1",
+            "Habitacion_11"
+        ],
+        [
+            "Puerta_2",
+            "Habitacion_1"
+        ],
+        [
+            "Puerta_2",
+            "Habitacion_2"
+        ],
+        [
+            "Puerta_3",
+            "Habitacion_3"
+        ],
+        [
+            "Puerta_3",
+            "Habitacion_11"
+        ],
+        [
+            "Puerta_4",
+            "Habitacion_3"
+        ],
+        [
+            "Puerta_4",
+            "Habitacion_4"
+        ],
+        [
+            "Puerta_5",
+            "Habitacion_10"
+        ],
+        [
+            "Puerta_5",
+            "Habitacion_11"
+        ],
+        [
+            "Puerta_6",
+            "Habitacion_4"
+        ],
+        [
+            "Puerta_6",
+            "Habitacion_5"
+        ],
+        [
+            "Puerta_7",
+            "Habitacion_2"
+        ],
+        [
+            "Puerta_7",
+            "Habitacion_5"
+        ],
+        [
+            "Puerta_8",
+            "Habitacion_2"
+        ],
+        [
+            "Puerta_8",
+            "Habitacion_7"
+        ],
+        [
+            "Puerta_9",
+            "Habitacion_2"
+        ],
+        [
+            "Puerta_9",
+            "Habitacion_8"
+        ],
+        [
+            "Puerta_10",
+            "Habitacion_8"
+        ],
+        [
+            "Puerta_10",
+            "Habitacion_9"
+        ],
+        [
+            "Puerta_11",
+            "Habitacion_7"
+        ],
+        [
+            "Puerta_11",
+            "Habitacion_8"
+        ],
+        [
+            "Puerta_12",
+            "Habitacion_5"
+        ],
+        [
+            "Puerta_12",
+            "Habitacion_6"
+        ],
+        [
+            "SALIDA_1",
+            "Habitacion_6"
+        ]
+    ],
+    "agentesspawn": [
+        [
+            2.0,
+            25.0
+        ],
+        [
+            2.5,
+            14.5
+        ],
+        [
+            3.5,
+            5.5
+        ],
+        [
+            5.5,
+            2.0
+        ],
+        [
+            10.0,
+            26.5
+        ],
+        [
+            20.5,
+            27.0
+        ],
+        [
+            31.5,
+            20.5
+        ],
+        [
+            19.5,
+            16.5
+        ],
+        [
+            17.0,
+            14.0
+        ],
+        [
+            20.0,
+            2.0
+        ],
+        [
+            46.5,
+            2.0
+        ]
+    ],
+    "muros": [
+        {
+            "id": "Muro_1",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 0.0,
+            "x2": 49.0,
+            "y2": 0.0
+        },
+        {
+            "id": "Muro_2",
+            "tipo": "muro_exterior",
+            "x1": 49.0,
+            "y1": 0.0,
+            "x2": 49.0,
+            "y2": 29.5
+        },
+        {
+            "id": "Muro_3",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 29.5,
+            "x2": 49.0,
+            "y2": 29.5
+        },
+        {
+            "id": "Muro_4",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 0.0,
+            "x2": -0.5,
+            "y2": 29.5
+        },
+        {
+            "id": "Muro_5",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 9.0,
+            "x2": 49.0,
+            "y2": 9.0
+        },
+        {
+            "id": "Muro_6",
+            "tipo": "muro_interior",
+            "x1": 5.0,
+            "y1": 9.0,
+            "x2": 5.0,
+            "y2": 29.5
+        },
+        {
+            "id": "Muro_7",
+            "tipo": "muro_interior",
+            "x1": 5.0,
+            "y1": 19.5,
+            "x2": 33.0,
+            "y2": 19.5
+        },
+        {
+            "id": "Muro_8",
+            "tipo": "muro_interior",
+            "x1": 33.0,
+            "y1": 9.0,
+            "x2": 33.0,
+            "y2": 29.5
+        },
+        {
+            "id": "Muro_9",
+            "tipo": "muro_interior",
+            "x1": 32.5,
+            "y1": 9.0,
+            "x2": 33.0,
+            "y2": 9.0
+        },
+        {
+            "id": "Muro_10",
+            "tipo": "muro_interior",
+            "x1": 9.0,
+            "y1": 0.0,
+            "x2": 9.0,
+            "y2": 9.0
+        },
+        {
+            "id": "Muro_11",
+            "tipo": "muro_interior",
+            "x1": 28.0,
+            "y1": 0.5,
+            "x2": 28.0,
+            "y2": 9.0
+        },
+        {
+            "id": "Muro_12",
+            "tipo": "muro_interior",
+            "x1": 28.0,
+            "y1": 0.0,
+            "x2": 28.0,
+            "y2": 0.5
+        },
+        {
+            "id": "Muro_13",
+            "tipo": "muro_interior",
+            "x1": 41.0,
+            "y1": 9.0,
+            "x2": 41.0,
+            "y2": 29.5
+        },
+        {
+            "id": "Puerta_1",
+            "tipo": "puerta",
+            "x1": 5.0,
+            "y1": 22.0,
+            "x2": 5.0,
+            "y2": 22.5
+        },
+        {
+            "id": "Puerta_2",
+            "tipo": "puerta",
+            "x1": 5.0,
+            "y1": 15.5,
+            "x2": 5.0,
+            "y2": 16.5
+        },
+        {
+            "id": "Muro_14",
+            "tipo": "muro_interior",
+            "x1": 5.0,
+            "y1": 24.0,
+            "x2": 25.5,
+            "y2": 24.0
+        },
+        {
+            "id": "Muro_15",
+            "tipo": "muro_interior",
+            "x1": 25.5,
+            "y1": 24.0,
+            "x2": 25.5,
+            "y2": 29.0
+        },
+        {
+            "id": "Muro_16",
+            "tipo": "muro_interior",
+            "x1": 25.5,
+            "y1": 29.0,
+            "x2": 25.5,
+            "y2": 29.5
+        },
+        {
+            "id": "Puerta_3",
+            "tipo": "puerta",
+            "x1": 25.5,
+            "y1": 19.5,
+            "x2": 25.5,
+            "y2": 24.0
+        },
+        {
+            "id": "Puerta_4",
+            "tipo": "puerta",
+            "x1": 25.5,
+            "y1": 24.0,
+            "x2": 33.0,
+            "y2": 24.0
+        },
+        {
+            "id": "Puerta_5",
+            "tipo": "puerta",
+            "x1": 11.5,
+            "y1": 24.0,
+            "x2": 12.5,
+            "y2": 24.0
+        },
+        {
+            "id": "Puerta_6",
+            "tipo": "puerta",
+            "x1": 33.0,
+            "y1": 27.0,
+            "x2": 33.0,
+            "y2": 27.5
+        },
+        {
+            "id": "Puerta_7",
+            "tipo": "puerta",
+            "x1": 33.0,
+            "y1": 15.5,
+            "x2": 33.0,
+            "y2": 16.0
+        },
+        {
+            "id": "Puerta_8",
+            "tipo": "puerta",
+            "x1": 29.0,
+            "y1": 9.0,
+            "x2": 30.0,
+            "y2": 9.0
+        },
+        {
+            "id": "Puerta_9",
+            "tipo": "puerta",
+            "x1": 16.5,
+            "y1": 9.0,
+            "x2": 17.5,
+            "y2": 9.0
+        },
+        {
+            "id": "Puerta_10",
+            "tipo": "puerta",
+            "x1": 9.0,
+            "y1": 4.5,
+            "x2": 9.0,
+            "y2": 5.0
+        },
+        {
+            "id": "Puerta_11",
+            "tipo": "puerta",
+            "x1": 28.0,
+            "y1": 2.0,
+            "x2": 28.0,
+            "y2": 2.5
+        },
+        {
+            "id": "Puerta_12",
+            "tipo": "puerta",
+            "x1": 41.0,
+            "y1": 18.5,
+            "x2": 41.0,
+            "y2": 19.5
+        },
+        {
+            "id": "Puerta_13",
+            "tipo": "puerta",
+            "x1": 49.0,
+            "y1": 17.5,
+            "x2": 49.0,
+            "y2": 18.5
+        }
+    ]
+}

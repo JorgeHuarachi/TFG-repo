@@ -1,0 +1,322 @@
+{
+    "configuracion": {
+        "ancho": 50,
+        "alto": 30
+    },
+    "hitos": {
+        "Puerta_1": [
+            18.0,
+            15.75
+        ],
+        "Puerta_2": [
+            9.5,
+            19.0
+        ],
+        "Puerta_3": [
+            3.25,
+            11.0
+        ],
+        "Puerta_4": [
+            30.5,
+            13.75
+        ],
+        "Puerta_5": [
+            30.5,
+            18.0
+        ],
+        "SALIDA_1": [
+            49.0,
+            15.75
+        ],
+        "Habitacion_1": [
+            24.25,
+            24.0
+        ],
+        "Habitacion_2": [
+            39.75,
+            15.0
+        ],
+        "Habitacion_3": [
+            24.25,
+            15.0
+        ],
+        "Habitacion_4": [
+            8.75,
+            15.0
+        ],
+        "Habitacion_5": [
+            24.25,
+            5.5
+        ]
+    },
+    "conexiones": [
+        [
+            "Puerta_1",
+            "Habitacion_3"
+        ],
+        [
+            "Puerta_1",
+            "Habitacion_4"
+        ],
+        [
+            "Puerta_2",
+            "Habitacion_1"
+        ],
+        [
+            "Puerta_2",
+            "Habitacion_4"
+        ],
+        [
+            "Puerta_3",
+            "Habitacion_4"
+        ],
+        [
+            "Puerta_3",
+            "Habitacion_5"
+        ],
+        [
+            "Puerta_4",
+            "Habitacion_2"
+        ],
+        [
+            "Puerta_4",
+            "Habitacion_3"
+        ],
+        [
+            "Puerta_5",
+            "Habitacion_2"
+        ],
+        [
+            "Puerta_5",
+            "Habitacion_3"
+        ],
+        [
+            "SALIDA_1",
+            "Habitacion_2"
+        ]
+    ],
+    "agentesspawn": [
+        [
+            5.0,
+            23.5
+        ],
+        [
+            4.0,
+            16.0
+        ],
+        [
+            15.5,
+            11.5
+        ],
+        [
+            15.5,
+            16.5
+        ],
+        [
+            30.0,
+            5.0
+        ],
+        [
+            42.0,
+            3.5
+        ],
+        [
+            44.5,
+            8.0
+        ],
+        [
+            39.5,
+            26.0
+        ],
+        [
+            25.0,
+            26.5
+        ],
+        [
+            24.5,
+            20.5
+        ],
+        [
+            10.0,
+            1.5
+        ]
+    ],
+    "muros": [
+        {
+            "id": "Muro_1",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 0.0,
+            "x2": 49.0,
+            "y2": 0.0
+        },
+        {
+            "id": "Muro_2",
+            "tipo": "muro_exterior",
+            "x1": 49.0,
+            "y1": 0.0,
+            "x2": 49.0,
+            "y2": 29.0
+        },
+        {
+            "id": "Muro_3",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 29.0,
+            "x2": 49.0,
+            "y2": 29.0
+        },
+        {
+            "id": "Muro_4",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 0.5,
+            "x2": -0.5,
+            "y2": 29.0
+        },
+        {
+            "id": "Muro_5",
+            "tipo": "muro_exterior",
+            "x1": -0.5,
+            "y1": 0.0,
+            "x2": -0.5,
+            "y2": 0.5
+        },
+        {
+            "id": "Muro_6",
+            "tipo": "muro_interior",
+            "x1": 18.5,
+            "y1": 11.0,
+            "x2": 30.5,
+            "y2": 11.0
+        },
+        {
+            "id": "Muro_7",
+            "tipo": "muro_interior",
+            "x1": 30.5,
+            "y1": 11.0,
+            "x2": 30.5,
+            "y2": 19.0
+        },
+        {
+            "id": "Muro_8",
+            "tipo": "muro_interior",
+            "x1": 18.0,
+            "y1": 19.0,
+            "x2": 30.5,
+            "y2": 19.0
+        },
+        {
+            "id": "Muro_9",
+            "tipo": "muro_interior",
+            "x1": 18.0,
+            "y1": 11.0,
+            "x2": 18.0,
+            "y2": 19.0
+        },
+        {
+            "id": "Muro_10",
+            "tipo": "muro_interior",
+            "x1": 18.0,
+            "y1": 11.0,
+            "x2": 18.5,
+            "y2": 11.0
+        },
+        {
+            "id": "Muro_11",
+            "tipo": "muro_interior",
+            "x1": 18.5,
+            "y1": 11.0,
+            "x2": 19.0,
+            "y2": 11.0
+        },
+        {
+            "id": "Muro_12",
+            "tipo": "muro_interior",
+            "x1": -0.5,
+            "y1": 11.0,
+            "x2": 18.0,
+            "y2": 11.0
+        },
+        {
+            "id": "Muro_13",
+            "tipo": "muro_interior",
+            "x1": 30.5,
+            "y1": 11.0,
+            "x2": 49.0,
+            "y2": 11.0
+        },
+        {
+            "id": "Muro_14",
+            "tipo": "muro_interior",
+            "x1": 49.0,
+            "y1": 11.0,
+            "x2": 49.0,
+            "y2": 19.0
+        },
+        {
+            "id": "Muro_15",
+            "tipo": "muro_interior",
+            "x1": 30.5,
+            "y1": 19.0,
+            "x2": 49.0,
+            "y2": 19.0
+        },
+        {
+            "id": "Muro_16",
+            "tipo": "muro_interior",
+            "x1": -0.5,
+            "y1": 19.0,
+            "x2": 30.5,
+            "y2": 19.0
+        },
+        {
+            "id": "Puerta_1",
+            "tipo": "puerta",
+            "x1": 18.0,
+            "y1": 15.0,
+            "x2": 18.0,
+            "y2": 16.5
+        },
+        {
+            "id": "Puerta_2",
+            "tipo": "puerta",
+            "x1": 9.0,
+            "y1": 19.0,
+            "x2": 10.0,
+            "y2": 19.0
+        },
+        {
+            "id": "Puerta_3",
+            "tipo": "puerta",
+            "x1": 3.0,
+            "y1": 11.0,
+            "x2": 3.5,
+            "y2": 11.0
+        },
+        {
+            "id": "Puerta_4",
+            "tipo": "puerta",
+            "x1": 30.5,
+            "y1": 13.5,
+            "x2": 30.5,
+            "y2": 14.0
+        },
+        {
+            "id": "Puerta_5",
+            "tipo": "puerta",
+            "x1": 30.5,
+            "y1": 17.5,
+            "x2": 30.5,
+            "y2": 18.5
+        },
+        {
+            "id": "Puerta_6",
+            "tipo": "puerta",
+            "x1": 49.0,
+            "y1": 14.5,
+            "x2": 49.0,
+            "y2": 16.0
+        }
+    ]
+}

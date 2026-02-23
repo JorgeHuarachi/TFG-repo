@@ -1,0 +1,27 @@
+Step,AgenteID,Evento,Valor,Pos_X,Pos_Y
+1,12,CAMBIO_RUTA,Puerta_4->Habitacion_3->Puerta_5->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,11.0,4.0
+1,6,CAMBIO_RUTA,Puerta_1->Habitacion_1->Puerta_11->Habitacion_6->SALIDA,5.0,15.0
+1,1,CAMBIO_RUTA,Puerta_1->Habitacion_1->Puerta_11->Habitacion_6->SALIDA,2.0,21.0
+1,14,CAMBIO_RUTA,Habitacion_3->Puerta_5->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,16.0,4.0
+1,10,CAMBIO_RUTA,Puerta_4->Habitacion_3->Puerta_5->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,4.0,4.0
+1,22,CAMBIO_RUTA,Puerta_14->Habitacion_6->SALIDA,33.0,16.0
+1,21,CAMBIO_RUTA,Habitacion_5->Puerta_14->Habitacion_6->SALIDA,33.0,6.0
+1,4,CAMBIO_RUTA,Puerta_12->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,13.0,19.0
+1,2,CAMBIO_RUTA,Puerta_1->Habitacion_1->Puerta_11->Habitacion_6->SALIDA,4.0,20.0
+1,18,CAMBIO_RUTA,Habitacion_4->Puerta_7->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,25.0,2.0
+1,20,CAMBIO_RUTA,Puerta_7->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,25.0,10.0
+1,13,CAMBIO_RUTA,Habitacion_3->Puerta_5->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,12.0,3.0
+1,11,CAMBIO_RUTA,Habitacion_2->Puerta_3->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,2.0,8.0
+1,23,CAMBIO_RUTA,Habitacion_6->SALIDA,25.0,21.0
+1,3,CAMBIO_RUTA,Habitacion_1->Puerta_11->Habitacion_6->SALIDA,9.0,21.0
+1,5,CAMBIO_RUTA,Puerta_12->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,14.0,20.0
+1,24,CAMBIO_RUTA,Habitacion_7->Puerta_13->Habitacion_6->SALIDA,15.0,11.0
+1,19,CAMBIO_RUTA,Puerta_10->Habitacion_6->SALIDA,23.0,15.0
+1,15,CAMBIO_RUTA,Puerta_6->Habitacion_4->Puerta_7->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,20.0,2.0
+1,16,CAMBIO_RUTA,Puerta_6->Habitacion_4->Puerta_7->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,20.0,3.0
+1,8,CAMBIO_RUTA,Puerta_3->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,5.0,12.0
+1,9,CAMBIO_RUTA,Habitacion_2->Puerta_3->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,2.0,6.0
+1,7,CAMBIO_RUTA,Puerta_1->Habitacion_1->Puerta_11->Habitacion_6->SALIDA,3.0,13.0
+1,17,CAMBIO_RUTA,Habitacion_4->Puerta_7->Habitacion_7->Puerta_13->Habitacion_6->SALIDA,26.0,4.0
+60,22,EVACUACION_COMPLETA,Tiempo: 60,37.31859367996529,19.59504188754721
+121,23,EVACUACION_COMPLETA,Tiempo: 121,37.09229053760548,20.56813248079978
