@@ -6,6 +6,10 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Circle
 import json
+# Shapely
+from shapely.geometry import Polygon, Point, LineString
+from shapely.ops import nearest_points, unary_union
+from matplotlib.patches import Polygon as MplPolygon
 
 # --- 1. CONFIGURACIÓN GENERAL ---
 RADIO_FISICO = 0.4        
@@ -56,7 +60,7 @@ class ModeloAvanzado(mesa.Model):
         
         # 2. INICIALIZAR ESPACIO
         self.space = mesa.space.ContinuousSpace(self.ancho, self.alto, torus=False)
-        self.mapa_muros = np.zeros((self.ancho, self.alto))
+        self.poligonos_muros = [] 
         self.construir_paredes_desde_json(datos['muros'])
         
         # 3. CONSTRUIR GRAFO
@@ -93,18 +97,44 @@ class ModeloAvanzado(mesa.Model):
                 print(f"⚠️ Aviso: Agente {i} en la pos {pos} está dentro de un muro y fue ignorado.")
 
     def construir_paredes_desde_json(self, muros_json):
-        # Bordes por defecto
-        self.mapa_muros[0,:] = 1; self.mapa_muros[-1,:] = 1
-        self.mapa_muros[:,0] = 1; self.mapa_muros[:,-1] = 1
-        
+        # Variables temporales (sin self) para hacer los cálculos
+        muros_crudos = []
+        puertas = []
+
+        # 1. Separamos los polígonos según su tipo
         for m in muros_json:
-            val = 1 if m['tipo'] == 'muro' else 0
-            if m['x1'] == m['x2']: # Muro Vertical
-                ymin, ymax = min(m['y1'], m['y2']), max(m['y1'], m['y2'])
-                self.mapa_muros[m['x1'], ymin:ymax+1] = val
-            else: # Muro Horizontal
-                xmin, xmax = min(m['x1'], m['x2']), max(m['x1'], m['x2'])
-                self.mapa_muros[xmin:xmax+1, m['y1']] = val
+            poly = Polygon(m['poligono'])
+            if m.get('tipo') in ['muro_exterior', 'muro_interior']:
+                muros_crudos.append(poly)
+            elif m.get('tipo') == 'puerta':
+                puertas.append(poly)
+                
+        # 2. Unimos todos los muros en un solo bloque sólido gigante
+        if muros_crudos:
+            masa_muros = unary_union(muros_crudos)
+        else:
+            masa_muros = Polygon() # Polígono vacío si no hay muros
+            
+        # 3. Unimos todas las puertas en otro bloque
+        if puertas:
+            masa_puertas = unary_union(puertas)
+        else:
+            masa_puertas = Polygon()
+
+        # 4. Hacemos el "taladro" (Diferencia booleana)
+        muros_finales = masa_muros.difference(masa_puertas)
+        
+        # 5. Guardamos el resultado FINAL en 'self' para que el resto del simulador lo use
+        self.poligonos_muros = []
+        
+        if muros_finales.is_empty:
+            pass # No hay muros en el mapa
+        elif muros_finales.geom_type == 'MultiPolygon':
+            # Si al recortar quedaron varios trozos separados
+            self.poligonos_muros = list(muros_finales.geoms)
+        elif muros_finales.geom_type == 'Polygon':
+            # Si quedó un solo bloque continuo de muro
+            self.poligonos_muros = [muros_finales]
 
     def construir_grafo_desde_json(self, conexiones_json):
         for u, v in conexiones_json:
@@ -113,22 +143,28 @@ class ModeloAvanzado(mesa.Model):
             distancia = np.linalg.norm(p1 - p2)
             self.grafo_logico.add_edge(u, v, weight=distancia, base_weight=distancia)
 
-    def tiene_linea_vision(self, p1, p2):
-        dist = np.linalg.norm(p2 - p1)
-        pasos = int(dist * 2)
-        if pasos == 0: return True
-        for i in range(pasos + 1):
-            t = i / pasos
-            x = int(p1[0] + (p2[0] - p1[0]) * t)
-            y = int(p1[1] + (p2[1] - p1[1]) * t)
-            if not (0 <= x < self.ancho and 0 <= y < self.alto): return False
-            if self.mapa_muros[x, y] == 1: return False
+    def tiene_linea_vision(self, p1, p2,dist_max=15.0):
+        if np.linalg.norm(p2 - p1) > dist_max: 
+            return False
+            
+        linea_visual = LineString([p1, p2])
+        # Si la línea cruza CUALQUIER polígono, no hay visión
+        for muro in self.poligonos_muros:
+            if linea_visual.intersects(muro):
+                return False
         return True
     
     def es_transitable(self, pos):
-        x, y = int(pos[0]), int(pos[1])
-        if 0 <= x < self.ancho and 0 <= y < self.alto: return self.mapa_muros[x, y] == 0
-        return False
+        # 1. No salir del mapa
+        if not (0 <= pos[0] < self.ancho and 0 <= pos[1] < self.alto):
+            return False
+            
+        punto_agente = Point(pos[0], pos[1])
+        # 2. No estar dentro de un muro
+        for muro in self.poligonos_muros:
+            if muro.contains(punto_agente):
+                return False
+        return True
     
     def crear_fuego(self, x, y):
         self.fuegos.append({'pos': np.array([x, y]), 'radio': RADIO_FUEGO})
@@ -289,16 +325,22 @@ class AgentePro(mesa.Agent):
             fuerza += (vec_objetivo / dist_meta) * 2.0 
 
         # Paredes
-        xi, yi = int(pos[0]), int(pos[1])
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                nx, ny = xi+dx, yi+dy
-                if 0 <= nx < self.model.ancho and 0 <= ny < self.model.alto and self.model.mapa_muros[nx, ny] == 1:
-                    vec_muro = pos - np.array([nx+0.5, ny+0.5])
-                    d = np.linalg.norm(vec_muro) - 0.5 
-                    if d < RADIO_VISION_MUROS and d > 0.001:
-                        fuerza += (vec_muro/d) * (FUERZA_PARED * np.exp(-d * 2))
-
+        punto_agente = Point(pos[0], pos[1])
+        
+        for muro in self.model.poligonos_muros:
+            # 1. Distancia exacta a la superficie del muro
+            d = muro.distance(punto_agente)
+            
+            # 2. Si está a menos de 0.8m, empieza la repulsión
+            if d < RADIO_VISION_MUROS and d > 0.001:
+                # 3. Buscamos el punto de la pared que tenemos más cerca
+                punto_pared, _ = nearest_points(muro, punto_agente)
+                coord_pared = np.array([punto_pared.x, punto_pared.y])
+                
+                # 4. Generamos la fuerza de empuje
+                vec_muro = pos - coord_pared
+                intensidad = FUERZA_PARED * np.exp(-d * 2) 
+                fuerza += (vec_muro/d) * intensidad
         # Social
         vecinos = self.model.space.get_neighbors(self.pos, RADIO_PERSONAL, include_center=False)
         hay_vecinos = False
@@ -347,7 +389,7 @@ agentes_prueba_1 = [
 
 # Inicializar modelo pasándole el mapa guardado y los agentes
 model = ModeloAvanzado(
-    ruta_mapa="nivel_2_FINAL.json", 
+    ruta_mapa="20x20_MurosParaSimular_FINAL.json", 
     posiciones_agentes=None # Cambia a agentes_prueba_1 para usar la lista personalizada
 )
 
@@ -360,7 +402,12 @@ lineas_x, lineas_y = [], []
 for x in range(model.ancho): lineas_x.extend([x, x, None]); lineas_y.extend([0, model.alto, None])
 for y in range(model.alto): lineas_x.extend([0, model.ancho, None]); lineas_y.extend([y, y, None])
 ax.plot(lineas_x, lineas_y, c='#004400', linewidth=0.5, alpha=0.3)
-ax.imshow(model.mapa_muros.T, cmap=plt.cm.gray, origin='lower', alpha=0.9, extent=[0, model.ancho, 0, model.alto])
+for muro in model.poligonos_muros:
+    # Extraemos las coordenadas X e Y del polígono de Shapely
+    x, y = muro.exterior.xy
+    # Lo pintamos como un parche gris
+    muro_patch = MplPolygon(list(zip(x, y)), closed=True, facecolor='gray', edgecolor='black', alpha=0.8, zorder=2)
+    ax.add_patch(muro_patch)
 
 # Dibujar Salidas dinámicamente
 zonas_salida_dibujos = []

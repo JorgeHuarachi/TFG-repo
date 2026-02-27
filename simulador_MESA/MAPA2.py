@@ -5,8 +5,8 @@ import json
 import datetime
 
 # --- CONFIGURACIÓN ---
-ANCHO = 40
-ALTO = 25
+ANCHO = 20
+ALTO = 20
 
 class DiseñadorConectado:
     def __init__(self, ancho, alto, nombre_archivo="escenario_base"):
