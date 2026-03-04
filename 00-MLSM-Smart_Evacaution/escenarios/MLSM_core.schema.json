@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Esquema MLSM Core (Perfil Híbrido IndoorGML) para Simulación",
+  "type": "object",
+  "properties": {
+    "configuracion": {
+      "type": "object",
+      "properties": {
+        "ancho": { "type": "number" },
+        "alto": { "type": "number" }
+      },
+      "required": ["ancho", "alto"]
+    },
+    "agentesspawn": {
+      "type": "array",
+      "description": "Coordenadas iniciales [x, y] de los agentes",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "espacios_navegables": {
+      "type": "object",
+      "description": "Diccionario semántico de nodos topológicos (Habitaciones, Puertas, Salidas, Fronteras)",
+      "patternProperties": {
+        "^[A-Za-z0-9_]+$": {
+          "type": "object",
+          "properties": {
+            "centroide": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+            "poligono": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } },
+            "atributos": {
+              "type": "object",
+              "properties": {
+                "clase_indoor": { "type": "string", "enum": ["NavigableSpace", "TransferSpace", "AnchorSpace"] },
+                "categoria": { "type": "string", "enum": ["Room", "Door", "Transition", "VirtualBoundary"] },
+                "locomotion": { "type": "array", "items": { "type": "string", "enum": ["Walking", "Rolling", "Step"] } }
+              },
+              "required": ["clase_indoor", "categoria", "locomotion"]
+            }
+          },
+          "required": ["centroide", "poligono", "atributos"]
+        }
+      }
+    },
+    "muros": {
+      "type": "array",
+      "description": "Geometría física recortada (CSG) para el motor de colisiones",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "tipo": { 
+            "type": "string", 
+            "enum": ["muro_exterior", "muro_interior", "puerta_simple", "puerta_doble", "salida", "frontera_virtual"] 
+          },
+          "poligono": { "type": "array", "items": { "type": "array", "items": { "type": "number" } } }
+        },
+        "required": ["id", "tipo", "poligono"]
+      }
+    },
+    "conexiones_horizontales": {
+      "type": "array",
+      "description": "Enlaces topológicos de movimiento (Grafos de Capa 1, Capa 2 y Capa 3)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "origen": { "type": "string" },
+          "destino": { "type": "string" },
+          "tipo": { "type": "string", "enum": ["adyacencia_fisica", "navegable_puerta", "door_to_door"] },
+          "color": { "type": "string" },
+          "estilo": { "type": "string" },
+          "contexto": { "type": "string", "description": "ID de la habitación a la que pertenecen las puertas (solo para door_to_door)" }
+        },
+        "required": ["origen", "destino", "tipo"]
+      }
+    },
+    "conexiones_verticales": {
+      "type": "array",
+      "description": "Enlaces InterLayer (MLSM) que conectan el mismo espacio físico en diferentes niveles de abstracción",
+      "items": {
+        "type": "object",
+        "properties": {
+          "nodo_id": { "type": "string" },
+          "capa_superior": { "type": "string" },
+          "capa_inferior": { "type": "string" },
+          "tipo_conexion": { "type": "string", "enum": ["representa_el_mismo_espacio"] }
+        },
+        "required": ["nodo_id", "capa_superior", "capa_inferior", "tipo_conexion"]
+      }
+    }
+  },
+  "required": ["configuracion", "espacios_navegables", "muros", "conexiones_horizontales", "conexiones_verticales"]
+}
