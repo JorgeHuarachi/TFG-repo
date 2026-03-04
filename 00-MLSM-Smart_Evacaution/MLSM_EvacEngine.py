@@ -776,4 +776,4 @@ ani = animation.FuncAnimation(fig, update, frames=600, init_func=init, interval=
 plt.show()
 
 # AL CERRAR LA VENTANA, EXPORTA LOS DATOS
-model.datos.exportar_csv(nombre_salida=ruta_resultados) # 
+model.datos.exportar_csv(nombre_salida=ruta_resultados) 
