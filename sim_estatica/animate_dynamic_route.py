@@ -238,7 +238,7 @@ DB_CFG = dict(
     host="localhost",
     dbname="simulacion",      # Nombre de la base de datos
     user="postgres",
-    password="DB032122"
+    password=""
 )
 
 DUAL_ID = "DU-01"         # Identificador de grafo dual IndoorGML en BD

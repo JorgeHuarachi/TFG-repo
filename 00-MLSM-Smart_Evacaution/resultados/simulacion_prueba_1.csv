@@ -1,136 +1,29 @@
 Step,AgenteID,Evento,Valor,Pos_X,Pos_Y
-1,13,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,5.5,17.5
-1,10,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,5.0,15.0
-1,3,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,3.0,16.0
-1,12,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,1.5,17.5
-1,4,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,2.5,14.5
-1,2,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,3.5,17.5
+1,3,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,3.0,16.0
 1,14,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,8.5,17.5
-1,8,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.5,15.5
-1,6,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,4.5,12.0
-1,9,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,5.5,15.5
 1,1,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.0,18.0
-1,11,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,4.0,13.5
+1,13,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,5.5,17.5
+1,8,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.5,15.5
+1,9,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,5.5,15.5
+1,12,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,1.5,17.5
 1,7,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.5,13.0
-1,5,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,3.0,12.5
-341,SYSTEM,FUEGO_CREADO,"Pos: 28.38623655913979,12.468824884792628",28.38623655913979,12.468824884792628
-342,6,RECALCULO,Fuego detectado,15.078014216812392,10.41753798666197
-342,6,CAMBIO_RUTA,Habitacion_8 -> Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,15.078014216812392,10.41753798666197
-342,8,RECALCULO,Fuego detectado,28.50124750520753,11.143686022881136
-342,8,CAMBIO_RUTA,Frontera_virtual_9 -> Habitacion_9 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,28.50124750520753,11.143686022881136
-342,1,RECALCULO,Fuego detectado,25.471730436784263,12.681119150006998
-342,1,CAMBIO_RUTA,Frontera_virtual_9 -> Habitacion_9 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,25.471730436784263,12.681119150006998
-342,2,RECALCULO,Fuego detectado,23.694536294539198,13.110509034348098
-342,2,CAMBIO_RUTA,Habitacion_7 -> Puerta_simple_4 -> Habitacion_8 -> Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,23.694536294539198,13.110509034348098
-342,13,RECALCULO,Fuego detectado,32.12419667584537,9.157137321095277
-342,13,CAMBIO_RUTA,Habitacion_9 -> Salida_5,32.12419667584537,9.157137321095277
-342,4,RECALCULO,Fuego detectado,24.676660038987702,12.705004890016362
-342,4,CAMBIO_RUTA,Frontera_virtual_9 -> Habitacion_9 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,24.676660038987702,12.705004890016362
-342,10,RECALCULO,Fuego detectado,11.634072765721509,8.978771159309446
-342,10,CAMBIO_RUTA,Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,11.634072765721509,8.978771159309446
-342,3,RECALCULO,Fuego detectado,24.209279178028428,13.248171404092744
-342,3,CAMBIO_RUTA,Habitacion_7 -> Puerta_simple_4 -> Habitacion_8 -> Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,24.209279178028428,13.248171404092744
-342,14,RECALCULO,Fuego detectado,22.570810743311284,13.529939286937601
-342,14,CAMBIO_RUTA,Puerta_simple_4 -> Habitacion_8 -> Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,22.570810743311284,13.529939286937601
-342,12,RECALCULO,Fuego detectado,23.254108843902873,13.369289727517993
-342,12,CAMBIO_RUTA,Puerta_simple_4 -> Habitacion_8 -> Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,23.254108843902873,13.369289727517993
-342,9,RECALCULO,Fuego detectado,26.740694621635825,11.91342394937395
-342,9,CAMBIO_RUTA,Frontera_virtual_9 -> Habitacion_9 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,26.740694621635825,11.91342394937395
-342,7,RECALCULO,Fuego detectado,30.507085690665118,10.259672162683565
-342,7,CAMBIO_RUTA,Habitacion_9 -> Salida_5,30.507085690665118,10.259672162683565
-342,5,RECALCULO,Fuego detectado,35.70325726124877,9.665924773421771
-342,5,CAMBIO_RUTA,Habitacion_9 -> Salida_5,35.70325726124877,9.665924773421771
-342,11,RECALCULO,Fuego detectado,12.155406879515866,9.20212343103659
-342,11,CAMBIO_RUTA,Puerta_simple_1 -> Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,12.155406879515866,9.20212343103659
-357,5,EVACUACION_COMPLETA,Tiempo: 357,37.61586759972899,9.83421527564491
-387,13,EVACUACION_COMPLETA,Tiempo: 387,37.58838624239285,9.826341345829112
-411,7,EVACUACION_COMPLETA,Tiempo: 411,37.50406240002067,10.056646901838587
-587,8,EVACUACION_COMPLETA,Tiempo: 587,37.58579619711104,9.704525866723698
-593,9,EVACUACION_COMPLETA,Tiempo: 593,37.599116841130204,9.852001794313226
-603,1,EVACUACION_COMPLETA,Tiempo: 603,37.585657934253945,9.813349744562277
-612,4,EVACUACION_COMPLETA,Tiempo: 612,37.56927785781953,9.812002402621088
-641,SYSTEM,FUEGO_CREADO,"Pos: 14.223145161290324,7.699239631336406",14.223145161290324,7.699239631336406
-642,3,RECALCULO,Fuego detectado,13.418296449705512,5.188783599695368
-642,3,CAMBIO_RUTA,Frontera_virtual_7 -> Habitacion_3 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,13.418296449705512,5.188783599695368
-642,10,RECALCULO,Fuego detectado,28.25403013483837,4.964052098146938
-642,10,CAMBIO_RUTA,Puerta_simple_3 -> Habitacion_9 -> Salida_5,28.25403013483837,4.964052098146938
-642,2,RECALCULO,Fuego detectado,14.167507471252282,4.953048099399345
-642,2,CAMBIO_RUTA,Frontera_virtual_7 -> Habitacion_3 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,14.167507471252282,4.953048099399345
-642,12,RECALCULO,Fuego detectado,15.402564465086913,4.120334869489365
-642,12,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,15.402564465086913,4.120334869489365
-642,11,RECALCULO,Fuego detectado,12.772157775466077,7.772192699701761
-642,11,CAMBIO_RUTA,Habitacion_5 -> Frontera_virtual_7 -> Habitacion_3 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,12.772157775466077,7.772192699701761
-642,14,RECALCULO,Fuego detectado,17.216885222487427,3.303491495205806
-642,14,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,17.216885222487427,3.303491495205806
-642,6,RECALCULO,Fuego detectado,13.599604972787816,5.669408360417396
-642,6,CAMBIO_RUTA,Frontera_virtual_7 -> Habitacion_3 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,13.599604972787816,5.669408360417396
-676,SYSTEM,FUEGO_CREADO,"Pos: 16.469274193548387,8.971129032258064",16.469274193548387,8.971129032258064
-677,3,RECALCULO,Fuego detectado,16.034019794529826,3.822762484495787
-677,3,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,16.034019794529826,3.822762484495787
-677,2,RECALCULO,Fuego detectado,16.509164082265364,3.4617239898292276
-677,2,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,16.509164082265364,3.4617239898292276
-677,12,RECALCULO,Fuego detectado,18.59390285526841,2.683199079331128
-677,12,CAMBIO_RUTA,Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,18.59390285526841,2.683199079331128
-677,14,RECALCULO,Fuego detectado,20.258294316938716,2.085564531776667
-677,14,CAMBIO_RUTA,Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,20.258294316938716,2.085564531776667
-677,10,RECALCULO,Fuego detectado,30.567642173578612,7.590304053728518
-677,10,CAMBIO_RUTA,Habitacion_9 -> Salida_5,30.567642173578612,7.590304053728518
-677,11,RECALCULO,Fuego detectado,14.018820250280221,6.563334914996788
-677,11,CAMBIO_RUTA,Frontera_virtual_7 -> Habitacion_3 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,14.018820250280221,6.563334914996788
-677,6,RECALCULO,Fuego detectado,13.933231636651977,5.219726537329073
-689,SYSTEM,FUEGO_CREADO,"Pos: 18.684206989247315,10.81536866359447",18.684206989247315,10.81536866359447
-690,2,RECALCULO,Fuego detectado,17.693976162271966,2.9322114627318663
-690,2,CAMBIO_RUTA,Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,17.693976162271966,2.9322114627318663
-690,10,RECALCULO,Fuego detectado,31.821119069742515,7.934362822746945
-690,6,RECALCULO,Fuego detectado,14.006699189038322,5.102100633333652
-690,12,RECALCULO,Fuego detectado,19.580447200179208,2.3331425745156897
-690,11,RECALCULO,Fuego detectado,14.516427371773853,6.156499374311128
-690,3,RECALCULO,Fuego detectado,17.22084987434803,3.2922586092614052
-690,14,RECALCULO,Fuego detectado,21.548574405505157,1.9562943961025827
-690,14,CAMBIO_RUTA,Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,21.548574405505157,1.9562943961025827
-695,SYSTEM,FUEGO_CREADO,"Pos: 13.256061827956989,9.638870967741935",13.256061827956989,9.638870967741935
-696,14,RECALCULO,Fuego detectado,22.148470017414038,1.966681058350788
-696,11,RECALCULO,Fuego detectado,14.72353866053378,5.939463183404193
-696,12,RECALCULO,Fuego detectado,19.879499600767378,2.0668142884500353
-696,2,RECALCULO,Fuego detectado,18.27990306649817,2.8107403079462556
-696,10,RECALCULO,Fuego detectado,32.40052173224166,8.090223512752141
-696,6,RECALCULO,Fuego detectado,14.074690589227794,5.034377185870287
-696,3,RECALCULO,Fuego detectado,17.768617605173564,3.0474106706010278
-696,3,CAMBIO_RUTA,Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,17.768617605173564,3.0474106706010278
-703,SYSTEM,FUEGO_CREADO,"Pos: 11.97701612903226,8.494170506912443",11.97701612903226,8.494170506912443
-704,10,RECALCULO,Fuego detectado,33.17305861557384,8.298037766092401
-704,2,RECALCULO,Fuego detectado,19.05750362230732,2.631954208512343
-704,11,RECALCULO,Fuego detectado,14.998905011229246,5.649336736794079
-704,11,CAMBIO_RUTA,Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,14.998905011229246,5.649336736794079
-704,6,RECALCULO,Fuego detectado,14.268826430969195,4.878648324666752
-704,6,CAMBIO_RUTA,Frontera_virtual_7 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,14.268826430969195,4.878648324666752
-704,12,RECALCULO,Fuego detectado,20.629942235324837,2.117270231799037
-704,3,RECALCULO,Fuego detectado,18.55704086843441,2.911988090260049
-704,14,RECALCULO,Fuego detectado,22.948142426442512,1.9895631787474612
-708,SYSTEM,FUEGO_CREADO,"Pos: 13.318454301075269,5.123663594470047",13.318454301075269,5.123663594470047
-709,2,RECALCULO,Fuego detectado,19.532424690913253,2.483730438451067
-709,6,RECALCULO,Fuego detectado,14.461208744930428,4.7190078229529835
-709,14,RECALCULO,Fuego detectado,23.44792583378851,2.0042786705983153
-709,12,RECALCULO,Fuego detectado,21.12714551748443,2.1673493156769634
-709,10,RECALCULO,Fuego detectado,33.65589416765645,8.427921674430063
-709,11,RECALCULO,Fuego detectado,15.199723067379086,5.502158343853271
-709,3,RECALCULO,Fuego detectado,19.05013956537462,2.8292011645056383
-712,SYSTEM,FUEGO_CREADO,"Pos: 15.283817204301078,5.155460829493089",15.283817204301078,5.155460829493089
-713,10,RECALCULO,Fuego detectado,34.04216260932254,8.531828801100193
-713,6,RECALCULO,Fuego detectado,14.53463993731312,4.551098112987527
-713,14,RECALCULO,Fuego detectado,23.84775239203338,2.016056757117202
-713,14,CAMBIO_RUTA,Puerta_simple_3 -> Habitacion_9 -> Salida_5,23.84775239203338,2.016056757117202
-713,12,RECALCULO,Fuego detectado,21.527054336705273,2.1734343886390626
-713,12,CAMBIO_RUTA,Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,21.527054336705273,2.1734343886390626
-713,2,RECALCULO,Fuego detectado,19.54939422825965,2.267849429722555
-713,11,RECALCULO,Fuego detectado,15.387697737941883,5.438175425414228
-713,3,RECALCULO,Fuego detectado,19.444618522933624,2.762971623942802
-716,SYSTEM,FUEGO_CREADO,"Pos: 15.970134408602151,5.2826497695852535",15.970134408602151,5.2826497695852535
-717,2,RECALCULO,Fuego detectado,19.54793824650347,2.123768727903081
-717,14,RECALCULO,Fuego detectado,24.146932735024727,2.2569798299543535
-717,11,RECALCULO,Fuego detectado,15.441869445276868,5.44081359703225
-717,12,RECALCULO,Fuego detectado,21.92695653340664,2.1649307432238203
-717,10,RECALCULO,Fuego detectado,34.42843105098863,8.635735927770323
-717,6,RECALCULO,Fuego detectado,14.621323316759268,4.406079544142612
-717,6,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,14.621323316759268,4.406079544142612
-717,3,RECALCULO,Fuego detectado,19.61356558320728,2.5706807233076843
+1,6,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,4.5,12.0
+1,2,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,3.5,17.5
+1,4,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,2.5,14.5
+1,5,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,3.0,12.5
+1,11,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,4.0,13.5
+1,10,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,5.0,15.0
+347,6,EVACUACION_COMPLETA,Tiempo: 347,37.53984121599922,9.837977686498144
+370,10,EVACUACION_COMPLETA,Tiempo: 370,37.592308428007705,9.826302013119527
+384,3,EVACUACION_COMPLETA,Tiempo: 384,37.5786220011993,9.825795326116962
+414,7,EVACUACION_COMPLETA,Tiempo: 414,37.58198611217989,9.886167264722426
+443,8,EVACUACION_COMPLETA,Tiempo: 443,37.50598143723779,9.895186319238876
+456,9,EVACUACION_COMPLETA,Tiempo: 456,37.529698994371124,9.888546325004219
+470,14,EVACUACION_COMPLETA,Tiempo: 470,37.52312440406889,9.890143291340747
+491,2,EVACUACION_COMPLETA,Tiempo: 491,37.59806236630837,9.897500622935327
+508,11,EVACUACION_COMPLETA,Tiempo: 508,37.51698329764508,9.890810239301825
+538,5,EVACUACION_COMPLETA,Tiempo: 538,37.552968165526956,9.889887380909332
+551,12,EVACUACION_COMPLETA,Tiempo: 551,37.506042493428,9.890997882366081
+919,4,EVACUACION_COMPLETA,Tiempo: 919,37.52352557938469,9.948939718533762
+962,13,EVACUACION_COMPLETA,Tiempo: 962,37.53136712984787,9.94829648932678
+990,1,EVACUACION_COMPLETA,Tiempo: 990,37.52848347514017,9.948527474208422

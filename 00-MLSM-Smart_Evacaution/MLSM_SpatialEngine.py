@@ -750,9 +750,12 @@ class DiseñadorConectado:
         for id_puerta, tipo, coords in datos_puertas:
             datos["muros"].append({"id": id_puerta, "tipo": tipo, "poligono": coords})
 
-        # 3. Enrutamiento del File System
-        carpeta_destino = "escenarios"
-        os.makedirs(carpeta_destino, exist_ok=True) # Asegura que la carpeta existe en el repo
+        # 3. Enrutamiento del File System Absoluto
+        # __file__ obtiene la ruta exacta de este script (MLSM_SpatialEngine.py)
+        directorio_script = os.path.dirname(os.path.abspath(__file__))
+        carpeta_destino = os.path.join(directorio_script, "escenarios")
+        
+        os.makedirs(carpeta_destino, exist_ok=True) 
         ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
 
         # Escritura en disco

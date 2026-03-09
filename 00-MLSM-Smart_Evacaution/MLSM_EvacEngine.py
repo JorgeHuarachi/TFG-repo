@@ -772,8 +772,38 @@ def update(frame):
     texto_info.set_text(f"Evacuados: {model.evacuados} | Activos: {agentes_activos}")
     return circulos_fisicos + circulos_personales + lineas_rastro + lineas_intencion + lineas_grafo + [texto_info] + artistas_fuego
 
-ani = animation.FuncAnimation(fig, update, frames=600, init_func=init, interval=30, blit=True)
-plt.show()
+# =====================================================================
+# --- 7. EXPORTACIÓN Y RENDERIZADO ---
+# =====================================================================
+GUARDAR_GIF = True   # <--- PONLO A 'False' PARA DESACTIVAR LA GRABACIÓN LUEGO
+ARCHIVO_GIF = os.path.join(BASE_DIR, "resultados", "evacuacion_demo.gif")
 
-# AL CERRAR LA VENTANA, EXPORTA LOS DATOS
-model.datos.exportar_csv(nombre_salida=ruta_resultados) 
+# Generador inteligente: Solo crea frames mientras queden agentes dentro
+def generador_frames():
+    frame = 0
+    # Mientras los evacuados sean menos que el total de agentes, sigue grabando
+    while model.evacuados < len(model.todos_los_agentes):
+        yield frame
+        frame += 1
+
+# Creamos la animación pasándole el generador en lugar de un número fijo
+ani = animation.FuncAnimation(
+    fig, update, 
+    frames=generador_frames, 
+    init_func=init, 
+    interval=30, 
+    blit=True,
+    save_count=2000  # Un límite de seguridad (aprox 1 minuto de vídeo a 30fps)
+)
+
+if GUARDAR_GIF:
+    print(f"🎥 Grabando simulación en segundo plano... (Ten paciencia)")
+    ani.save(ARCHIVO_GIF, writer='pillow', fps=30)
+    print(f"✅ ¡Video GIF guardado con éxito en '{ARCHIVO_GIF}'!")
+else:
+    # Si GUARDAR_GIF es False, simplemente abre la ventana interactiva
+    plt.show()
+
+# AL TERMINAR (ya sea al cerrar la ventana o al acabar el GIF), EXPORTA LOS DATOS
+model.datos.exportar_csv(nombre_salida=ruta_resultados)
+
