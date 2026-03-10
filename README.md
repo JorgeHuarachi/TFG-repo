@@ -13,5 +13,5 @@ Archivos relacionados al TFG como:
 
 
 
-> [_Nota para alguien que recien clona este repositorio_](Notas/Nota_venv_requiremetns.md)
+> Consulta la [Guía de Instalación y Despliegue (Setup.md)](Notas/Setup.md) para clonar el repositorio y configurar el entorno virtual.
 
