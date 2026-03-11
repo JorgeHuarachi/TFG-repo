@@ -1,0 +1,11 @@
+{
+    "configuracion": {
+        "ancho": 20,
+        "alto": 10
+    },
+    "conexiones_horizontales": [],
+    "conexiones_verticales": [],
+    "agentesspawn": [],
+    "espacios_navegables": {},
+    "muros": []
+}

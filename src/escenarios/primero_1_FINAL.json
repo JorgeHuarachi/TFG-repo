@@ -1,0 +1,293 @@
+{
+    "configuracion": {
+        "ancho": 10,
+        "alto": 5
+    },
+    "conexiones_horizontales": [
+        {
+            "origen": "Habitacion_1",
+            "destino": "Salida_1",
+            "tipo": "navegable_puerta",
+            "color": "cyan",
+            "estilo": "-"
+        }
+    ],
+    "conexiones_verticales": [
+        {
+            "nodo_id": "Habitacion_1",
+            "capa_superior": "adyacencia_fisica",
+            "capa_inferior": "navegable_puerta",
+            "tipo_conexion": "representa_el_mismo_espacio"
+        },
+        {
+            "nodo_id": "Habitacion_1",
+            "capa_superior": "adyacencia_fisica",
+            "capa_inferior": "navegable_puerta",
+            "tipo_conexion": "representa_el_mismo_espacio"
+        },
+        {
+            "nodo_id": "Salida_1",
+            "capa_superior": "navegable_puerta",
+            "capa_inferior": "door_to_door",
+            "tipo_conexion": "representa_el_mismo_espacio"
+        }
+    ],
+    "agentesspawn": [
+        [
+            1.5,
+            4.0
+        ],
+        [
+            1.0,
+            2.5
+        ],
+        [
+            2.0,
+            0.5
+        ]
+    ],
+    "espacios_navegables": {
+        "Habitacion_1": {
+            "centroide": [
+                7.0,
+                2.0
+            ],
+            "poligono": [
+                [
+                    4.5,
+                    4.5
+                ],
+                [
+                    9.5,
+                    4.5
+                ],
+                [
+                    9.5,
+                    -0.5
+                ],
+                [
+                    4.5,
+                    -0.5
+                ]
+            ],
+            "atributos": {
+                "clase_indoor": "NavigableSpace",
+                "categoria": "Room",
+                "locomotion": [
+                    "Walking",
+                    "Rolling"
+                ]
+            }
+        },
+        "Salida_1": {
+            "centroide": [
+                9.5,
+                1.5
+            ],
+            "poligono": [
+                [
+                    9.6,
+                    2.5
+                ],
+                [
+                    9.4,
+                    2.5
+                ],
+                [
+                    9.4,
+                    0.5
+                ],
+                [
+                    9.6,
+                    0.5
+                ]
+            ],
+            "atributos": {
+                "clase_indoor": "AnchorSpace",
+                "categoria": "Transition",
+                "locomotion": [
+                    "Walking",
+                    "Rolling"
+                ]
+            }
+        }
+    },
+    "muros": [
+        {
+            "id": "Muro_exterior_1_part0",
+            "tipo": "muro_exterior",
+            "poligono": [
+                [
+                    9.5,
+                    -0.3
+                ],
+                [
+                    9.5,
+                    -0.7
+                ],
+                [
+                    -0.5,
+                    -0.7
+                ],
+                [
+                    -0.5,
+                    -0.3
+                ]
+            ]
+        },
+        {
+            "id": "Muro_exterior_2_part0",
+            "tipo": "muro_exterior",
+            "poligono": [
+                [
+                    9.3,
+                    4.5
+                ],
+                [
+                    9.7,
+                    4.5
+                ],
+                [
+                    9.7,
+                    -0.5
+                ],
+                [
+                    9.3,
+                    -0.5
+                ]
+            ]
+        },
+        {
+            "id": "Muro_exterior_3_part0",
+            "tipo": "muro_exterior",
+            "poligono": [
+                [
+                    -0.5,
+                    4.3
+                ],
+                [
+                    -0.5,
+                    4.7
+                ],
+                [
+                    9.5,
+                    4.7
+                ],
+                [
+                    9.5,
+                    4.3
+                ]
+            ]
+        },
+        {
+            "id": "Muro_exterior_4_part0",
+            "tipo": "muro_exterior",
+            "poligono": [
+                [
+                    -0.3,
+                    -0.5
+                ],
+                [
+                    -0.7,
+                    -0.5
+                ],
+                [
+                    -0.7,
+                    4.5
+                ],
+                [
+                    -0.3,
+                    4.5
+                ]
+            ]
+        },
+        {
+            "id": "Muro_interior_5_part0",
+            "tipo": "muro_interior",
+            "poligono": [
+                [
+                    4.425,
+                    4.5
+                ],
+                [
+                    4.575,
+                    4.5
+                ],
+                [
+                    4.575,
+                    -0.5
+                ],
+                [
+                    4.425,
+                    -0.5
+                ]
+            ]
+        },
+        {
+            "id": "Muro_interior_6_part0",
+            "tipo": "muro_interior",
+            "poligono": [
+                [
+                    4.575,
+                    2.5
+                ],
+                [
+                    4.425,
+                    2.5
+                ],
+                [
+                    4.425,
+                    3.5
+                ],
+                [
+                    4.575,
+                    3.5
+                ]
+            ]
+        },
+        {
+            "id": "Muro_interior_7_part0",
+            "tipo": "muro_interior",
+            "poligono": [
+                [
+                    4.425,
+                    1.5
+                ],
+                [
+                    4.575,
+                    1.5
+                ],
+                [
+                    4.575,
+                    0.0
+                ],
+                [
+                    4.425,
+                    0.0
+                ]
+            ]
+        },
+        {
+            "id": "Salida_1_part0",
+            "tipo": "salida",
+            "poligono": [
+                [
+                    9.6,
+                    0.5
+                ],
+                [
+                    9.4,
+                    0.5
+                ],
+                [
+                    9.4,
+                    2.5
+                ],
+                [
+                    9.6,
+                    2.5
+                ]
+            ]
+        }
+    ]
+}

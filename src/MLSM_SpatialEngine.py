@@ -25,8 +25,8 @@ from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.ops import unary_union
 
 # --- CONFIGURACIÓN ---
-ANCHO = 40
-ALTO = 20
+ANCHO = 10
+ALTO = 5
 
 class DiseñadorConectado:
     def __init__(self, ancho, alto, nombre_archivo="escenario_base"):
@@ -341,7 +341,12 @@ class DiseñadorConectado:
             if len(self.puntos_zona_temp) > 0 and x == self.puntos_zona_temp[-1][0] and y == self.puntos_zona_temp[-1][1]:
                 if len(self.puntos_zona_temp) >= 3:
                     nombre_final = f"SALIDA_{self.cont_salida}" if self.modo == 'salida' else f"Habitacion_{self.cont_hab}"
-                    
+                    # --- AQUÍ ESTÁ LA SOLUCIÓN: Sumar 1 a los contadores ---
+                    if self.modo == 'salida': 
+                        self.cont_salida += 1
+                    else: 
+                        self.cont_hab += 1
+                    # -------------------------------------------------------
                     # MAGIA SHAPELY: Usamos el polígono para calcular el Centro de Masa (Centroide)
                     # Esto asegura que la etiqueta del texto y el nodo del grafo queden perfectamente centrados
                     poly_shapely = ShapelyPolygon(self.puntos_zona_temp)
