@@ -9,9 +9,8 @@ Archivos relacionados al TFG como:
 * [Modelado_BBDD](Modelado_BBDD/)
 * [visual_simulacion](visual_simulacion/) _(se ven las primeras simulaciones y preubas)_
 
-![Animación](00-MLSM-Smart_Evacaution/resultados/evacuacion_demo.gif)
+![Animación](src/resultados/evacuacion_demo.gif)
 
 
-
-> Consulta la [Guía de Instalación y Despliegue (Setup.md)](Notas/Setup.md) para clonar el repositorio y configurar el entorno virtual.
+> Consulta la [Guía de Instalación y Despliegue (Setup.md)](Setup.md) para clonar el repositorio y configurar el entorno virtual.
 

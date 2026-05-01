@@ -579,11 +579,11 @@ class AgentePro(mesa.Agent):
                 fuerza += np.random.uniform(-1, 1, 2) # Ruido para desempate si se solapan en (0,0)
                 continue
             if dist < RADIO_PERSONAL:
-                 # Fuerza suave que decae con la distancia
+                # Fuerza suave que decae con la distancia
                  fuerza += (vec_alej / dist) * (1.5 * np.exp(-dist_piel))
         if hay_vecinos:
-             # Micro-variaciones para naturalidad
-             fuerza += np.random.uniform(-0.05, 0.05, 2)
+            # Micro-variaciones para naturalidad
+            fuerza += np.random.uniform(-0.05, 0.05, 2)
 
         # Limitador absoluto del "Físico del Agente"
         norm_f = np.linalg.norm(fuerza)
@@ -605,9 +605,9 @@ class AgentePro(mesa.Agent):
         else:
             self.velocidad_actual *= 0.1 # Colisión "blanda": pierde casi toda su energía si toca un polígono
 
-# --- 5. EJECUCIÓN (¡AQUÍ DEFINES TUS ESCENARIOS!) ---
+# --- 5. EJECUCIÓN (ESCENARIOS) ---
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
 
 # Unimos esa ruta base con las carpetas de nuestro proyecto
 ruta_escenario = os.path.join(BASE_DIR, "escenarios", "v3_TEST5_FINAL.json")
@@ -775,7 +775,7 @@ def update(frame):
 # =====================================================================
 # --- 7. EXPORTACIÓN Y RENDERIZADO ---
 # =====================================================================
-GUARDAR_GIF = True   # <--- PONLO A 'False' PARA DESACTIVAR LA GRABACIÓN LUEGO
+GUARDAR_GIF = False   # <--- PONLO A 'False' PARA DESACTIVAR LA GRABACIÓN LUEGO
 ARCHIVO_GIF = os.path.join(BASE_DIR, "resultados", "evacuacion_demo.gif")
 
 # Generador inteligente: Solo crea frames mientras queden agentes dentro
