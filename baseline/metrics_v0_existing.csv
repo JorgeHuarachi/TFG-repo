@@ -1,0 +1,29 @@
+Step,AgenteID,Evento,Valor,Pos_X,Pos_Y
+1,7,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.5,13.0
+1,11,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,4.0,13.5
+1,1,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.0,18.0
+1,4,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,2.5,14.5
+1,10,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,5.0,15.0
+1,9,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,5.5,15.5
+1,12,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,1.5,17.5
+1,3,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,3.0,16.0
+1,14,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,8.5,17.5
+1,5,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,3.0,12.5
+1,8,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,7.5,15.5
+1,6,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_5 -> Puerta_simple_1 -> Habitacion_8 -> Puerta_simple_4 -> Habitacion_7 -> Frontera_virtual_9 -> Habitacion_9 -> Salida_5,4.5,12.0
+1,2,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,3.5,17.5
+1,13,CAMBIO_RUTA,Habitacion_2 -> Frontera_virtual_6 -> Habitacion_2 -> Frontera_virtual_8 -> Habitacion_3 -> Puerta_simple_2 -> Habitacion_4 -> Puerta_simple_3 -> Habitacion_9 -> Salida_5,5.5,17.5
+383,13,EVACUACION_COMPLETA,Tiempo: 383,37.59128163085907,9.825889271814772
+392,2,EVACUACION_COMPLETA,Tiempo: 392,37.590168003113256,9.82550671587993
+415,7,EVACUACION_COMPLETA,Tiempo: 415,37.51864197352618,9.890698202292189
+435,8,EVACUACION_COMPLETA,Tiempo: 435,37.504365572116726,9.891909459850124
+453,11,EVACUACION_COMPLETA,Tiempo: 453,37.59258831061628,9.898080425492585
+466,9,EVACUACION_COMPLETA,Tiempo: 466,37.50931963106428,9.891024005411184
+480,14,EVACUACION_COMPLETA,Tiempo: 480,37.552404189030156,9.89079911907578
+493,5,EVACUACION_COMPLETA,Tiempo: 493,37.543298839760354,9.887977350822093
+505,1,EVACUACION_COMPLETA,Tiempo: 505,37.519782765944676,9.893677426678117
+518,4,EVACUACION_COMPLETA,Tiempo: 518,37.59258881859309,9.894432755570762
+528,12,EVACUACION_COMPLETA,Tiempo: 528,37.50981835386913,9.890839460279324
+546,3,EVACUACION_COMPLETA,Tiempo: 546,37.581155050762455,9.886433077383971
+695,6,EVACUACION_COMPLETA,Tiempo: 695,37.595732854076864,9.897874399085316
+999,10,EVACUACION_COMPLETA,Tiempo: 999,37.52554775036771,9.948678216897513
