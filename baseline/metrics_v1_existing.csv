@@ -1,0 +1,32 @@
+Step,AgenteID,Evento,Valor,Pos_X,Pos_Y
+1,9,CAMBIO_RUTA,Puerta_doble_2 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,2.0,3.5
+1,6,CAMBIO_RUTA,Habitacion_1 -> Puerta_doble_2 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,0.5,1.5
+1,7,CAMBIO_RUTA,Puerta_simple_1 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,0.0,0.0
+1,8,CAMBIO_RUTA,Puerta_simple_1 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,1.0,0.0
+1,14,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,4.0,1.5
+1,3,CAMBIO_RUTA,Habitacion_1 -> Puerta_doble_2 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,1.0,2.5
+1,1,CAMBIO_RUTA,Puerta_doble_2 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,0.0,3.5
+1,12,CAMBIO_RUTA,Puerta_simple_1 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,2.0,0.0
+1,2,CAMBIO_RUTA,Puerta_doble_2 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,0.5,3.5
+1,10,CAMBIO_RUTA,Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,2.0,2.5
+1,11,CAMBIO_RUTA,Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,2.5,1.5
+1,13,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,4.0,2.5
+64,14,EVACUACION_COMPLETA,Tiempo: 64,7.70846074640378,0.6254937918534953
+96,13,EVACUACION_COMPLETA,Tiempo: 96,7.775827401256167,0.5836498420762686
+103,11,EVACUACION_COMPLETA,Tiempo: 103,7.765946501302205,0.5817212249260111
+119,10,EVACUACION_COMPLETA,Tiempo: 119,7.753039233491932,0.5441825380754135
+127,9,EVACUACION_COMPLETA,Tiempo: 127,7.746955587057012,0.5430262391442126
+136,12,EVACUACION_COMPLETA,Tiempo: 136,7.784061105807608,0.622574936745975
+147,3,EVACUACION_COMPLETA,Tiempo: 147,7.775818660611152,0.6345348917660978
+172,1,EVACUACION_COMPLETA,Tiempo: 172,7.751750785494639,0.5472600786979642
+198,8,EVACUACION_COMPLETA,Tiempo: 198,7.758166758064762,0.606862496608635
+253,2,EVACUACION_COMPLETA,Tiempo: 253,7.720857180806284,0.6677010187847868
+268,SYSTEM,FUEGO_CREADO,"Pos: 5.864649462365591,3.7799640701350974",5.864649462365591,3.7799640701350974
+269,7,RECALCULO,Fuego detectado,1.1244233965499453,2.05154817925932
+269,7,CAMBIO_RUTA,Habitacion_1 -> Puerta_doble_2 -> Habitacion_2 -> Puerta_simple_7 -> Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,1.1244233965499453,2.05154817925932
+269,5,RECALCULO,Fuego detectado,0.0,1.5
+269,4,RECALCULO,Fuego detectado,0.5,2.5
+269,6,RECALCULO,Fuego detectado,4.80469403060819,1.4724133510684654
+269,6,CAMBIO_RUTA,Habitacion_3 -> Puerta_simple_18 -> Habitacion_8 -> Frontera_virtual_15 -> Habitacion_5 -> Puerta_simple_9 -> Habitacion_9 -> Salida_16,4.80469403060819,1.4724133510684654
+336,6,EVACUACION_COMPLETA,Tiempo: 336,7.767475409751273,0.6039860366845339
+378,7,EVACUACION_COMPLETA,Tiempo: 378,7.7430267526699295,0.5786703137130066
