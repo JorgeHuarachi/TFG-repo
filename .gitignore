@@ -1,6 +1,7 @@
 # Archivos temporales
 *.log
 *.tmp
+~$*
 
 # Configuración local
 .vscode/
