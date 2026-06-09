@@ -1,0 +1,1487 @@
+{
+  "schema_version": "2.0.0",
+  "metadata": {
+    "name": "MLSM JSON v2 Minimal Example - Two Spaces and One Door",
+    "description": "Ejemplo mínimo con dos espacios navegables conectados mediante un transfer_space de tipo puerta. Incluye muros exteriores, un muro interior, boundaries navegables/no navegables y grafos básicos.",
+    "author": "MLSM TFG",
+    "reference_standard": "IndoorGML/IndoorJSON-inspired MLSM JSON v2"
+  },
+  "crs": {
+    "type": "local",
+    "srid": 0,
+    "unit": "meters",
+    "origin": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "description": "Sistema de coordenadas local del edificio."
+  },
+  "levels": [
+    {
+      "level_id": "LEVEL_00",
+      "name": "Planta baja",
+      "floor_index": 0,
+      "floor_z": 0.0,
+      "ceiling_z": 3.0,
+      "height_m": 3.0,
+      "description": "Ejemplo mínimo de una sola planta.",
+      "spatial_extent_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              6.7,
+              0.0
+            ],
+            [
+              6.7,
+              3.6
+            ],
+            [
+              0.0,
+              3.6
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      }
+    }
+  ],
+  "catalogs": {
+    "wall_types": [
+      {
+        "catalog_id": "WALL_EXTERIOR_30CM",
+        "element_type": "wall",
+        "wall_type": "exterior",
+        "default_thickness_m": 0.3,
+        "default_height_m": 3.0,
+        "default_material": "generic_masonry",
+        "description": "Muro exterior de 30 cm."
+      },
+      {
+        "catalog_id": "WALL_INTERIOR_10CM",
+        "element_type": "wall",
+        "wall_type": "interior",
+        "default_thickness_m": 0.1,
+        "default_height_m": 3.0,
+        "default_material": "partition",
+        "description": "Muro interior de 10 cm."
+      }
+    ],
+    "door_types": [
+      {
+        "catalog_id": "DOOR_SINGLE_90CM",
+        "element_type": "door",
+        "door_type": "single_leaf",
+        "default_width_m": 0.9,
+        "default_height_m": 2.1,
+        "description": "Puerta simple de 90 cm."
+      }
+    ],
+    "window_types": [],
+    "space_types": [
+      {
+        "catalog_id": "SPACE_ROOM_NAVIGABLE",
+        "space_type": "navigable_space",
+        "category": "room",
+        "default_locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "description": "Habitación navegable."
+      },
+      {
+        "catalog_id": "SPACE_DOOR_TRANSFER",
+        "space_type": "transfer_space",
+        "category": "door_space",
+        "default_locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "description": "Espacio de transferencia asociado a una puerta."
+      }
+    ],
+    "stair_types": [],
+    "ramp_types": [],
+    "elevator_types": [],
+    "beacon_types": [],
+    "hazard_types": []
+  },
+  "physical_elements": [
+    {
+      "element_id": "PE_WALL_EXT_SOUTH",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "WALL_EXTERIOR_30CM",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.15,
+            0.15
+          ],
+          [
+            6.55,
+            0.15
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              6.7,
+              0.0
+            ],
+            [
+              6.7,
+              0.3
+            ],
+            [
+              0.0,
+              0.3
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "thickness_m": 0.3,
+        "is_exterior": true
+      }
+    },
+    {
+      "element_id": "PE_WALL_EXT_NORTH",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "WALL_EXTERIOR_30CM",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.15,
+            3.45
+          ],
+          [
+            6.55,
+            3.45
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              3.3
+            ],
+            [
+              6.7,
+              3.3
+            ],
+            [
+              6.7,
+              3.6
+            ],
+            [
+              0.0,
+              3.6
+            ],
+            [
+              0.0,
+              3.3
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "thickness_m": 0.3,
+        "is_exterior": true
+      }
+    },
+    {
+      "element_id": "PE_WALL_EXT_WEST",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "WALL_EXTERIOR_30CM",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.15,
+            0.15
+          ],
+          [
+            0.15,
+            3.45
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.3,
+              0.0
+            ],
+            [
+              0.3,
+              3.6
+            ],
+            [
+              0.0,
+              3.6
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "thickness_m": 0.3,
+        "is_exterior": true
+      }
+    },
+    {
+      "element_id": "PE_WALL_EXT_EAST",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "WALL_EXTERIOR_30CM",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.55,
+            0.15
+          ],
+          [
+            6.55,
+            3.45
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.4,
+              0.0
+            ],
+            [
+              6.7,
+              0.0
+            ],
+            [
+              6.7,
+              3.6
+            ],
+            [
+              6.4,
+              3.6
+            ],
+            [
+              6.4,
+              0.0
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "thickness_m": 0.3,
+        "is_exterior": true
+      }
+    },
+    {
+      "element_id": "PE_WALL_INT_001",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "WALL_INTERIOR_10CM",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.35,
+            0.3
+          ],
+          [
+            3.35,
+            3.3
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              3.3,
+              0.3
+            ],
+            [
+              3.4,
+              0.3
+            ],
+            [
+              3.4,
+              3.3
+            ],
+            [
+              3.3,
+              3.3
+            ],
+            [
+              3.3,
+              0.3
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "thickness_m": 0.1,
+        "is_exterior": false
+      }
+    },
+    {
+      "element_id": "PE_DOOR_001",
+      "level_id": "LEVEL_00",
+      "element_type": "door",
+      "catalog_ref": "DOOR_SINGLE_90CM",
+      "centerline_2d": {
+        "type": "Point",
+        "coordinates": [
+          3.35,
+          1.8
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              3.3,
+              1.35
+            ],
+            [
+              3.4,
+              1.35
+            ],
+            [
+              3.4,
+              2.25
+            ],
+            [
+              3.3,
+              2.25
+            ],
+            [
+              3.3,
+              1.35
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "host_wall_ref": "PE_WALL_INT_001",
+        "width_m": 0.9,
+        "authoring_geometry": "anchor_point_on_host_wall",
+        "derivation_note": "El footprint de la puerta se deriva del punto ancla, el muro hospedador y el ancho de catálogo."
+      }
+    }
+  ],
+  "spaces": [
+    {
+      "space_id": "S1",
+      "level_id": "LEVEL_00",
+      "space_type": "navigable_space",
+      "name": "Habitación 1",
+      "category": "room",
+      "function": "General",
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          1.8,
+          1.8
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.3,
+              0.3
+            ],
+            [
+              3.3,
+              0.3
+            ],
+            [
+              3.3,
+              3.3
+            ],
+            [
+              0.3,
+              3.3
+            ],
+            [
+              0.3,
+              0.3
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "area_sqm": 9.0,
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_DOOR_1",
+      "level_id": "LEVEL_00",
+      "space_type": "transfer_space",
+      "name": "Puerta entre habitaciones",
+      "category": "door_space",
+      "function": "ConnectionSpace",
+      "physical_element_ref": "PE_DOOR_001",
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          3.35,
+          1.8
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              3.3,
+              1.35
+            ],
+            [
+              3.4,
+              1.35
+            ],
+            [
+              3.4,
+              2.25
+            ],
+            [
+              3.3,
+              2.25
+            ],
+            [
+              3.3,
+              1.35
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "area_sqm": 0.09,
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S2",
+      "level_id": "LEVEL_00",
+      "space_type": "navigable_space",
+      "name": "Habitación 2",
+      "category": "room",
+      "function": "General",
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          4.9,
+          1.8
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              3.4,
+              0.3
+            ],
+            [
+              6.4,
+              0.3
+            ],
+            [
+              6.4,
+              3.3
+            ],
+            [
+              3.4,
+              3.3
+            ],
+            [
+              3.4,
+              0.3
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "area_sqm": 9.0,
+        "accessible": true
+      }
+    }
+  ],
+  "boundaries": [
+    {
+      "boundary_id": "B_S1_DOOR_1",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S1"
+      },
+      "target_ref": {
+        "entity_type": "space",
+        "entity_id": "S_DOOR_1"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.3,
+            1.35
+          ],
+          [
+            3.3,
+            2.25
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": true,
+        "derived": true,
+        "derivation_source": "geometry_contact",
+        "via_element": "PE_DOOR_001"
+      },
+      "source_space_id": "S1",
+      "target_space_id": "S_DOOR_1",
+      "description": "Interfaz navegable entre S1 y el door_space."
+    },
+    {
+      "boundary_id": "B_DOOR_1_S2",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S_DOOR_1"
+      },
+      "target_ref": {
+        "entity_type": "space",
+        "entity_id": "S2"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.4,
+            1.35
+          ],
+          [
+            3.4,
+            2.25
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": true,
+        "derived": true,
+        "derivation_source": "geometry_contact",
+        "via_element": "PE_DOOR_001"
+      },
+      "source_space_id": "S_DOOR_1",
+      "target_space_id": "S2",
+      "description": "Interfaz navegable entre el door_space y S2."
+    },
+    {
+      "boundary_id": "B_S1_WEST_WALL",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S1"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_EXT_WEST"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.3,
+            0.3
+          ],
+          [
+            0.3,
+            3.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S1",
+      "description": "Contacto no navegable entre S1 y muro exterior oeste."
+    },
+    {
+      "boundary_id": "B_S1_SOUTH_WALL",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S1"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_EXT_SOUTH"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.3,
+            0.3
+          ],
+          [
+            3.3,
+            0.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S1"
+    },
+    {
+      "boundary_id": "B_S1_NORTH_WALL",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S1"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_EXT_NORTH"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.3,
+            3.3
+          ],
+          [
+            3.3,
+            3.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S1"
+    },
+    {
+      "boundary_id": "B_S1_INT_WALL_LOWER",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S1"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_INT_001"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.3,
+            0.3
+          ],
+          [
+            3.3,
+            1.35
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S1"
+    },
+    {
+      "boundary_id": "B_S1_INT_WALL_UPPER",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S1"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_INT_001"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.3,
+            2.25
+          ],
+          [
+            3.3,
+            3.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S1"
+    },
+    {
+      "boundary_id": "B_S2_EAST_WALL",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S2"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_EXT_EAST"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.4,
+            0.3
+          ],
+          [
+            6.4,
+            3.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S2"
+    },
+    {
+      "boundary_id": "B_S2_SOUTH_WALL",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S2"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_EXT_SOUTH"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.4,
+            0.3
+          ],
+          [
+            6.4,
+            0.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S2"
+    },
+    {
+      "boundary_id": "B_S2_NORTH_WALL",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S2"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_EXT_NORTH"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.4,
+            3.3
+          ],
+          [
+            6.4,
+            3.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S2"
+    },
+    {
+      "boundary_id": "B_S2_INT_WALL_LOWER",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S2"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_INT_001"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.4,
+            0.3
+          ],
+          [
+            3.4,
+            1.35
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S2"
+    },
+    {
+      "boundary_id": "B_S2_INT_WALL_UPPER",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_ref": {
+        "entity_type": "space",
+        "entity_id": "S2"
+      },
+      "target_ref": {
+        "entity_type": "physical_element",
+        "entity_id": "PE_WALL_INT_001"
+      },
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            3.4,
+            2.25
+          ],
+          [
+            3.4,
+            3.3
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "bidirectional": false,
+        "derived": true,
+        "derivation_source": "geometry_contact"
+      },
+      "source_space_id": "S2"
+    }
+  ],
+  "graphs": {
+    "adjacency_graph": {
+      "graph_id": "GRAPH_ADJ_MINIMAL_001",
+      "graph_type": "adjacency_graph",
+      "level_id": "LEVEL_00",
+      "purpose": "Grafo de contacto físico/topológico. Incluye spaces y muros como adyacencia física extendida.",
+      "nodes": [
+        {
+          "node_id": "N_S1",
+          "space_ref": "S1"
+        },
+        {
+          "node_id": "N_S_DOOR_1",
+          "space_ref": "S_DOOR_1"
+        },
+        {
+          "node_id": "N_S2",
+          "space_ref": "S2"
+        },
+        {
+          "node_id": "N_WALL_EXT_WEST",
+          "physical_element_ref": "PE_WALL_EXT_WEST",
+          "position": {
+            "type": "Point",
+            "coordinates": [
+              0.15,
+              1.8
+            ]
+          }
+        },
+        {
+          "node_id": "N_WALL_EXT_EAST",
+          "physical_element_ref": "PE_WALL_EXT_EAST",
+          "position": {
+            "type": "Point",
+            "coordinates": [
+              6.55,
+              1.8
+            ]
+          }
+        },
+        {
+          "node_id": "N_WALL_EXT_SOUTH",
+          "physical_element_ref": "PE_WALL_EXT_SOUTH",
+          "position": {
+            "type": "Point",
+            "coordinates": [
+              3.35,
+              0.15
+            ]
+          }
+        },
+        {
+          "node_id": "N_WALL_EXT_NORTH",
+          "physical_element_ref": "PE_WALL_EXT_NORTH",
+          "position": {
+            "type": "Point",
+            "coordinates": [
+              3.35,
+              3.45
+            ]
+          }
+        },
+        {
+          "node_id": "N_WALL_INT_001",
+          "physical_element_ref": "PE_WALL_INT_001",
+          "position": {
+            "type": "Point",
+            "coordinates": [
+              3.35,
+              1.8
+            ]
+          }
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "E_ADJ_S1_DOOR_1",
+          "source_node_id": "N_S1",
+          "target_node_id": "N_S_DOOR_1",
+          "relationship_type": "contact_via_boundary",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                3.35,
+                1.8
+              ]
+            ]
+          },
+          "boundary_ref": "B_S1_DOOR_1",
+          "traversable": true
+        },
+        {
+          "edge_id": "E_ADJ_DOOR_1_S2",
+          "source_node_id": "N_S_DOOR_1",
+          "target_node_id": "N_S2",
+          "relationship_type": "contact_via_boundary",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.35,
+                1.8
+              ],
+              [
+                4.9,
+                1.8
+              ]
+            ]
+          },
+          "boundary_ref": "B_DOOR_1_S2",
+          "traversable": true
+        },
+        {
+          "edge_id": "E_ADJ_S1_WEST_WALL",
+          "source_node_id": "N_S1",
+          "target_node_id": "N_WALL_EXT_WEST",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                0.15,
+                1.8
+              ]
+            ]
+          },
+          "boundary_ref": "B_S1_WEST_WALL",
+          "physical_element_ref": "PE_WALL_EXT_WEST",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S1_SOUTH_WALL",
+          "source_node_id": "N_S1",
+          "target_node_id": "N_WALL_EXT_SOUTH",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                1.8,
+                0.15
+              ]
+            ]
+          },
+          "boundary_ref": "B_S1_SOUTH_WALL",
+          "physical_element_ref": "PE_WALL_EXT_SOUTH",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S1_NORTH_WALL",
+          "source_node_id": "N_S1",
+          "target_node_id": "N_WALL_EXT_NORTH",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                1.8,
+                3.45
+              ]
+            ]
+          },
+          "boundary_ref": "B_S1_NORTH_WALL",
+          "physical_element_ref": "PE_WALL_EXT_NORTH",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S1_INT_WALL_LOWER",
+          "source_node_id": "N_S1",
+          "target_node_id": "N_WALL_INT_001",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                3.35,
+                0.825
+              ]
+            ]
+          },
+          "boundary_ref": "B_S1_INT_WALL_LOWER",
+          "physical_element_ref": "PE_WALL_INT_001",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S1_INT_WALL_UPPER",
+          "source_node_id": "N_S1",
+          "target_node_id": "N_WALL_INT_001",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                3.35,
+                2.775
+              ]
+            ]
+          },
+          "boundary_ref": "B_S1_INT_WALL_UPPER",
+          "physical_element_ref": "PE_WALL_INT_001",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S2_EAST_WALL",
+          "source_node_id": "N_S2",
+          "target_node_id": "N_WALL_EXT_EAST",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                4.9,
+                1.8
+              ],
+              [
+                6.55,
+                1.8
+              ]
+            ]
+          },
+          "boundary_ref": "B_S2_EAST_WALL",
+          "physical_element_ref": "PE_WALL_EXT_EAST",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S2_SOUTH_WALL",
+          "source_node_id": "N_S2",
+          "target_node_id": "N_WALL_EXT_SOUTH",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                4.9,
+                1.8
+              ],
+              [
+                4.9,
+                0.15
+              ]
+            ]
+          },
+          "boundary_ref": "B_S2_SOUTH_WALL",
+          "physical_element_ref": "PE_WALL_EXT_SOUTH",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S2_NORTH_WALL",
+          "source_node_id": "N_S2",
+          "target_node_id": "N_WALL_EXT_NORTH",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                4.9,
+                1.8
+              ],
+              [
+                4.9,
+                3.45
+              ]
+            ]
+          },
+          "boundary_ref": "B_S2_NORTH_WALL",
+          "physical_element_ref": "PE_WALL_EXT_NORTH",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S2_INT_WALL_LOWER",
+          "source_node_id": "N_S2",
+          "target_node_id": "N_WALL_INT_001",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                4.9,
+                1.8
+              ],
+              [
+                3.35,
+                0.825
+              ]
+            ]
+          },
+          "boundary_ref": "B_S2_INT_WALL_LOWER",
+          "physical_element_ref": "PE_WALL_INT_001",
+          "traversable": false
+        },
+        {
+          "edge_id": "E_ADJ_S2_INT_WALL_UPPER",
+          "source_node_id": "N_S2",
+          "target_node_id": "N_WALL_INT_001",
+          "relationship_type": "contact_with_physical_element",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                4.9,
+                1.8
+              ],
+              [
+                3.35,
+                2.775
+              ]
+            ]
+          },
+          "boundary_ref": "B_S2_INT_WALL_UPPER",
+          "physical_element_ref": "PE_WALL_INT_001",
+          "traversable": false
+        }
+      ]
+    },
+    "connectivity_graph": {
+      "graph_id": "GRAPH_CONN_MINIMAL_001",
+      "graph_type": "connectivity_graph",
+      "level_id": "LEVEL_00",
+      "purpose": "Grafo de paso real. Solo incluye conexiones atravesables mediante la puerta.",
+      "nodes": [
+        {
+          "node_id": "N_CONN_S1",
+          "space_ref": "S1"
+        },
+        {
+          "node_id": "N_CONN_DOOR_1",
+          "space_ref": "S_DOOR_1",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_CONN_S2",
+          "space_ref": "S2"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "E_CONN_S1_DOOR_1",
+          "source_node_id": "N_CONN_S1",
+          "target_node_id": "N_CONN_DOOR_1",
+          "connector_type": "door_passage",
+          "through_space_id": "S_DOOR_1",
+          "through_element_id": "PE_DOOR_001",
+          "boundary_ref": "B_S1_DOOR_1",
+          "allowed_flows": [
+            "pedestrian",
+            "emergency_exit"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 1,
+          "width_m": 0.9,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                1.8,
+                1.8
+              ],
+              [
+                3.35,
+                1.8
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_CONN_DOOR_1_S2",
+          "source_node_id": "N_CONN_DOOR_1",
+          "target_node_id": "N_CONN_S2",
+          "connector_type": "door_passage",
+          "through_space_id": "S_DOOR_1",
+          "through_element_id": "PE_DOOR_001",
+          "boundary_ref": "B_DOOR_1_S2",
+          "allowed_flows": [
+            "pedestrian",
+            "emergency_exit"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 1,
+          "width_m": 0.9,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.35,
+                1.8
+              ],
+              [
+                4.9,
+                1.8
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "door_to_door_graph": {
+      "graph_id": "GRAPH_D2D_MINIMAL_001",
+      "graph_type": "door_to_door_graph",
+      "level_id": "LEVEL_00",
+      "purpose": "Grafo puerta-a-puerta mínimo. Solo existe una puerta, por lo que no hay aristas door-to-door.",
+      "nodes": [
+        {
+          "node_id": "N_D2D_DOOR_1",
+          "space_ref": "S_DOOR_1",
+          "node_type": "door_space"
+        }
+      ],
+      "edges": []
+    },
+    "vertical_connectivity_graph": {
+      "graph_id": "GRAPH_VERTICAL_MINIMAL_001",
+      "graph_type": "vertical_connectivity_graph",
+      "purpose": "Grafo vertical vacío porque el ejemplo solo tiene una planta.",
+      "nodes": [],
+      "edges": []
+    }
+  },
+  "agent_spawns": [
+    {
+      "spawn_id": "SPAWN_S1_001",
+      "level_id": "LEVEL_00",
+      "space_ref": "S1",
+      "position": {
+        "type": "Point",
+        "coordinates": [
+          1.8,
+          1.8
+        ]
+      },
+      "capacity": 5,
+      "allowed_profiles": [
+        "walking",
+        "rolling"
+      ],
+      "description": "Punto de aparición en la habitación 1."
+    }
+  ],
+  "agents": [],
+  "beacons": [],
+  "hazards": [],
+  "simulation": {
+    "random_seed": 42,
+    "time_step_s": 1.0,
+    "max_steps": 300,
+    "routing": {
+      "source_graph": "connectivity_graph",
+      "use_dynamic_weights": false,
+      "use_beacon_risk": false,
+      "use_hazard_risk": false,
+      "use_congestion": false,
+      "note": "Ejemplo mínimo para validar topología. No representa una evacuación completa porque no incluye salida."
+    },
+    "population": {
+      "mode": "from_agent_spawns",
+      "default_profile": "walking",
+      "default_count": 5
+    }
+  },
+  "indoorjson_mapping": {
+    "core_mapping": {
+      "spaces": "CellSpace",
+      "boundaries": "CellBoundary",
+      "graphs.nodes": "Node",
+      "graphs.edges": "Edge"
+    },
+    "navigation_mapping": {
+      "navigable_space": "NavigableSpace",
+      "transfer_space": "TransferSpace",
+      "navigable_boundary": "NavigableBoundary",
+      "non_navigable_boundary": "NonNavigableBoundary"
+    },
+    "mlsm_extensions": [
+      "physical_elements",
+      "catalogs",
+      "agent_spawns",
+      "simulation",
+      "door_to_door_graph"
+    ]
+  }
+}
