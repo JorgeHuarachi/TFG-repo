@@ -1,0 +1,2019 @@
+{
+  "schema_version": "2.0.0",
+  "metadata": {
+    "name": "MLSM v2 Rich Example — Single Floor Evacuation",
+    "description": "Escenario rico de una planta: dos salas, pasillo, dos puertas, salida, ventana, columna, baliza y configuración inicial de simulación.",
+    "created_at": "2025-12-06T12:00:00Z",
+    "modified_at": "2025-12-06T12:00:00Z",
+    "author": "MLSM Design Phase 2A",
+    "organization": "TFG Project",
+    "reference_standard": "IndoorGML 2.0 (profile MLSM v2)"
+  },
+  "crs": {
+    "type": "local",
+    "srid": 0,
+    "unit": "meters",
+    "origin": {
+      "x": 0,
+      "y": 0
+    },
+    "comment": "Sistema local XY de edificio; todas las plantas comparten el mismo XY."
+  },
+  "levels": [
+    {
+      "level_id": "LEVEL_00",
+      "name": "Planta baja",
+      "floor_index": 0,
+      "floor_z": 0.0,
+      "ceiling_z": 3.0,
+      "height_m": 3.0,
+      "description": "Escenario de evacuación en una planta"
+    }
+  ],
+  "catalogs": {
+    "wall_types": [
+      {
+        "catalog_id": "wall_exterior_30cm",
+        "element_type": "wall",
+        "wall_type": "exterior",
+        "default_width_m": 0.3,
+        "default_material": "concrete",
+        "default_color": "#444444",
+        "description": "Muro exterior de 30 cm"
+      },
+      {
+        "catalog_id": "wall_interior_10cm",
+        "element_type": "wall",
+        "wall_type": "interior",
+        "default_width_m": 0.1,
+        "default_material": "partition",
+        "default_color": "#666666",
+        "description": "Muro interior de 10 cm"
+      }
+    ],
+    "door_types": [
+      {
+        "catalog_id": "door_single_90cm",
+        "element_type": "door",
+        "door_type": "single",
+        "default_width_m": 0.9,
+        "default_height_m": 2.1,
+        "default_material": "wood",
+        "description": "Puerta simple de 90 cm"
+      },
+      {
+        "catalog_id": "door_exit_120cm",
+        "element_type": "door",
+        "door_type": "emergency_exit",
+        "default_width_m": 1.2,
+        "default_height_m": 2.1,
+        "default_material": "steel",
+        "description": "Salida de emergencia de 120 cm"
+      }
+    ],
+    "window_types": [
+      {
+        "catalog_id": "window_fixed_120cm",
+        "element_type": "window",
+        "window_type": "fixed",
+        "default_width_m": 1.2,
+        "default_height_m": 1.2,
+        "description": "Ventana fija de 120 cm"
+      }
+    ],
+    "column_types": [
+      {
+        "catalog_id": "column_square_30cm",
+        "element_type": "column",
+        "column_type": "square",
+        "default_width_m": 0.3,
+        "default_length_m": 0.3,
+        "default_material": "concrete",
+        "description": "Columna cuadrada de 30 cm"
+      }
+    ],
+    "space_types": [
+      {
+        "catalog_id": "space_room",
+        "space_type": "navigable_space",
+        "category": "room",
+        "default_function": "General",
+        "default_locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "description": "Sala navegable"
+      },
+      {
+        "catalog_id": "space_corridor",
+        "space_type": "navigable_space",
+        "category": "corridor",
+        "default_function": "Circulation",
+        "default_locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "description": "Pasillo navegable"
+      },
+      {
+        "catalog_id": "space_door",
+        "space_type": "transfer_space",
+        "category": "door_space",
+        "default_function": "ConnectionSpace",
+        "default_locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "description": "Espacio de puerta"
+      },
+      {
+        "catalog_id": "space_exit",
+        "space_type": "exit_space",
+        "category": "exit",
+        "default_function": "ExitSpace",
+        "default_locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "description": "Salida"
+      },
+      {
+        "catalog_id": "space_window",
+        "space_type": "transfer_space",
+        "category": "window_space",
+        "default_function": "NonNavigableOpening",
+        "default_locomotion": [],
+        "description": "Ventana no transitable en el modelo base"
+      },
+      {
+        "catalog_id": "space_obstacle",
+        "space_type": "object_space",
+        "category": "obstacle",
+        "default_function": "NonNavigable",
+        "default_locomotion": [],
+        "description": "Obstáculo no navegable"
+      }
+    ],
+    "beacon_types": [
+      {
+        "catalog_id": "beacon_environmental_basic",
+        "beacon_type": "environmental_beacon",
+        "sensor_types": [
+          "temperature",
+          "smoke",
+          "co"
+        ],
+        "default_influence_radius_m": 4.0,
+        "description": "Baliza ambiental básica"
+      }
+    ],
+    "hazard_types": [
+      {
+        "catalog_id": "hazard_fire",
+        "hazard_type": "fire",
+        "description": "Peligro de fuego opcional/programable",
+        "default_growth_model": "linear"
+      }
+    ],
+    "stair_types": [],
+    "ramp_types": [],
+    "elevator_types": []
+  },
+  "physical_elements": [
+    {
+      "element_id": "PE_WALL_EXT_SOUTH",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "wall_types/wall_exterior_30cm",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.15,
+            0.15
+          ],
+          [
+            14.85,
+            0.15
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              0.0
+            ],
+            [
+              15.0,
+              0.3
+            ],
+            [
+              0.0,
+              0.3
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_WALL_EXT_NORTH",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "wall_types/wall_exterior_30cm",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.15,
+            8.45
+          ],
+          [
+            14.85,
+            8.45
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              8.3
+            ],
+            [
+              15.0,
+              8.3
+            ],
+            [
+              15.0,
+              8.6
+            ],
+            [
+              0.0,
+              8.6
+            ],
+            [
+              0.0,
+              8.3
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_WALL_EXT_WEST",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "wall_types/wall_exterior_30cm",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.15,
+            0.15
+          ],
+          [
+            0.15,
+            8.45
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              0.3,
+              0.0
+            ],
+            [
+              0.3,
+              8.6
+            ],
+            [
+              0.0,
+              8.6
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_WALL_EXT_EAST",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "wall_types/wall_exterior_30cm",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.85,
+            0.15
+          ],
+          [
+            14.85,
+            8.45
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              14.7,
+              0.0
+            ],
+            [
+              15.0,
+              0.0
+            ],
+            [
+              15.0,
+              8.6
+            ],
+            [
+              14.7,
+              8.6
+            ],
+            [
+              14.7,
+              0.0
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_WALL_INT_VERTICAL",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "wall_types/wall_interior_10cm",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.35,
+            0.3
+          ],
+          [
+            6.35,
+            8.3
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.3,
+              0.3
+            ],
+            [
+              6.4,
+              0.3
+            ],
+            [
+              6.4,
+              8.3
+            ],
+            [
+              6.3,
+              8.3
+            ],
+            [
+              6.3,
+              0.3
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_WALL_INT_HORIZONTAL",
+      "level_id": "LEVEL_00",
+      "element_type": "wall",
+      "catalog_ref": "wall_types/wall_interior_10cm",
+      "centerline_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.3,
+            4.0
+          ],
+          [
+            6.3,
+            4.0
+          ]
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.3,
+              3.95
+            ],
+            [
+              6.3,
+              3.95
+            ],
+            [
+              6.3,
+              4.05
+            ],
+            [
+              0.3,
+              4.05
+            ],
+            [
+              0.3,
+              3.95
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_DOOR_1",
+      "level_id": "LEVEL_00",
+      "element_type": "door",
+      "catalog_ref": "door_types/door_single_90cm",
+      "centerline_2d": {
+        "type": "Point",
+        "coordinates": [
+          6.35,
+          2.1
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.3,
+              1.65
+            ],
+            [
+              6.4,
+              1.65
+            ],
+            [
+              6.4,
+              2.55
+            ],
+            [
+              6.3,
+              2.55
+            ],
+            [
+              6.3,
+              1.65
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_DOOR_2",
+      "level_id": "LEVEL_00",
+      "element_type": "door",
+      "catalog_ref": "door_types/door_single_90cm",
+      "centerline_2d": {
+        "type": "Point",
+        "coordinates": [
+          6.35,
+          6.2
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.3,
+              5.75
+            ],
+            [
+              6.4,
+              5.75
+            ],
+            [
+              6.4,
+              6.65
+            ],
+            [
+              6.3,
+              6.65
+            ],
+            [
+              6.3,
+              5.75
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_DOOR_EXIT",
+      "level_id": "LEVEL_00",
+      "element_type": "door",
+      "catalog_ref": "door_types/door_exit_120cm",
+      "centerline_2d": {
+        "type": "Point",
+        "coordinates": [
+          14.85,
+          4.3
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              14.7,
+              3.7
+            ],
+            [
+              15.0,
+              3.7
+            ],
+            [
+              15.0,
+              4.9
+            ],
+            [
+              14.7,
+              4.9
+            ],
+            [
+              14.7,
+              3.7
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_WINDOW_1",
+      "level_id": "LEVEL_00",
+      "element_type": "window",
+      "catalog_ref": "window_types/window_fixed_120cm",
+      "centerline_2d": {
+        "type": "Point",
+        "coordinates": [
+          0.15,
+          3.2
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              2.6
+            ],
+            [
+              0.3,
+              2.6
+            ],
+            [
+              0.3,
+              3.8
+            ],
+            [
+              0.0,
+              3.8
+            ],
+            [
+              0.0,
+              2.6
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    },
+    {
+      "element_id": "PE_COLUMN_1",
+      "level_id": "LEVEL_00",
+      "element_type": "column",
+      "catalog_ref": "column_types/column_square_30cm",
+      "centerline_2d": {
+        "type": "Point",
+        "coordinates": [
+          2.55,
+          1.55
+        ]
+      },
+      "derived_footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              2.4,
+              1.4
+            ],
+            [
+              2.7,
+              1.4
+            ],
+            [
+              2.7,
+              1.7
+            ],
+            [
+              2.4,
+              1.7
+            ],
+            [
+              2.4,
+              1.4
+            ]
+          ]
+        ]
+      },
+      "overrides": {},
+      "created_at": "2025-12-06T12:00:00Z"
+    }
+  ],
+  "spaces": [
+    {
+      "space_id": "S_ROOM_1",
+      "level_id": "LEVEL_00",
+      "space_type": "navigable_space",
+      "name": "Sala 1",
+      "category": "room",
+      "function": "General",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          3.3,
+          2.125
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.3,
+              0.3
+            ],
+            [
+              6.3,
+              0.3
+            ],
+            [
+              6.3,
+              3.95
+            ],
+            [
+              0.3,
+              3.95
+            ],
+            [
+              0.3,
+              0.3
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "area_sqm": 21.9,
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_ROOM_2",
+      "level_id": "LEVEL_00",
+      "space_type": "navigable_space",
+      "name": "Sala 2",
+      "category": "room",
+      "function": "General",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          3.3,
+          6.175000000000001
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.3,
+              4.05
+            ],
+            [
+              6.3,
+              4.05
+            ],
+            [
+              6.3,
+              8.3
+            ],
+            [
+              0.3,
+              8.3
+            ],
+            [
+              0.3,
+              4.05
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "area_sqm": 25.5,
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_CORRIDOR",
+      "level_id": "LEVEL_00",
+      "space_type": "navigable_space",
+      "name": "Pasillo",
+      "category": "corridor",
+      "function": "Circulation",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          10.55,
+          4.300000000000001
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.4,
+              0.3
+            ],
+            [
+              14.7,
+              0.3
+            ],
+            [
+              14.7,
+              8.3
+            ],
+            [
+              6.4,
+              8.3
+            ],
+            [
+              6.4,
+              0.3
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "area_sqm": 66.4,
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_DOOR_1",
+      "level_id": "LEVEL_00",
+      "space_type": "transfer_space",
+      "name": "Puerta Sala 1",
+      "category": "door_space",
+      "function": "ConnectionSpace",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          6.35,
+          2.0999999999999996
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.3,
+              1.65
+            ],
+            [
+              6.4,
+              1.65
+            ],
+            [
+              6.4,
+              2.55
+            ],
+            [
+              6.3,
+              2.55
+            ],
+            [
+              6.3,
+              1.65
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "attached_to": "PE_DOOR_1",
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_DOOR_2",
+      "level_id": "LEVEL_00",
+      "space_type": "transfer_space",
+      "name": "Puerta Sala 2",
+      "category": "door_space",
+      "function": "ConnectionSpace",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          6.35,
+          6.2
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              6.3,
+              5.75
+            ],
+            [
+              6.4,
+              5.75
+            ],
+            [
+              6.4,
+              6.65
+            ],
+            [
+              6.3,
+              6.65
+            ],
+            [
+              6.3,
+              5.75
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "attached_to": "PE_DOOR_2",
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_EXIT",
+      "level_id": "LEVEL_00",
+      "space_type": "exit_space",
+      "name": "Salida",
+      "category": "exit",
+      "function": "ExitSpace",
+      "poi": true,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          14.85,
+          4.300000000000001
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              14.7,
+              3.7
+            ],
+            [
+              15.0,
+              3.7
+            ],
+            [
+              15.0,
+              4.9
+            ],
+            [
+              14.7,
+              4.9
+            ],
+            [
+              14.7,
+              3.7
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [
+          "walking",
+          "rolling"
+        ],
+        "is_goal": true,
+        "attached_to": "PE_DOOR_EXIT",
+        "accessible": true
+      }
+    },
+    {
+      "space_id": "S_WINDOW_1",
+      "level_id": "LEVEL_00",
+      "space_type": "transfer_space",
+      "name": "Ventana Sala 1",
+      "category": "window_space",
+      "function": "NonNavigableOpening",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          0.15,
+          3.2
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0.0,
+              2.6
+            ],
+            [
+              0.3,
+              2.6
+            ],
+            [
+              0.3,
+              3.8
+            ],
+            [
+              0.0,
+              3.8
+            ],
+            [
+              0.0,
+              2.6
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "locomotion": [],
+        "attached_to": "PE_WINDOW_1",
+        "navigable": false
+      }
+    },
+    {
+      "space_id": "S_COLUMN_1",
+      "level_id": "LEVEL_00",
+      "space_type": "object_space",
+      "name": "Columna",
+      "category": "obstacle",
+      "function": "NonNavigable",
+      "poi": false,
+      "centroid_2d": {
+        "type": "Point",
+        "coordinates": [
+          2.55,
+          1.5499999999999998
+        ]
+      },
+      "footprint_2d": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              2.4,
+              1.4
+            ],
+            [
+              2.7,
+              1.4
+            ],
+            [
+              2.7,
+              1.7
+            ],
+            [
+              2.4,
+              1.7
+            ],
+            [
+              2.4,
+              1.4
+            ]
+          ]
+        ]
+      },
+      "attributes": {
+        "element_ref": "PE_COLUMN_1",
+        "navigable": false
+      }
+    }
+  ],
+  "boundaries": [
+    {
+      "boundary_id": "B_ROOM1_DOOR1",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_space_id": "S_ROOM_1",
+      "target_space_id": "S_DOOR_1",
+      "description": "Sala 1 a puerta 1",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.3,
+            1.65
+          ],
+          [
+            6.3,
+            2.55
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": true,
+        "via_element": "PE_DOOR_1"
+      }
+    },
+    {
+      "boundary_id": "B_DOOR1_CORRIDOR",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_space_id": "S_DOOR_1",
+      "target_space_id": "S_CORRIDOR",
+      "description": "Puerta 1 a pasillo",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.4,
+            1.65
+          ],
+          [
+            6.4,
+            2.55
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": true,
+        "via_element": "PE_DOOR_1"
+      }
+    },
+    {
+      "boundary_id": "B_ROOM2_DOOR2",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_space_id": "S_ROOM_2",
+      "target_space_id": "S_DOOR_2",
+      "description": "Sala 2 a puerta 2",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.3,
+            5.75
+          ],
+          [
+            6.3,
+            6.65
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": true,
+        "via_element": "PE_DOOR_2"
+      }
+    },
+    {
+      "boundary_id": "B_DOOR2_CORRIDOR",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_space_id": "S_DOOR_2",
+      "target_space_id": "S_CORRIDOR",
+      "description": "Puerta 2 a pasillo",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            6.4,
+            5.75
+          ],
+          [
+            6.4,
+            6.65
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": true,
+        "via_element": "PE_DOOR_2"
+      }
+    },
+    {
+      "boundary_id": "B_CORRIDOR_EXIT",
+      "level_id": "LEVEL_00",
+      "boundary_type": "navigable_boundary",
+      "source_space_id": "S_CORRIDOR",
+      "target_space_id": "S_EXIT",
+      "description": "Pasillo a salida",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            14.7,
+            3.7
+          ],
+          [
+            14.7,
+            4.9
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": true,
+        "bidirectional": false,
+        "via_element": "PE_DOOR_EXIT"
+      }
+    },
+    {
+      "boundary_id": "B_ROOM1_WINDOW",
+      "level_id": "LEVEL_00",
+      "boundary_type": "special_boundary",
+      "source_space_id": "S_ROOM_1",
+      "target_space_id": "S_WINDOW_1",
+      "description": "Sala 1 a ventana no transitable",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0.3,
+            2.6
+          ],
+          [
+            0.3,
+            3.8
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "relationship_type": "contact_with_window",
+        "allowed_flows": [
+          "visibility",
+          "air_quality",
+          "smoke_propagation"
+        ],
+        "via_element": "PE_WINDOW_1"
+      }
+    },
+    {
+      "boundary_id": "B_ROOM1_COLUMN",
+      "level_id": "LEVEL_00",
+      "boundary_type": "non_navigable_boundary",
+      "source_space_id": "S_ROOM_1",
+      "target_space_id": "S_COLUMN_1",
+      "description": "Sala 1 contiene una columna/obstáculo",
+      "geometry_2d": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            2.4,
+            1.4
+          ],
+          [
+            2.4,
+            1.7
+          ]
+        ]
+      },
+      "attributes": {
+        "traversable": false,
+        "relationship_type": "contains_object",
+        "via_element": "PE_COLUMN_1"
+      }
+    }
+  ],
+  "graphs": {
+    "adjacency_graph": {
+      "graph_id": "GRAPH_ADJ_LEVEL_00",
+      "graph_type": "adjacency_graph",
+      "level_id": "LEVEL_00",
+      "purpose": "Contactos físicos/topológicos entre espacios y entidades espaciales relevantes.",
+      "nodes": [
+        {
+          "node_id": "N_ADJ_ROOM1",
+          "space_ref": "S_ROOM_1",
+          "node_type": "space"
+        },
+        {
+          "node_id": "N_ADJ_ROOM2",
+          "space_ref": "S_ROOM_2",
+          "node_type": "space"
+        },
+        {
+          "node_id": "N_ADJ_CORRIDOR",
+          "space_ref": "S_CORRIDOR",
+          "node_type": "space"
+        },
+        {
+          "node_id": "N_ADJ_DOOR1",
+          "space_ref": "S_DOOR_1",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_ADJ_DOOR2",
+          "space_ref": "S_DOOR_2",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_ADJ_EXIT",
+          "space_ref": "S_EXIT",
+          "node_type": "exit_space"
+        },
+        {
+          "node_id": "N_ADJ_WINDOW1",
+          "space_ref": "S_WINDOW_1",
+          "node_type": "window_space"
+        },
+        {
+          "node_id": "N_ADJ_COLUMN1",
+          "space_ref": "S_COLUMN_1",
+          "node_type": "object_space"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "E_ADJ_ROOM1_DOOR1",
+          "source_node_id": "N_ADJ_ROOM1",
+          "target_node_id": "N_ADJ_DOOR1",
+          "relationship_type": "contact_via_boundary",
+          "boundary_ref": "B_ROOM1_DOOR1",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                2.1
+              ],
+              [
+                6.35,
+                2.1
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_DOOR1_CORRIDOR",
+          "source_node_id": "N_ADJ_DOOR1",
+          "target_node_id": "N_ADJ_CORRIDOR",
+          "relationship_type": "contact_via_boundary",
+          "boundary_ref": "B_DOOR1_CORRIDOR",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.35,
+                2.1
+              ],
+              [
+                10.55,
+                4.3
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_ROOM2_DOOR2",
+          "source_node_id": "N_ADJ_ROOM2",
+          "target_node_id": "N_ADJ_DOOR2",
+          "relationship_type": "contact_via_boundary",
+          "boundary_ref": "B_ROOM2_DOOR2",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                6.2
+              ],
+              [
+                6.35,
+                6.2
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_DOOR2_CORRIDOR",
+          "source_node_id": "N_ADJ_DOOR2",
+          "target_node_id": "N_ADJ_CORRIDOR",
+          "relationship_type": "contact_via_boundary",
+          "boundary_ref": "B_DOOR2_CORRIDOR",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.35,
+                6.2
+              ],
+              [
+                10.55,
+                4.3
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_CORRIDOR_EXIT",
+          "source_node_id": "N_ADJ_CORRIDOR",
+          "target_node_id": "N_ADJ_EXIT",
+          "relationship_type": "contact_via_boundary",
+          "boundary_ref": "B_CORRIDOR_EXIT",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                10.55,
+                4.3
+              ],
+              [
+                14.85,
+                4.3
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_ROOM1_WINDOW",
+          "source_node_id": "N_ADJ_ROOM1",
+          "target_node_id": "N_ADJ_WINDOW1",
+          "relationship_type": "contact_with_window",
+          "boundary_ref": "B_ROOM1_WINDOW",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                2.1
+              ],
+              [
+                0.15,
+                3.2
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_ROOM1_COLUMN",
+          "source_node_id": "N_ADJ_ROOM1",
+          "target_node_id": "N_ADJ_COLUMN1",
+          "relationship_type": "contains_object",
+          "boundary_ref": "B_ROOM1_COLUMN",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                2.1
+              ],
+              [
+                2.55,
+                1.55
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_ADJ_ROOM1_ROOM2",
+          "source_node_id": "N_ADJ_ROOM1",
+          "target_node_id": "N_ADJ_ROOM2",
+          "relationship_type": "contact_through_wall",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                3.95
+              ],
+              [
+                3.3,
+                4.05
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "connectivity_graph": {
+      "graph_id": "GRAPH_CONN_LEVEL_00",
+      "graph_type": "connectivity_graph",
+      "level_id": "LEVEL_00",
+      "purpose": "Conexiones reales atravesables mediante transfer spaces.",
+      "nodes": [
+        {
+          "node_id": "N_CONN_ROOM1",
+          "space_ref": "S_ROOM_1",
+          "node_type": "space"
+        },
+        {
+          "node_id": "N_CONN_DOOR1",
+          "space_ref": "S_DOOR_1",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_CONN_CORRIDOR",
+          "space_ref": "S_CORRIDOR",
+          "node_type": "space"
+        },
+        {
+          "node_id": "N_CONN_DOOR2",
+          "space_ref": "S_DOOR_2",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_CONN_ROOM2",
+          "space_ref": "S_ROOM_2",
+          "node_type": "space"
+        },
+        {
+          "node_id": "N_CONN_EXIT",
+          "space_ref": "S_EXIT",
+          "node_type": "exit_space"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "E_CONN_ROOM1_DOOR1",
+          "source_node_id": "N_CONN_ROOM1",
+          "target_node_id": "N_CONN_DOOR1",
+          "connector_type": "door_passage",
+          "through_element_id": "PE_DOOR_1",
+          "through_space_id": "S_DOOR_1",
+          "allowed_flows": [
+            "pedestrian",
+            "wheelchair"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 1,
+          "width_m": 0.9,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                2.1
+              ],
+              [
+                6.35,
+                2.1
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_CONN_DOOR1_CORRIDOR",
+          "source_node_id": "N_CONN_DOOR1",
+          "target_node_id": "N_CONN_CORRIDOR",
+          "connector_type": "door_passage",
+          "through_element_id": "PE_DOOR_1",
+          "through_space_id": "S_DOOR_1",
+          "allowed_flows": [
+            "pedestrian",
+            "wheelchair"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 1,
+          "width_m": 0.9,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.35,
+                2.1
+              ],
+              [
+                10.55,
+                4.3
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_CONN_ROOM2_DOOR2",
+          "source_node_id": "N_CONN_ROOM2",
+          "target_node_id": "N_CONN_DOOR2",
+          "connector_type": "door_passage",
+          "through_element_id": "PE_DOOR_2",
+          "through_space_id": "S_DOOR_2",
+          "allowed_flows": [
+            "pedestrian",
+            "wheelchair"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 1,
+          "width_m": 0.9,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                3.3,
+                6.2
+              ],
+              [
+                6.35,
+                6.2
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_CONN_DOOR2_CORRIDOR",
+          "source_node_id": "N_CONN_DOOR2",
+          "target_node_id": "N_CONN_CORRIDOR",
+          "connector_type": "door_passage",
+          "through_element_id": "PE_DOOR_2",
+          "through_space_id": "S_DOOR_2",
+          "allowed_flows": [
+            "pedestrian",
+            "wheelchair"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 1,
+          "width_m": 0.9,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.35,
+                6.2
+              ],
+              [
+                10.55,
+                4.3
+              ]
+            ]
+          }
+        },
+        {
+          "edge_id": "E_CONN_CORRIDOR_EXIT",
+          "source_node_id": "N_CONN_CORRIDOR",
+          "target_node_id": "N_CONN_EXIT",
+          "connector_type": "emergency_exit",
+          "through_element_id": "PE_DOOR_EXIT",
+          "through_space_id": "S_EXIT",
+          "allowed_flows": [
+            "pedestrian",
+            "wheelchair",
+            "emergency_exit"
+          ],
+          "allowed_profiles": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 2,
+          "width_m": 1.2,
+          "base_weight": 1.0,
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                10.55,
+                4.3
+              ],
+              [
+                14.85,
+                4.3
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "door_to_door_graph": {
+      "graph_id": "GRAPH_D2D_LEVEL_00",
+      "graph_type": "door_to_door_graph",
+      "level_id": "LEVEL_00",
+      "purpose": "Grafo principal de evacuación entre puntos de paso.",
+      "nodes": [
+        {
+          "node_id": "N_D2D_DOOR1",
+          "space_ref": "S_DOOR_1",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_D2D_DOOR2",
+          "space_ref": "S_DOOR_2",
+          "node_type": "door_space"
+        },
+        {
+          "node_id": "N_D2D_EXIT",
+          "space_ref": "S_EXIT",
+          "node_type": "exit_space"
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "E_D2D_DOOR1_DOOR2",
+          "source_node_id": "N_D2D_DOOR1",
+          "target_node_id": "N_D2D_DOOR2",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.45,
+                2.1
+              ],
+              [
+                8.5,
+                2.1
+              ],
+              [
+                8.5,
+                6.2
+              ],
+              [
+                6.45,
+                6.2
+              ]
+            ]
+          },
+          "distance_m": 8.2,
+          "traversable_by": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 2,
+          "base_weight": 8.2,
+          "description": "Puerta sala 1 a puerta sala 2 por pasillo"
+        },
+        {
+          "edge_id": "E_D2D_DOOR1_EXIT",
+          "source_node_id": "N_D2D_DOOR1",
+          "target_node_id": "N_D2D_EXIT",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.45,
+                2.1
+              ],
+              [
+                10.5,
+                2.1
+              ],
+              [
+                10.5,
+                4.3
+              ],
+              [
+                14.7,
+                4.3
+              ]
+            ]
+          },
+          "distance_m": 10.45,
+          "traversable_by": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 2,
+          "base_weight": 10.45,
+          "description": "Puerta sala 1 a salida"
+        },
+        {
+          "edge_id": "E_D2D_DOOR2_EXIT",
+          "source_node_id": "N_D2D_DOOR2",
+          "target_node_id": "N_D2D_EXIT",
+          "geometry_2d": {
+            "type": "LineString",
+            "coordinates": [
+              [
+                6.45,
+                6.2
+              ],
+              [
+                10.5,
+                6.2
+              ],
+              [
+                10.5,
+                4.3
+              ],
+              [
+                14.7,
+                4.3
+              ]
+            ]
+          },
+          "distance_m": 8.0,
+          "traversable_by": [
+            "walking",
+            "rolling"
+          ],
+          "capacity_persons": 2,
+          "base_weight": 8.0,
+          "description": "Puerta sala 2 a salida"
+        }
+      ]
+    },
+    "vertical_connectivity_graph": {
+      "graph_id": "GRAPH_VERTICAL",
+      "graph_type": "vertical_connectivity_graph",
+      "purpose": "Reservado para conexiones verticales; vacío en este escenario de una planta.",
+      "nodes": [],
+      "edges": []
+    }
+  },
+  "agent_spawns": [
+    {
+      "spawn_id": "SPAWN_ROOM_1",
+      "level_id": "LEVEL_00",
+      "space_ref": "S_ROOM_1",
+      "position": {
+        "type": "Point",
+        "coordinates": [
+          3.0,
+          2.1
+        ]
+      },
+      "capacity": 10,
+      "allowed_profiles": [
+        "walking",
+        "rolling"
+      ],
+      "description": "Spawn en sala 1"
+    },
+    {
+      "spawn_id": "SPAWN_ROOM_2",
+      "level_id": "LEVEL_00",
+      "space_ref": "S_ROOM_2",
+      "position": {
+        "type": "Point",
+        "coordinates": [
+          3.0,
+          6.2
+        ]
+      },
+      "capacity": 10,
+      "allowed_profiles": [
+        "walking",
+        "rolling"
+      ],
+      "description": "Spawn en sala 2"
+    }
+  ],
+  "agents": [],
+  "beacons": [
+    {
+      "beacon_id": "BEACON_EXIT_001",
+      "level_id": "LEVEL_00",
+      "beacon_type": "environmental_beacon",
+      "catalog_ref": "beacon_types/beacon_environmental_basic",
+      "position": {
+        "type": "Point",
+        "coordinates": [
+          13.5,
+          4.3
+        ]
+      },
+      "attached_to": "S_CORRIDOR",
+      "sensor_types": [
+        "temperature",
+        "smoke",
+        "co"
+      ],
+      "influence": {
+        "model": "radius",
+        "radius_m": 4.0,
+        "coverage_type": "circular"
+      },
+      "affects": {
+        "mode": "manual_or_computed",
+        "space_refs": [
+          "S_CORRIDOR",
+          "S_EXIT"
+        ],
+        "node_refs": [
+          "N_D2D_EXIT"
+        ],
+        "edge_refs": [
+          "E_D2D_DOOR1_EXIT",
+          "E_D2D_DOOR2_EXIT"
+        ],
+        "graph_refs": [
+          "door_to_door_graph"
+        ]
+      },
+      "description": "Baliza ambiental próxima a la salida, útil para modificar pesos dinámicos en simulaciones futuras.",
+      "activation": {
+        "mode": "always",
+        "start_step": 0
+      },
+      "attributes": {
+        "signal_strength": 1.0
+      }
+    }
+  ],
+  "hazards": [],
+  "simulation": {
+    "random_seed": 42,
+    "time_step_s": 1.0,
+    "max_steps": 600,
+    "routing": {
+      "source_graph": "door_to_door_graph",
+      "strategy": "dijkstra",
+      "use_dynamic_weights": true,
+      "use_beacon_influence": true,
+      "use_hazard_avoidance": true,
+      "use_congestion_weighting": true
+    },
+    "population": {
+      "count": 15,
+      "profiles": [
+        {
+          "profile_name": "walking",
+          "percentage": 0.8,
+          "speed_mps": 1.2,
+          "reaction_time_s": 2.0,
+          "allowed_traversals": [
+            "walking"
+          ]
+        },
+        {
+          "profile_name": "rolling",
+          "percentage": 0.2,
+          "speed_mps": 0.8,
+          "reaction_time_s": 3.0,
+          "allowed_traversals": [
+            "walking",
+            "rolling"
+          ]
+        }
+      ]
+    },
+    "hazard_evolution": {
+      "enable": false,
+      "hazard_speed_m_per_step": 0.0
+    },
+    "output": {
+      "metrics": [
+        "evacuation_time",
+        "path_efficiency",
+        "congestion"
+      ],
+      "record_agent_trajectories": true
+    }
+  },
+  "indoorjson_mapping": {
+    "core_mappings": [
+      {
+        "mlsm_concept": "spaces[]",
+        "indoorjson_concept": "CellSpace",
+        "alignment": "partial",
+        "note": "Los spaces MLSM se alinean conceptualmente con CellSpace."
+      },
+      {
+        "mlsm_concept": "boundaries[]",
+        "indoorjson_concept": "CellBoundary",
+        "alignment": "partial",
+        "note": "Las boundaries MLSM representan interfaces entre espacios."
+      },
+      {
+        "mlsm_concept": "graphs.*.nodes",
+        "indoorjson_concept": "Node",
+        "alignment": "partial"
+      },
+      {
+        "mlsm_concept": "graphs.*.edges",
+        "indoorjson_concept": "Edge",
+        "alignment": "partial"
+      }
+    ],
+    "navigation_mappings": [
+      {
+        "mlsm_concept": "navigable_space",
+        "indoorjson_concept": "NavigableSpace",
+        "alignment": "partial"
+      },
+      {
+        "mlsm_concept": "transfer_space",
+        "indoorjson_concept": "TransferSpace",
+        "alignment": "partial"
+      },
+      {
+        "mlsm_concept": "object_space",
+        "indoorjson_concept": "ObjectSpace",
+        "alignment": "partial"
+      },
+      {
+        "mlsm_concept": "navigable_boundary",
+        "indoorjson_concept": "NavigableBoundary",
+        "alignment": "partial"
+      }
+    ],
+    "mlsm_extensions": [
+      "catalogs",
+      "physical_elements",
+      "beacons",
+      "hazards",
+      "agent_spawns",
+      "simulation",
+      "door_to_door_graph"
+    ],
+    "future_alignment": "Puede exportarse una vista derivada más próxima a IndoorJSON, manteniendo extensiones MLSM separadas."
+  }
+}

@@ -1,0 +1,1698 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mlsm.example.org/schemas/mlsm_json_v2.schema.json",
+  "title": "MLSM JSON v2 — Enriched Schema",
+  "description": "MLSM JSON v2 Schema (Phase 2A) — Enriched multi-layer spatial model for evacuation simulation. Inspired by IndoorGML/IndoorJSON but adapted for MLSM-specific extensions: catalogs, physical elements, multi-graph architecture, beacons, hazards, and evacuation routing.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^2\\.\\d+\\.\\d+.*$",
+      "description": "MLSM v2 version identifier (e.g., 2.0.0, 2.0.0-draft)"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "crs": {
+      "$ref": "#/$defs/CoordinateReferenceSystem"
+    },
+    "levels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Level"
+      },
+      "description": "List of floor/level definitions (one per floor)"
+    },
+    "catalogs": {
+      "$ref": "#/$defs/Catalogs"
+    },
+    "physical_elements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PhysicalElement"
+      },
+      "description": "Authored geometry: walls, doors, windows, columns, etc."
+    },
+    "spaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Space"
+      },
+      "description": "Semantic cells/rooms/spaces (primal layer)"
+    },
+    "boundaries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Boundary"
+      },
+      "description": "Interfaces between spaces (primal layer)"
+    },
+    "graphs": {
+      "$ref": "#/$defs/Graphs"
+    },
+    "agent_spawns": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AgentSpawn"
+      },
+      "description": "Locations for population initialization"
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Agent"
+      },
+      "description": "Optional: named agents (if specific agents are pre-defined)"
+    },
+    "beacons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Beacon"
+      },
+      "description": "Evacuation beacons/sensors for guidance"
+    },
+    "hazards": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Hazard"
+      },
+      "description": "Initial/scheduled dangers (not simulation results)"
+    },
+    "simulation": {
+      "$ref": "#/$defs/SimulationConfig"
+    },
+    "indoorjson_mapping": {
+      "$ref": "#/$defs/IndoorJSONMapping",
+      "description": "Optional: mapping to IndoorJSON concepts for trazability"
+    }
+  },
+  "required": [
+    "schema_version",
+    "metadata",
+    "crs",
+    "levels",
+    "catalogs",
+    "physical_elements",
+    "spaces",
+    "boundaries",
+    "graphs",
+    "simulation"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Metadata": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modified_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "author": {
+          "type": "string"
+        },
+        "organization": {
+          "type": "string"
+        },
+        "reference_standard": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "CoordinateReferenceSystem": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "local",
+            "global",
+            "projected"
+          ]
+        },
+        "srid": {
+          "type": "integer",
+          "description": "Spatial Reference ID (0 for local)"
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "meters",
+            "feet",
+            "kilometers"
+          ]
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        "comment": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "srid",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "Level": {
+      "type": "object",
+      "properties": {
+        "level_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "floor_index": {
+          "type": "integer"
+        },
+        "floor_z": {
+          "type": "number",
+          "description": "Z coordinate of floor level (meters)"
+        },
+        "ceiling_z": {
+          "type": "number",
+          "description": "Z coordinate of ceiling (meters)"
+        },
+        "height_m": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        },
+        "spatial_extent_2d": {
+          "$ref": "#/$defs/Polygon"
+        }
+      },
+      "required": [
+        "level_id",
+        "name",
+        "floor_index",
+        "floor_z",
+        "ceiling_z",
+        "height_m"
+      ],
+      "additionalProperties": false
+    },
+    "Catalogs": {
+      "type": "object",
+      "properties": {
+        "wall_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WallType"
+          }
+        },
+        "door_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DoorType"
+          }
+        },
+        "window_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WindowType"
+          }
+        },
+        "column_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ColumnType"
+          }
+        },
+        "space_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpaceType"
+          }
+        },
+        "beacon_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BeaconType"
+          }
+        },
+        "hazard_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HazardType"
+          }
+        },
+        "stair_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StairType"
+          }
+        },
+        "ramp_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RampType"
+          }
+        },
+        "elevator_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ElevatorType"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "WallType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "wall"
+        },
+        "wall_type": {
+          "type": "string",
+          "enum": [
+            "exterior",
+            "interior",
+            "firewall",
+            "loadbearing"
+          ]
+        },
+        "default_width_m": {
+          "type": "number"
+        },
+        "default_material": {
+          "type": "string"
+        },
+        "default_color": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "default_thickness_m": {
+          "type": "number"
+        },
+        "default_height_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type",
+        "wall_type"
+      ],
+      "additionalProperties": false
+    },
+    "DoorType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "door"
+        },
+        "door_type": {
+          "type": "string",
+          "enum": [
+            "single",
+            "double",
+            "sliding",
+            "emergency_exit",
+            "fireproof",
+            "single_leaf",
+            "exit"
+          ]
+        },
+        "default_width_m": {
+          "type": "number"
+        },
+        "default_height_m": {
+          "type": "number"
+        },
+        "default_material": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type",
+        "door_type"
+      ],
+      "additionalProperties": false
+    },
+    "WindowType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "window"
+        },
+        "window_type": {
+          "type": "string",
+          "enum": [
+            "fixed",
+            "operable",
+            "safety_glass"
+          ]
+        },
+        "default_width_m": {
+          "type": "number"
+        },
+        "default_height_m": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type",
+        "window_type"
+      ],
+      "additionalProperties": false
+    },
+    "ColumnType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "column"
+        },
+        "column_type": {
+          "type": "string",
+          "enum": [
+            "square",
+            "circular",
+            "rectangular"
+          ]
+        },
+        "default_width_m": {
+          "type": "number"
+        },
+        "default_length_m": {
+          "type": "number"
+        },
+        "default_material": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type",
+        "column_type"
+      ],
+      "additionalProperties": false
+    },
+    "SpaceType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "space_type": {
+          "type": "string",
+          "enum": [
+            "navigable_space",
+            "transfer_space",
+            "exit_space",
+            "object_space",
+            "non_navigable_space"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "default_function": {
+          "type": "string"
+        },
+        "default_locomotion": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "space_type"
+      ],
+      "additionalProperties": false
+    },
+    "BeaconType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "beacon_type": {
+          "type": "string"
+        },
+        "sensor_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_influence_radius_m": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "beacon_type"
+      ],
+      "additionalProperties": false
+    },
+    "HazardType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "hazard_type": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "default_growth_model": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "exponential",
+            "static"
+          ]
+        }
+      },
+      "required": [
+        "catalog_id",
+        "hazard_type"
+      ],
+      "additionalProperties": false
+    },
+    "PhysicalElement": {
+      "type": "object",
+      "properties": {
+        "element_id": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "type": "string",
+          "enum": [
+            "wall",
+            "door",
+            "window",
+            "column",
+            "stair",
+            "ramp",
+            "elevator"
+          ]
+        },
+        "catalog_ref": {
+          "type": "string"
+        },
+        "centerline_2d": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Point"
+            },
+            {
+              "$ref": "#/$defs/LineString"
+            }
+          ]
+        },
+        "derived_footprint_2d": {
+          "$ref": "#/$defs/Polygon"
+        },
+        "overrides": {
+          "type": "object"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modified_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "anchor_point": {
+          "$ref": "#/$defs/Point"
+        },
+        "host_wall_ref": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "element_id",
+        "level_id",
+        "element_type",
+        "catalog_ref",
+        "centerline_2d",
+        "derived_footprint_2d"
+      ],
+      "additionalProperties": false
+    },
+    "Space": {
+      "type": "object",
+      "properties": {
+        "space_id": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "space_type": {
+          "type": "string",
+          "enum": [
+            "navigable_space",
+            "transfer_space",
+            "exit_space",
+            "object_space",
+            "non_navigable_space"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        },
+        "poi": {
+          "type": "boolean"
+        },
+        "centroid_2d": {
+          "$ref": "#/$defs/Point"
+        },
+        "footprint_2d": {
+          "$ref": "#/$defs/Polygon"
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "label": {
+          "type": "string"
+        },
+        "physical_element_ref": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "space_id",
+        "level_id",
+        "space_type",
+        "centroid_2d",
+        "footprint_2d"
+      ],
+      "additionalProperties": false
+    },
+    "Boundary": {
+      "type": "object",
+      "properties": {
+        "boundary_id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "boundary_type": {
+          "type": "string",
+          "enum": [
+            "navigable_boundary",
+            "non_navigable_boundary",
+            "special_boundary",
+            "opening_boundary",
+            "non_evacuation_boundary",
+            "contact_boundary",
+            "vertical_contact_boundary"
+          ]
+        },
+        "source_space_id": {
+          "type": "string"
+        },
+        "target_space_id": {
+          "type": "string"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "description": {
+          "type": "string"
+        },
+        "geometry_2d": {
+          "$ref": "#/$defs/LineString"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "boundary_id",
+        "level_id",
+        "boundary_type",
+        "geometry_2d"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "source_space_id",
+            "target_space_id"
+          ]
+        },
+        {
+          "required": [
+            "source_ref",
+            "target_ref"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "Graphs": {
+      "type": "object",
+      "properties": {
+        "adjacency_graph": {
+          "$ref": "#/$defs/Graph"
+        },
+        "connectivity_graph": {
+          "$ref": "#/$defs/Graph"
+        },
+        "door_to_door_graph": {
+          "$ref": "#/$defs/Graph"
+        },
+        "vertical_connectivity_graph": {
+          "$ref": "#/$defs/Graph"
+        }
+      },
+      "required": [
+        "adjacency_graph",
+        "connectivity_graph",
+        "door_to_door_graph",
+        "vertical_connectivity_graph"
+      ],
+      "additionalProperties": false
+    },
+    "Graph": {
+      "type": "object",
+      "properties": {
+        "graph_id": {
+          "type": "string"
+        },
+        "graph_type": {
+          "type": "string",
+          "enum": [
+            "adjacency_graph",
+            "connectivity_graph",
+            "door_to_door_graph",
+            "vertical_connectivity_graph"
+          ]
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GraphNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GraphEdge"
+          }
+        }
+      },
+      "required": [
+        "graph_id",
+        "graph_type",
+        "purpose",
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false
+    },
+    "GraphNode": {
+      "type": "object",
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "space_ref": {
+          "type": "string"
+        },
+        "physical_element_ref": {
+          "type": "string"
+        },
+        "boundary_ref": {
+          "type": "string"
+        },
+        "node_type": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/Point"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "additionalProperties": false
+    },
+    "GraphEdge": {
+      "type": "object",
+      "properties": {
+        "edge_id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source_node_id": {
+          "type": "string"
+        },
+        "target_node_id": {
+          "type": "string"
+        },
+        "geometry_2d": {
+          "$ref": "#/$defs/LineString"
+        },
+        "relationship_type": {
+          "type": "string"
+        },
+        "boundary_ref": {
+          "type": "string"
+        },
+        "physical_element_ref": {
+          "type": "string"
+        },
+        "connector_type": {
+          "type": "string"
+        },
+        "through_element_id": {
+          "type": "string"
+        },
+        "through_space_id": {
+          "type": "string"
+        },
+        "allowed_flows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "capacity_persons": {
+          "type": "number"
+        },
+        "width_m": {
+          "type": "number"
+        },
+        "base_weight": {
+          "type": "number"
+        },
+        "distance_m": {
+          "type": "number"
+        },
+        "traversable_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "level_from": {
+          "type": "string"
+        },
+        "level_to": {
+          "type": "string"
+        },
+        "steps_count": {
+          "type": "integer"
+        },
+        "step_height_m": {
+          "type": "number"
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "traversable": {
+          "type": "boolean"
+        },
+        "source_ref": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/EntityRef"
+        }
+      },
+      "required": [
+        "edge_id",
+        "source_node_id",
+        "target_node_id"
+      ],
+      "additionalProperties": false
+    },
+    "AgentSpawn": {
+      "type": "object",
+      "properties": {
+        "spawn_id": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "space_ref": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/Point"
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allowed_profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "spawn_id",
+        "level_id",
+        "space_ref",
+        "position",
+        "capacity"
+      ],
+      "additionalProperties": false
+    },
+    "Agent": {
+      "type": "object",
+      "properties": {
+        "agent_id": {
+          "type": "string"
+        },
+        "spawn_id": {
+          "type": "string"
+        },
+        "initial_position": {
+          "$ref": "#/$defs/Point"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "speed_mps": {
+          "type": "number"
+        },
+        "reaction_time_s": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "agent_id"
+      ],
+      "additionalProperties": false
+    },
+    "Beacon": {
+      "type": "object",
+      "properties": {
+        "beacon_id": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "beacon_type": {
+          "type": "string"
+        },
+        "catalog_ref": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/Point"
+        },
+        "attached_to": {
+          "type": "string"
+        },
+        "sensor_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "influence": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "radius_m": {
+              "type": "number"
+            },
+            "coverage_type": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "affects": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string"
+            },
+            "space_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "node_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "edge_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "graph_refs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "description": {
+          "type": "string"
+        },
+        "activation": {
+          "$ref": "#/$defs/Activation"
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "beacon_id",
+        "level_id",
+        "beacon_type",
+        "position",
+        "activation"
+      ],
+      "additionalProperties": false
+    },
+    "Hazard": {
+      "type": "object",
+      "properties": {
+        "hazard_id": {
+          "type": "string"
+        },
+        "level_id": {
+          "type": "string"
+        },
+        "hazard_type": {
+          "type": "string"
+        },
+        "catalog_ref": {
+          "type": "string"
+        },
+        "initial_position": {
+          "$ref": "#/$defs/Point"
+        },
+        "initial_space_ref": {
+          "type": "string"
+        },
+        "activation": {
+          "$ref": "#/$defs/Activation"
+        },
+        "growth_model": {
+          "$ref": "#/$defs/GrowthModel"
+        },
+        "affected_spaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blocked_edges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "affected_beacons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hazard_id",
+        "level_id",
+        "hazard_type",
+        "initial_position",
+        "activation"
+      ],
+      "additionalProperties": false
+    },
+    "Activation": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "always",
+            "scheduled",
+            "trigger"
+          ]
+        },
+        "start_step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "trigger": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "GrowthModel": {
+      "type": "object",
+      "properties": {
+        "model_type": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "exponential",
+            "static"
+          ]
+        },
+        "expansion_rate_m_per_step": {
+          "type": "number"
+        },
+        "max_expansion_m": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "model_type"
+      ],
+      "additionalProperties": false
+    },
+    "SimulationConfig": {
+      "type": "object",
+      "properties": {
+        "random_seed": {
+          "type": "integer"
+        },
+        "time_step_s": {
+          "type": "number"
+        },
+        "max_steps": {
+          "type": "integer"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingConfig"
+        },
+        "population": {
+          "$ref": "#/$defs/PopulationConfig"
+        },
+        "hazard_evolution": {
+          "$ref": "#/$defs/HazardEvolution"
+        },
+        "output": {
+          "$ref": "#/$defs/OutputConfig"
+        }
+      },
+      "required": [
+        "time_step_s",
+        "max_steps"
+      ],
+      "additionalProperties": false
+    },
+    "RoutingConfig": {
+      "type": "object",
+      "properties": {
+        "source_graph": {
+          "type": "string",
+          "enum": [
+            "adjacency_graph",
+            "connectivity_graph",
+            "door_to_door_graph",
+            "vertical_connectivity_graph"
+          ]
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "dijkstra",
+            "a_star",
+            "breadth_first"
+          ]
+        },
+        "use_dynamic_weights": {
+          "type": "boolean"
+        },
+        "use_beacon_influence": {
+          "type": "boolean"
+        },
+        "use_hazard_avoidance": {
+          "type": "boolean"
+        },
+        "use_congestion_weighting": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        },
+        "use_beacon_risk": {
+          "type": "boolean"
+        },
+        "use_hazard_risk": {
+          "type": "boolean"
+        },
+        "use_congestion": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PopulationConfig": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentProfile"
+          }
+        },
+        "mode": {
+          "type": "string"
+        },
+        "default_profile": {
+          "type": "string"
+        },
+        "default_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentProfile": {
+      "type": "object",
+      "properties": {
+        "profile_name": {
+          "type": "string"
+        },
+        "percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "speed_mps": {
+          "type": "number"
+        },
+        "reaction_time_s": {
+          "type": "number"
+        },
+        "allowed_traversals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "profile_name",
+        "percentage"
+      ],
+      "additionalProperties": false
+    },
+    "HazardEvolution": {
+      "type": "object",
+      "properties": {
+        "enable": {
+          "type": "boolean"
+        },
+        "hazard_speed_m_per_step": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "OutputConfig": {
+      "type": "object",
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "record_agent_trajectories": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "IndoorJSONMapping": {
+      "type": "object",
+      "properties": {
+        "core_mappings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConceptMapping"
+          }
+        },
+        "navigation_mappings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConceptMapping"
+          }
+        },
+        "mlsm_extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "future_alignment": {
+          "type": "string"
+        },
+        "core_mapping": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "navigation_mapping": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "profile": {
+          "type": "string"
+        },
+        "compatibility": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConceptMapping": {
+      "type": "object",
+      "properties": {
+        "mlsm_concept": {
+          "type": "string"
+        },
+        "indoorjson_concept": {
+          "type": "string"
+        },
+        "alignment": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "partial",
+            "not_applicable"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mlsm_concept",
+        "indoorjson_concept"
+      ],
+      "additionalProperties": false
+    },
+    "Point": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Point"
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ]
+    },
+    "LineString": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "LineString"
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ]
+    },
+    "Polygon": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Polygon"
+        },
+        "coordinates": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 4,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ]
+    },
+    "StairType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "stair"
+        },
+        "stair_type": {
+          "type": "string"
+        },
+        "default_step_height_m": {
+          "type": "number"
+        },
+        "default_step_width_m": {
+          "type": "number"
+        },
+        "default_steps_count": {
+          "type": "integer"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type"
+      ],
+      "additionalProperties": false
+    },
+    "RampType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "ramp"
+        },
+        "ramp_type": {
+          "type": "string"
+        },
+        "default_slope": {
+          "type": "number"
+        },
+        "default_width_m": {
+          "type": "number"
+        },
+        "default_length_m": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type"
+      ],
+      "additionalProperties": false
+    },
+    "ElevatorType": {
+      "type": "object",
+      "properties": {
+        "catalog_id": {
+          "type": "string"
+        },
+        "element_type": {
+          "const": "elevator"
+        },
+        "elevator_type": {
+          "type": "string"
+        },
+        "default_capacity_persons": {
+          "type": "integer"
+        },
+        "default_width_m": {
+          "type": "number"
+        },
+        "default_depth_m": {
+          "type": "number"
+        },
+        "default_height_m": {
+          "type": "number"
+        },
+        "default_travel_speed_m_per_s": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_id",
+        "element_type"
+      ],
+      "additionalProperties": false
+    },
+    "EntityRef": {
+      "type": "object",
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "enum": [
+            "space",
+            "physical_element",
+            "object_space",
+            "transfer_space",
+            "boundary",
+            "external"
+          ]
+        },
+        "entity_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_type",
+        "entity_id"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
