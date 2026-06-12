@@ -21,12 +21,12 @@ import numpy as np
 import json
 import datetime
 import os
-from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint, LineString as ShapelyLineString
 from shapely.ops import unary_union
 
 # --- CONFIGURACIÓN ---
-ANCHO = 10
-ALTO = 5
+ANCHO = 15
+ALTO = 10
 
 class DiseñadorConectado:
     def __init__(self, ancho, alto, nombre_archivo="escenario_base"):
@@ -620,6 +620,711 @@ class DiseñadorConectado:
                 
         return muros_recortados, datos_puertas
 
+    def _v2_point(self, x, y):
+        return {"type": "Point", "coordinates": [float(x), float(y)]}
+
+    def _v2_linestring(self, coords):
+        return {
+            "type": "LineString",
+            "coordinates": [[float(x), float(y)] for x, y in coords]
+        }
+
+    def _v2_polygon(self, coords):
+        ring = [[float(x), float(y)] for x, y in coords]
+        if ring and ring[0] != ring[-1]:
+            ring.append(list(ring[0]))
+        return {"type": "Polygon", "coordinates": [ring]}
+
+    def _v2_normalizar_id(self, prefix, nombre):
+        texto = str(nombre).strip().upper()
+        normalizado = []
+        for char in texto:
+            normalizado.append(char if char.isalnum() else "_")
+        compacto = "_".join(parte for parte in "".join(normalizado).split("_") if parte)
+        return f"{prefix}_{compacto}" if compacto else prefix
+
+    def _v2_locomotion(self, valores):
+        mapping = {"Walking": "walking", "Rolling": "rolling", "Step": "step"}
+        normalizados = []
+        for valor in valores or []:
+            normalizado = mapping.get(valor, str(valor).strip().lower())
+            if normalizado and normalizado not in normalizados:
+                normalizados.append(normalizado)
+        return normalizados
+
+    def _v2_is_exit_name(self, nombre):
+        return "salida" in str(nombre).lower()
+
+    def _v2_is_virtual_name(self, nombre):
+        return "frontera" in str(nombre).lower()
+
+    def _v2_is_door_name(self, nombre):
+        lower = str(nombre).lower()
+        return "puerta" in lower or self._v2_is_exit_name(nombre)
+
+    def _v2_space_type_and_category(self, nombre, atributos):
+        lower = str(nombre).lower()
+        clase = atributos.get("clase_indoor", "")
+        categoria_original = str(atributos.get("categoria", "")).lower()
+
+        if "salida" in lower:
+            return "exit_space", "exit", "ExitSpace"
+        if "frontera" in lower:
+            return "transfer_space", "virtual_boundary", "VirtualBoundary"
+        if "puerta" in lower or categoria_original == "door":
+            return "transfer_space", "door_space", "ConnectionSpace"
+        if clase == "TransferSpace":
+            return "transfer_space", categoria_original or "transfer_space", "ConnectionSpace"
+        if clase == "AnchorSpace":
+            return "exit_space", "exit", "ExitSpace"
+        return "navigable_space", categoria_original or "room", "General"
+
+    def _v2_catalogs(self):
+        return {
+            "wall_types": [
+                {
+                    "catalog_id": "WALL_EXTERIOR_40CM",
+                    "element_type": "wall",
+                    "wall_type": "exterior",
+                    "default_thickness_m": self.GROSORES["muro_exterior"],
+                    "default_height_m": 3.0,
+                    "default_material": "generic",
+                    "description": "Muro exterior exportado desde SpatialEngine"
+                },
+                {
+                    "catalog_id": "WALL_INTERIOR_15CM",
+                    "element_type": "wall",
+                    "wall_type": "interior",
+                    "default_thickness_m": self.GROSORES["muro_interior"],
+                    "default_height_m": 3.0,
+                    "default_material": "generic",
+                    "description": "Muro interior exportado desde SpatialEngine"
+                }
+            ],
+            "door_types": [
+                {
+                    "catalog_id": "DOOR_SINGLE_90CM",
+                    "element_type": "door",
+                    "door_type": "single",
+                    "default_width_m": self.ANCHOS_PUERTA["puerta_simple"],
+                    "default_height_m": 2.1,
+                    "description": "Puerta simple exportada desde SpatialEngine"
+                },
+                {
+                    "catalog_id": "DOOR_DOUBLE_180CM",
+                    "element_type": "door",
+                    "door_type": "double",
+                    "default_width_m": self.ANCHOS_PUERTA["puerta_doble"],
+                    "default_height_m": 2.1,
+                    "description": "Puerta doble exportada desde SpatialEngine"
+                },
+                {
+                    "catalog_id": "DOOR_EXIT_200CM",
+                    "element_type": "door",
+                    "door_type": "emergency_exit",
+                    "default_width_m": self.ANCHOS_PUERTA["salida"],
+                    "default_height_m": 2.1,
+                    "description": "Salida exportada como puerta de emergencia"
+                }
+            ],
+            "window_types": [],
+            "column_types": [],
+            "space_types": [
+                {
+                    "catalog_id": "SPACE_NAVIGABLE",
+                    "space_type": "navigable_space",
+                    "category": "room",
+                    "default_function": "General",
+                    "default_locomotion": ["walking", "rolling"],
+                    "description": "Espacio navegable exportado desde hitos"
+                },
+                {
+                    "catalog_id": "SPACE_DOOR_TRANSFER",
+                    "space_type": "transfer_space",
+                    "category": "door_space",
+                    "default_function": "ConnectionSpace",
+                    "default_locomotion": ["walking", "rolling"],
+                    "description": "Espacio de transferencia asociado a puerta"
+                },
+                {
+                    "catalog_id": "SPACE_EXIT",
+                    "space_type": "exit_space",
+                    "category": "exit",
+                    "default_function": "ExitSpace",
+                    "default_locomotion": ["walking", "rolling"],
+                    "description": "Espacio de salida"
+                },
+                {
+                    "catalog_id": "SPACE_VIRTUAL_BOUNDARY",
+                    "space_type": "transfer_space",
+                    "category": "virtual_boundary",
+                    "default_function": "VirtualBoundary",
+                    "default_locomotion": ["walking", "rolling"],
+                    "description": "Frontera virtual topologica"
+                }
+            ],
+            "beacon_types": [],
+            "hazard_types": [],
+            "stair_types": [],
+            "ramp_types": [],
+            "elevator_types": []
+        }
+
+    def _v2_physical_catalog_ref(self, tipo):
+        if tipo == "muro_exterior":
+            return "WALL_EXTERIOR_40CM"
+        if tipo == "muro_interior":
+            return "WALL_INTERIOR_15CM"
+        if tipo == "puerta_doble":
+            return "DOOR_DOUBLE_180CM"
+        if tipo == "salida":
+            return "DOOR_EXIT_200CM"
+        return "DOOR_SINGLE_90CM"
+
+    def _v2_physical_elements(self):
+        elementos = []
+        element_id_map = {}
+        authoring_elements = self.muros
+
+        for nombre, tipo, x1, y1, x2, y2 in authoring_elements:
+            if tipo == "frontera_virtual":
+                # En v2 la frontera virtual es topologica; no se exporta como muro solido.
+                continue
+
+            if tipo in ["muro_exterior", "muro_interior"]:
+                element_type = "wall"
+            elif tipo in ["puerta_simple", "puerta_doble", "salida"]:
+                element_type = "door"
+            else:
+                continue
+
+            grosor = self.GROSORES.get(tipo)
+            esquinas = self.calcular_esquinas_muro(x1, y1, x2, y2, grosor)
+            if not esquinas:
+                continue
+
+            element_id = self._v2_normalizar_id("PE", nombre)
+            attrs = {
+                "original_type": tipo,
+                "thickness_m": grosor,
+                "is_virtual": False
+            }
+            if tipo in self.ANCHOS_PUERTA:
+                attrs["width_m"] = self.ANCHOS_PUERTA[tipo]
+            if tipo == "salida":
+                attrs["is_exit"] = True
+                attrs["connector_type"] = "emergency_exit"
+
+            elementos.append({
+                "element_id": element_id,
+                "level_id": "LEVEL_00",
+                "element_type": element_type,
+                "catalog_ref": self._v2_physical_catalog_ref(tipo),
+                "centerline_2d": self._v2_linestring([(x1, y1), (x2, y2)]),
+                "derived_footprint_2d": self._v2_polygon(esquinas),
+                "label": nombre,
+                "attributes": attrs
+            })
+            element_id_map[nombre] = element_id
+
+        return elementos, element_id_map
+
+    def _v2_spaces(self, element_id_map):
+        spaces = []
+        space_id_map = {}
+        space_centroids = self.hitos
+        # self.hitos_bounds stores space footprints, not IndoorGML/MLSM boundaries.
+        space_footprints = self.hitos_bounds
+        space_attributes = self.propiedades_zonas
+
+        for nombre, coords in space_footprints:
+            if nombre not in space_centroids or not coords:
+                continue
+
+            atributos_originales = space_attributes.get(nombre, {})
+            space_type, category, function = self._v2_space_type_and_category(nombre, atributos_originales)
+            cx, cy = space_centroids[nombre]
+            locomotion_original = atributos_originales.get("locomotion", [])
+            locomotion_v2 = self._v2_locomotion(locomotion_original)
+            space_id = self._v2_normalizar_id("SPACE", nombre)
+
+            attrs = dict(atributos_originales)
+            attrs["locomotion_original"] = locomotion_original
+            attrs["locomotion"] = locomotion_v2
+            attrs["source"] = "spatialengine_hitos_bounds"
+
+            space = {
+                "space_id": space_id,
+                "level_id": "LEVEL_00",
+                "space_type": space_type,
+                "name": nombre,
+                "category": category,
+                "function": function,
+                "poi": False,
+                "centroid_2d": self._v2_point(cx, cy),
+                "footprint_2d": self._v2_polygon(coords),
+                "attributes": attrs
+            }
+
+            if nombre in element_id_map:
+                space["physical_element_ref"] = element_id_map[nombre]
+
+            spaces.append(space)
+            space_id_map[nombre] = space_id
+
+        return spaces, space_id_map
+
+    def _v2_space_polygon_by_name(self, nombre):
+        # self.hitos_bounds stores space footprints, not MLSM boundaries.
+        for space_name, coords in self.hitos_bounds:
+            if space_name != nombre or not coords:
+                continue
+            try:
+                poly = ShapelyPolygon(coords)
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+                if poly.is_empty or poly.area <= 0:
+                    return None
+                return poly
+            except Exception:
+                return None
+        return None
+
+    def _v2_line_segments_from_coords(self, coords):
+        lines = []
+        points = list(coords)
+        for start, end in zip(points, points[1:]):
+            line = ShapelyLineString([start, end])
+            if not line.is_empty and line.length > 1e-9:
+                lines.append(line)
+        return lines
+
+    def _v2_extract_lines_from_geometry(self, geom):
+        if geom is None or geom.is_empty:
+            return []
+
+        geom_type = geom.geom_type
+        if geom_type == "LineString":
+            return [geom] if geom.length > 1e-9 else []
+        if geom_type == "LinearRing":
+            return self._v2_line_segments_from_coords(geom.coords)
+        if geom_type == "MultiLineString":
+            lines = []
+            for part in geom.geoms:
+                lines.extend(self._v2_extract_lines_from_geometry(part))
+            return lines
+        if geom_type == "Polygon":
+            return self._v2_line_segments_from_coords(geom.exterior.coords)
+        if geom_type == "MultiPolygon":
+            lines = []
+            for part in geom.geoms:
+                lines.extend(self._v2_extract_lines_from_geometry(part))
+            return lines
+        if geom_type == "GeometryCollection":
+            lines = []
+            for part in geom.geoms:
+                lines.extend(self._v2_extract_lines_from_geometry(part))
+            return lines
+
+        return []
+
+    def _v2_longest_line(self, lines):
+        useful_lines = [line for line in lines if line is not None and not line.is_empty and line.length > 1e-9]
+        if not useful_lines:
+            return None
+        return max(useful_lines, key=lambda line: line.length)
+
+    def _v2_boundary_centroid_fallback(self, origen, destino):
+        return self._v2_linestring([self.hitos[origen], self.hitos[destino]]), True, "centroid_fallback"
+
+    def _v2_boundary_geometry_between(self, origen, destino):
+        poly_a = self._v2_space_polygon_by_name(origen)
+        poly_b = self._v2_space_polygon_by_name(destino)
+
+        if poly_a is None or poly_b is None:
+            return self._v2_boundary_centroid_fallback(origen, destino)
+
+        try:
+            boundary_contact = poly_a.boundary.intersection(poly_b.boundary)
+            line = self._v2_longest_line(self._v2_extract_lines_from_geometry(boundary_contact))
+            if line is None:
+                overlap = poly_a.intersection(poly_b)
+                line = self._v2_longest_line(self._v2_extract_lines_from_geometry(overlap))
+            if line is None:
+                return self._v2_boundary_centroid_fallback(origen, destino)
+            return self._v2_linestring(list(line.coords)), False, "geometry_contact"
+        except Exception:
+            return self._v2_boundary_centroid_fallback(origen, destino)
+
+    def _v2_find_space_for_point(self, x, y, spaces):
+        point = ShapelyPoint(x, y)
+        fallback = spaces[0]["space_id"] if spaces else "UNKNOWN_SPACE"
+
+        for space in spaces:
+            coords = space.get("footprint_2d", {}).get("coordinates", [[]])[0]
+            if len(coords) < 4:
+                continue
+            poly = ShapelyPolygon(coords)
+            if poly.contains(point) or poly.touches(point):
+                return space["space_id"], True
+
+        return fallback, False
+
+    def _v2_agent_spawns(self, spaces):
+        spawns = []
+        agent_positions = self.agentes
+
+        for index, (x, y) in enumerate(agent_positions, start=1):
+            space_ref, inferred = self._v2_find_space_for_point(x, y, spaces)
+            spawns.append({
+                "spawn_id": f"SPAWN_{index:03d}",
+                "level_id": "LEVEL_00",
+                "space_ref": space_ref,
+                "position": self._v2_point(x, y),
+                "capacity": 1,
+                "allowed_profiles": ["walking", "rolling"],
+                "attributes": {
+                    "space_ref_inferred": inferred
+                }
+            })
+
+        return spawns
+
+    def _v2_boundary_type_for_connection(self, origen, destino):
+        if self._v2_is_virtual_name(origen) or self._v2_is_virtual_name(destino):
+            return "special_boundary"
+        return "navigable_boundary"
+
+    def _v2_boundaries_navegables(self, conexiones, space_id_map):
+        boundaries = []
+        boundary_id_map = {}
+
+        for index, conn in enumerate(conexiones, start=1):
+            if conn.get("tipo") != "navegable_puerta":
+                continue
+
+            origen = conn.get("origen")
+            destino = conn.get("destino")
+            if origen not in space_id_map or destino not in space_id_map:
+                continue
+            if origen not in self.hitos or destino not in self.hitos:
+                continue
+
+            boundary_id = f"BOUNDARY_NAV_{index:03d}"
+            geometry_2d, approximate_geometry, derivation_source = self._v2_boundary_geometry_between(origen, destino)
+            boundary = {
+                "boundary_id": boundary_id,
+                "level_id": "LEVEL_00",
+                "boundary_type": self._v2_boundary_type_for_connection(origen, destino),
+                "source_space_id": space_id_map[origen],
+                "target_space_id": space_id_map[destino],
+                "source_ref": {
+                    "entity_type": "space",
+                    "entity_id": space_id_map[origen]
+                },
+                "target_ref": {
+                    "entity_type": "space",
+                    "entity_id": space_id_map[destino]
+                },
+                "geometry_2d": geometry_2d,
+                "attributes": {
+                    "traversable": True,
+                    "bidirectional": True,
+                    "derived": True,
+                    "approximate_geometry": approximate_geometry,
+                    "derivation_source": derivation_source
+                }
+            }
+            boundaries.append(boundary)
+            boundary_id_map[(origen, destino)] = boundary_id
+            boundary_id_map[(destino, origen)] = boundary_id
+
+        return boundaries, boundary_id_map
+
+    def _v2_distance_between(self, origen, destino):
+        if origen not in self.hitos or destino not in self.hitos:
+            return None
+        x1, y1 = self.hitos[origen]
+        x2, y2 = self.hitos[destino]
+        return float(np.hypot(x2 - x1, y2 - y1))
+
+    def _v2_connection_profiles(self, origen, destino):
+        props_origen = self.propiedades_zonas.get(origen, {})
+        props_destino = self.propiedades_zonas.get(destino, {})
+        loc_origen = self._v2_locomotion(props_origen.get("locomotion", []))
+        loc_destino = self._v2_locomotion(props_destino.get("locomotion", []))
+
+        if loc_origen and loc_destino:
+            comunes = [loc for loc in loc_origen if loc in loc_destino]
+            return comunes or ["walking"]
+        return loc_origen or loc_destino or ["walking"]
+
+    def _v2_node_type_for_name(self, nombre):
+        if self._v2_is_exit_name(nombre):
+            return "exit_space"
+        if self._v2_is_virtual_name(nombre):
+            return "virtual_boundary"
+        if "puerta" in str(nombre).lower():
+            return "door_space"
+        return "space"
+
+    def _v2_connector_type_for_connection(self, origen, destino):
+        if self._v2_is_exit_name(origen) or self._v2_is_exit_name(destino):
+            return "emergency_exit"
+        if self._v2_is_virtual_name(origen) or self._v2_is_virtual_name(destino):
+            return "virtual_boundary"
+        return "door_passage"
+
+    def _v2_through_space_name(self, origen, destino):
+        for nombre in (origen, destino):
+            if self._v2_is_door_name(nombre) or self._v2_is_virtual_name(nombre):
+                return nombre
+        return None
+
+    def _v2_add_graph_node(self, nodes, node_ids, graph_prefix, nombre, space_id_map):
+        if nombre not in space_id_map:
+            return None
+        if nombre not in node_ids:
+            node_id = self._v2_normalizar_id(graph_prefix, nombre)
+            cx, cy = self.hitos.get(nombre, (0, 0))
+            nodes.append({
+                "node_id": node_id,
+                "space_ref": space_id_map[nombre],
+                "node_type": self._v2_node_type_for_name(nombre),
+                "level_id": "LEVEL_00",
+                "position": self._v2_point(cx, cy)
+            })
+            node_ids[nombre] = node_id
+        return node_ids[nombre]
+
+    def _v2_graphs(self, conexiones, spaces, physical_elements, boundaries, space_id_map, element_id_map, boundary_id_map):
+        graph_defs = {
+            "adyacencia_fisica": {
+                "key": "adjacency_graph",
+                "graph_id": "GRAPH_ADJ_LEVEL_00",
+                "node_prefix": "N_ADJ",
+                "edge_prefix": "E_ADJ",
+                "purpose": "Contactos fisicos/topologicos derivados de conexiones adyacencia_fisica."
+            },
+            "navegable_puerta": {
+                "key": "connectivity_graph",
+                "graph_id": "GRAPH_CONN_LEVEL_00",
+                "node_prefix": "N_CONN",
+                "edge_prefix": "E_CONN",
+                "purpose": "Conexiones atravesables derivadas de conexiones navegable_puerta."
+            },
+            "door_to_door": {
+                "key": "door_to_door_graph",
+                "graph_id": "GRAPH_D2D_LEVEL_00",
+                "node_prefix": "N_D2D",
+                "edge_prefix": "E_D2D",
+                "purpose": "Grafo principal de evacuacion entre puertas, salidas y pasos."
+            }
+        }
+
+        graphs = {}
+        for conn_type, config in graph_defs.items():
+            nodes = []
+            node_ids = {}
+            edges = []
+            edge_index = 1
+
+            for conn in conexiones:
+                if conn.get("tipo") != conn_type:
+                    continue
+
+                origen = conn.get("origen")
+                destino = conn.get("destino")
+                if origen not in space_id_map or destino not in space_id_map:
+                    continue
+                if origen not in self.hitos or destino not in self.hitos:
+                    continue
+
+                source_node_id = self._v2_add_graph_node(nodes, node_ids, config["node_prefix"], origen, space_id_map)
+                target_node_id = self._v2_add_graph_node(nodes, node_ids, config["node_prefix"], destino, space_id_map)
+                if not source_node_id or not target_node_id:
+                    continue
+
+                edge = {
+                    "edge_id": f"{config['edge_prefix']}_{edge_index:03d}",
+                    "source_node_id": source_node_id,
+                    "target_node_id": target_node_id,
+                    "geometry_2d": self._v2_linestring([self.hitos[origen], self.hitos[destino]])
+                }
+
+                distance = self._v2_distance_between(origen, destino)
+                if distance is not None:
+                    edge["distance_m"] = distance
+
+                if conn_type == "adyacencia_fisica":
+                    edge["relationship_type"] = "physical_adjacency"
+                    edge["traversable"] = False
+
+                elif conn_type == "navegable_puerta":
+                    through_name = self._v2_through_space_name(origen, destino)
+                    edge["connector_type"] = self._v2_connector_type_for_connection(origen, destino)
+                    edge["boundary_ref"] = boundary_id_map.get((origen, destino))
+                    edge["allowed_flows"] = ["pedestrian"]
+                    if edge["connector_type"] == "emergency_exit":
+                        edge["allowed_flows"].append("emergency_exit")
+                    edge["allowed_profiles"] = self._v2_connection_profiles(origen, destino)
+                    edge["base_weight"] = distance if distance is not None else 1.0
+                    edge["traversable"] = True
+                    if through_name:
+                        edge["through_space_id"] = space_id_map.get(through_name)
+                        if through_name in element_id_map:
+                            edge["through_element_id"] = element_id_map[through_name]
+                        if self._v2_is_door_name(through_name):
+                            width_key = "salida" if self._v2_is_exit_name(through_name) else "puerta_simple"
+                            edge["width_m"] = self.ANCHOS_PUERTA.get(width_key)
+
+                elif conn_type == "door_to_door":
+                    contexto = conn.get("contexto")
+                    edge["relationship_type"] = "door_to_door"
+                    edge["through_space_id"] = space_id_map.get(contexto) if contexto in space_id_map else None
+                    edge["traversable_by"] = self._v2_connection_profiles(origen, destino)
+                    edge["base_weight"] = distance if distance is not None else 1.0
+                    edge["capacity_persons"] = 1
+
+                edge = {k: v for k, v in edge.items() if v is not None}
+                edges.append(edge)
+                edge_index += 1
+
+            graphs[config["key"]] = {
+                "graph_id": config["graph_id"],
+                "graph_type": config["key"],
+                "level_id": "LEVEL_00",
+                "purpose": config["purpose"],
+                "nodes": nodes,
+                "edges": edges
+            }
+
+        graphs["vertical_connectivity_graph"] = {
+            "graph_id": "GRAPH_VERTICAL_LEVEL_00",
+            "graph_type": "vertical_connectivity_graph",
+            "purpose": "Reservado para conexiones verticales; vacio en la primera exportacion v2.",
+            "nodes": [],
+            "edges": []
+        }
+
+        return graphs
+
+    def _v2_write_json(self, datos, nombre_archivo):
+        directorio_script = os.path.dirname(os.path.abspath(__file__))
+        carpeta_destino = os.path.join(directorio_script, "escenarios")
+        os.makedirs(carpeta_destino, exist_ok=True)
+        ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
+
+        with open(ruta_completa, 'w', encoding='utf-8') as f:
+            json.dump(datos, f, indent=4, ensure_ascii=False)
+
+        print(f"\n✅ PERFIL MLSM JSON v2 EXPORTADO A: '{ruta_completa}'")
+
+    def exportar_mlsm_core_v2(self, conexiones, nombre_archivo="escenario_mlsm_v2.json"):
+        """
+        Exportacion paralela MLSM JSON v2.
+        Traduce las estructuras actuales sin alterar el contrato v1 ni el dibujo.
+        """
+        physical_elements, element_id_map = self._v2_physical_elements()
+        spaces, space_id_map = self._v2_spaces(element_id_map)
+        boundaries, boundary_id_map = self._v2_boundaries_navegables(conexiones, space_id_map)
+        graphs = self._v2_graphs(
+            conexiones,
+            spaces,
+            physical_elements,
+            boundaries,
+            space_id_map,
+            element_id_map,
+            boundary_id_map
+        )
+        agent_spawns = self._v2_agent_spawns(spaces)
+
+        ahora = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        datos = {
+            "schema_version": "2.0.0",
+            "metadata": {
+                "name": self.nombre_archivo_base,
+                "description": "Exportacion MLSM JSON v2 generada desde SpatialEngine.",
+                "created_at": ahora,
+                "modified_at": ahora,
+                "author": "MLSM SpatialEngine",
+                "reference_standard": "Perfil MLSM JSON v2 inspirado en IndoorGML/IndoorJSON"
+            },
+            "crs": {
+                "type": "local",
+                "srid": 0,
+                "unit": "meters",
+                "origin": {"x": 0, "y": 0, "z": 0},
+                "description": "Sistema local 2D de SpatialEngine."
+            },
+            "levels": [
+                {
+                    "level_id": "LEVEL_00",
+                    "name": "Planta baja",
+                    "floor_index": 0,
+                    "floor_z": 0.0,
+                    "ceiling_z": 3.0,
+                    "height_m": 3.0,
+                    "description": "Planta unica exportada desde SpatialEngine.",
+                    "spatial_extent_2d": self._v2_polygon([
+                        (0, 0),
+                        (self.ancho, 0),
+                        (self.ancho, self.alto),
+                        (0, self.alto)
+                    ])
+                }
+            ],
+            "catalogs": self._v2_catalogs(),
+            "physical_elements": physical_elements,
+            "spaces": spaces,
+            "boundaries": boundaries,
+            "graphs": graphs,
+            "agent_spawns": agent_spawns,
+            "agents": [],
+            "beacons": [],
+            "hazards": [],
+            "simulation": {
+                "time_step_s": 1.0,
+                "max_steps": 600,
+                "routing": {
+                    "source_graph": "door_to_door_graph",
+                    "use_dynamic_weights": False,
+                    "use_beacon_risk": False,
+                    "use_hazard_risk": False,
+                    "use_congestion": False
+                },
+                "population": {
+                    "mode": "from_agent_spawns",
+                    "default_profile": "walking",
+                    "default_count": len(agent_spawns)
+                }
+            },
+            "indoorjson_mapping": {
+                "core_mapping": {
+                    "spaces": "CellSpace",
+                    "boundaries": "CellBoundary",
+                    "graphs.nodes": "Node",
+                    "graphs.edges": "Edge"
+                },
+                "navigation_mapping": {
+                    "navigable_space": "NavigableSpace",
+                    "transfer_space": "TransferSpace",
+                    "exit_space": "TransferSpace",
+                    "special_boundary": "NavigableBoundary"
+                },
+                "mlsm_extensions": [
+                    "physical_elements",
+                    "catalogs",
+                    "agent_spawns",
+                    "simulation",
+                    "door_to_door_graph"
+                ],
+                "compatibility": "Perfil propio MLSM inspirado en IndoorGML/IndoorJSON; no compatibilidad formal completa."
+            }
+        }
+
+        self._v2_write_json(datos, nombre_archivo)
+
     def verificar_visual_y_exportar(self):
         """
         PANTALLA DE VALIDACIÓN FINAL:
@@ -679,6 +1384,11 @@ class DiseñadorConectado:
         # EXPORTACIÓN AUTOMÁTICA AL CERRAR
         nombre_final = f"{self.nombre_archivo_base}_FINAL.json"
         self.exportar_mlsm_core(conexiones_detectadas, nombre_final)
+        nombre_final_v2 = nombre_final.replace(".json", "_v2.json")
+        try:
+            self.exportar_mlsm_core_v2(conexiones_detectadas, nombre_final_v2)
+        except Exception as exc:
+            print(f"\nWARNING: No se pudo exportar MLSM JSON v2: {exc}")
 
     def generar_codigo(self, conexiones):
         print("\n" + "="*60)
