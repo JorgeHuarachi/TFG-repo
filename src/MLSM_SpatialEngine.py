@@ -39,6 +39,10 @@ class DiseñadorConectado:
         self.agentes = []      # Spawns iniciales para la simulación
         self.hitos = {}        # Diccionario de nodos matemáticos (Nombre -> Coordenadas X,Y)
         self.hitos_bounds = [] # Guarda el polígono delimitador exacto de cada nodo para el grafo 
+        # Aclaracion conceptual: self.muros contiene elementos de autoria lineal
+        # (muros, puertas, salidas y fronteras virtuales), no solo muros solidos.
+        # self.hitos_bounds contiene footprints/poligonos de espacios, no boundaries MLSM/IndoorGML.
+        # self.agentes contiene spawns geometricos, no agentes simulados completos.
         
         # Contadores autoincrementales para nombrar instancias automáticamente
         self.cont_hab = 1
@@ -91,6 +95,34 @@ class DiseñadorConectado:
         # Línea roja directriz
         self.linea_temp, = self.ax.plot([], [], color='red', linestyle='-', linewidth=1.5, alpha=0.9, zorder=4)
         self.dibujar_interfaz()
+
+    def get_authoring_elements(self):
+        return self.muros
+
+    def get_space_centroids(self):
+        return self.hitos
+
+    def get_space_footprints(self):
+        return self.hitos_bounds
+
+    def get_space_attributes(self):
+        return self.propiedades_zonas
+
+    def get_agent_spawns(self):
+        return self.agentes
+
+    def is_wall_type(self, tipo):
+        return tipo in ["muro_exterior", "muro_interior"]
+
+    def is_door_type(self, tipo):
+        return tipo in ["puerta_simple", "puerta_doble"]
+
+    def is_exit_type(self, tipo):
+        return tipo == "salida"
+
+    def is_virtual_boundary_type(self, tipo):
+        return tipo == "frontera_virtual"
+
     def configurar_lienzo(self):
         self.ax.set_xlim(-1, self.ancho)
         self.ax.set_ylim(-1, self.alto)
@@ -777,23 +809,23 @@ class DiseñadorConectado:
             return "WALL_INTERIOR_15CM"
         if tipo == "puerta_doble":
             return "DOOR_DOUBLE_180CM"
-        if tipo == "salida":
+        if self.is_exit_type(tipo):
             return "DOOR_EXIT_200CM"
         return "DOOR_SINGLE_90CM"
 
     def _v2_physical_elements(self):
         elementos = []
         element_id_map = {}
-        authoring_elements = self.muros
+        authoring_elements = self.get_authoring_elements()
 
         for nombre, tipo, x1, y1, x2, y2 in authoring_elements:
-            if tipo == "frontera_virtual":
+            if self.is_virtual_boundary_type(tipo):
                 # En v2 la frontera virtual es topologica; no se exporta como muro solido.
                 continue
 
-            if tipo in ["muro_exterior", "muro_interior"]:
+            if self.is_wall_type(tipo):
                 element_type = "wall"
-            elif tipo in ["puerta_simple", "puerta_doble", "salida"]:
+            elif self.is_door_type(tipo) or self.is_exit_type(tipo):
                 element_type = "door"
             else:
                 continue
@@ -811,7 +843,7 @@ class DiseñadorConectado:
             }
             if tipo in self.ANCHOS_PUERTA:
                 attrs["width_m"] = self.ANCHOS_PUERTA[tipo]
-            if tipo == "salida":
+            if self.is_exit_type(tipo):
                 attrs["is_exit"] = True
                 attrs["connector_type"] = "emergency_exit"
 
@@ -832,10 +864,10 @@ class DiseñadorConectado:
     def _v2_spaces(self, element_id_map):
         spaces = []
         space_id_map = {}
-        space_centroids = self.hitos
+        space_centroids = self.get_space_centroids()
         # self.hitos_bounds stores space footprints, not IndoorGML/MLSM boundaries.
-        space_footprints = self.hitos_bounds
-        space_attributes = self.propiedades_zonas
+        space_footprints = self.get_space_footprints()
+        space_attributes = self.get_space_attributes()
 
         for nombre, coords in space_footprints:
             if nombre not in space_centroids or not coords:
@@ -876,7 +908,7 @@ class DiseñadorConectado:
 
     def _v2_space_polygon_by_name(self, nombre):
         # self.hitos_bounds stores space footprints, not MLSM boundaries.
-        for space_name, coords in self.hitos_bounds:
+        for space_name, coords in self.get_space_footprints():
             if space_name != nombre or not coords:
                 continue
             try:
@@ -935,7 +967,8 @@ class DiseñadorConectado:
         return max(useful_lines, key=lambda line: line.length)
 
     def _v2_boundary_centroid_fallback(self, origen, destino):
-        return self._v2_linestring([self.hitos[origen], self.hitos[destino]]), True, "centroid_fallback"
+        space_centroids = self.get_space_centroids()
+        return self._v2_linestring([space_centroids[origen], space_centroids[destino]]), True, "centroid_fallback"
 
     def _v2_boundary_geometry_between(self, origen, destino):
         poly_a = self._v2_space_polygon_by_name(origen)
@@ -972,7 +1005,7 @@ class DiseñadorConectado:
 
     def _v2_agent_spawns(self, spaces):
         spawns = []
-        agent_positions = self.agentes
+        agent_positions = self.get_agent_spawns()
 
         for index, (x, y) in enumerate(agent_positions, start=1):
             space_ref, inferred = self._v2_find_space_for_point(x, y, spaces)
@@ -1007,7 +1040,8 @@ class DiseñadorConectado:
             destino = conn.get("destino")
             if origen not in space_id_map or destino not in space_id_map:
                 continue
-            if origen not in self.hitos or destino not in self.hitos:
+            space_centroids = self.get_space_centroids()
+            if origen not in space_centroids or destino not in space_centroids:
                 continue
 
             boundary_id = f"BOUNDARY_NAV_{index:03d}"
@@ -1042,15 +1076,17 @@ class DiseñadorConectado:
         return boundaries, boundary_id_map
 
     def _v2_distance_between(self, origen, destino):
-        if origen not in self.hitos or destino not in self.hitos:
+        space_centroids = self.get_space_centroids()
+        if origen not in space_centroids or destino not in space_centroids:
             return None
-        x1, y1 = self.hitos[origen]
-        x2, y2 = self.hitos[destino]
+        x1, y1 = space_centroids[origen]
+        x2, y2 = space_centroids[destino]
         return float(np.hypot(x2 - x1, y2 - y1))
 
     def _v2_connection_profiles(self, origen, destino):
-        props_origen = self.propiedades_zonas.get(origen, {})
-        props_destino = self.propiedades_zonas.get(destino, {})
+        space_attributes = self.get_space_attributes()
+        props_origen = space_attributes.get(origen, {})
+        props_destino = space_attributes.get(destino, {})
         loc_origen = self._v2_locomotion(props_origen.get("locomotion", []))
         loc_destino = self._v2_locomotion(props_destino.get("locomotion", []))
 
@@ -1086,7 +1122,7 @@ class DiseñadorConectado:
             return None
         if nombre not in node_ids:
             node_id = self._v2_normalizar_id(graph_prefix, nombre)
-            cx, cy = self.hitos.get(nombre, (0, 0))
+            cx, cy = self.get_space_centroids().get(nombre, (0, 0))
             nodes.append({
                 "node_id": node_id,
                 "space_ref": space_id_map[nombre],
@@ -1128,6 +1164,7 @@ class DiseñadorConectado:
             node_ids = {}
             edges = []
             edge_index = 1
+            space_centroids = self.get_space_centroids()
 
             for conn in conexiones:
                 if conn.get("tipo") != conn_type:
@@ -1137,7 +1174,7 @@ class DiseñadorConectado:
                 destino = conn.get("destino")
                 if origen not in space_id_map or destino not in space_id_map:
                     continue
-                if origen not in self.hitos or destino not in self.hitos:
+                if origen not in space_centroids or destino not in space_centroids:
                     continue
 
                 source_node_id = self._v2_add_graph_node(nodes, node_ids, config["node_prefix"], origen, space_id_map)
@@ -1149,7 +1186,7 @@ class DiseñadorConectado:
                     "edge_id": f"{config['edge_prefix']}_{edge_index:03d}",
                     "source_node_id": source_node_id,
                     "target_node_id": target_node_id,
-                    "geometry_2d": self._v2_linestring([self.hitos[origen], self.hitos[destino]])
+                    "geometry_2d": self._v2_linestring([space_centroids[origen], space_centroids[destino]])
                 }
 
                 distance = self._v2_distance_between(origen, destino)
