@@ -23,12 +23,23 @@ import datetime
 import os
 from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint, LineString as ShapelyLineString
 from shapely.ops import unary_union
+from indoor_data_model import build_indoor_model
 
 # --- CONFIGURACIÓN ---
 ANCHO = 15
 ALTO = 10
 
 class DiseñadorConectado:
+    LINEAR_AUTHORING_TYPES = {
+        "muro_exterior",
+        "muro_interior",
+        "puerta_simple",
+        "puerta_doble",
+        "salida",
+        "frontera_virtual",
+    }
+    POLYGON_AUTHORING_TYPES = {"hitos"}
+
     def __init__(self, ancho, alto, nombre_archivo="escenario_base"):
         self.nombre_archivo_base = nombre_archivo 
         self.ancho = ancho
@@ -122,6 +133,30 @@ class DiseñadorConectado:
 
     def is_virtual_boundary_type(self, tipo):
         return tipo == "frontera_virtual"
+
+    def is_opening_type(self, tipo):
+        return self.is_door_type(tipo) or self.is_exit_type(tipo) or tipo in ["ventana", "ventana_practicable"]
+
+    def is_solid_wall_type(self, tipo):
+        return self.is_wall_type(tipo)
+
+    def is_transfer_authoring_type(self, tipo):
+        return self.is_door_type(tipo) or self.is_exit_type(tipo)
+
+    def is_non_solid_topology_type(self, tipo):
+        return self.is_virtual_boundary_type(tipo)
+
+    def limpiar_temporales_autoria(self, limpiar_poligono=True):
+        self.puntos_temp = None
+        if limpiar_poligono:
+            self.puntos_zona_temp = []
+        self.vector_muro_temp = None
+        self.poly_temp.set_visible(False)
+        self.linea_temp.set_data([], [])
+
+    def cambiar_modo(self, nuevo_modo):
+        self.modo = nuevo_modo
+        self.limpiar_temporales_autoria(limpiar_poligono=True)
 
     def configurar_lienzo(self):
         self.ax.set_xlim(-1, self.ancho)
@@ -309,10 +344,10 @@ class DiseñadorConectado:
             self.agentes.append((x, y))
             self.dibujar_interfaz()
 
-        elif self.modo in ['muro_exterior', 'muro_interior', 'puerta_simple', 'puerta_doble', 'salida', 'frontera_virtual']:
+        elif self.modo in self.LINEAR_AUTHORING_TYPES:
             if self.puntos_temp is None:
                 # --- SNAP INICIAL: Obligar a empezar en un muro si es puerta/salida ---
-                if self.modo in ['puerta_simple', 'puerta_doble', 'salida']:
+                if self.is_transfer_authoring_type(self.modo):
                     snap = self.obtener_muro_cercano(x, y)
                     if snap:
                         self.puntos_temp = (snap[0], snap[1])
@@ -326,7 +361,7 @@ class DiseñadorConectado:
                 x_ini, y_ini = self.puntos_temp
                 
                 # --- APLICAR RESTRICCIÓN FINAL ---
-                if self.modo in ['puerta_simple', 'puerta_doble', 'salida'] and self.vector_muro_temp:
+                if self.is_transfer_authoring_type(self.modo) and self.vector_muro_temp:
                     vx, vy = self.vector_muro_temp
                     dot = (x - x_ini) * vx + (y - y_ini) * vy
                     signo = 1 if dot >= 0 else -1
@@ -338,11 +373,11 @@ class DiseñadorConectado:
                     else: x = x_ini
                 
                 if x == x_ini and y == y_ini:
-                    self.puntos_temp = None; self.poly_temp.set_visible(False); self.linea_temp.set_data([], [])
+                    self.limpiar_temporales_autoria(limpiar_poligono=False)
                     self.dibujar_interfaz(); return
                 
                 # Guardado de la geometría
-                es_puerta = self.modo in ['puerta_simple', 'puerta_doble', 'salida', 'frontera_virtual']
+                es_puerta = self.is_transfer_authoring_type(self.modo) or self.is_virtual_boundary_type(self.modo)
                 nombre = f"{self.modo.capitalize()}_{self.cont_puerta if es_puerta else self.cont_muro}"
                 
                 self.muros.append((nombre, self.modo, x_ini, y_ini, x, y))
@@ -359,7 +394,8 @@ class DiseñadorConectado:
                     self.propiedades_zonas[nombre] = {"clase_indoor": clase_indoor, "categoria": categoria, "locomotion": self.locomotion_actual}
 
                     self.cont_puerta += 1
-                    self.puntos_temp = None 
+                    self.puntos_temp = None
+                    self.vector_muro_temp = None
                 else:
                     self.cont_muro += 1
                     self.puntos_temp = (x, y) 
@@ -368,17 +404,12 @@ class DiseñadorConectado:
                 self.dibujar_interfaz()
 
         # 1. GENERACIÓN DE HITOS POLIGONALES (Múltiples Clics)
-        if (self.modo == 'hitos' or self.modo == 'salida') and event.button == 1:
+        elif self.modo == 'hitos' and event.button == 1:
             # Si el clic actual coincide exactamente con el último clic (Doble Clic), cerramos la forma
             if len(self.puntos_zona_temp) > 0 and x == self.puntos_zona_temp[-1][0] and y == self.puntos_zona_temp[-1][1]:
                 if len(self.puntos_zona_temp) >= 3:
-                    nombre_final = f"SALIDA_{self.cont_salida}" if self.modo == 'salida' else f"Habitacion_{self.cont_hab}"
-                    # --- AQUÍ ESTÁ LA SOLUCIÓN: Sumar 1 a los contadores ---
-                    if self.modo == 'salida': 
-                        self.cont_salida += 1
-                    else: 
-                        self.cont_hab += 1
-                    # -------------------------------------------------------
+                    nombre_final = f"Habitacion_{self.cont_hab}"
+                    self.cont_hab += 1
                     # MAGIA SHAPELY: Usamos el polígono para calcular el Centro de Masa (Centroide)
                     # Esto asegura que la etiqueta del texto y el nodo del grafo queden perfectamente centrados
                     poly_shapely = ShapelyPolygon(self.puntos_zona_temp)
@@ -388,10 +419,9 @@ class DiseñadorConectado:
                     self.hitos_bounds.append((nombre_final, list(self.puntos_zona_temp)))
                     
                     # GUARDADO SEMÁNTICO INDOORGML
-                    es_salida = self.modo == 'salida'
                     self.propiedades_zonas[nombre_final] = {
-                        "clase_indoor": "AnchorSpace" if es_salida else "NavigableSpace",
-                        "categoria": "Transition" if es_salida else "Room",
+                        "clase_indoor": "NavigableSpace",
+                        "categoria": "Room",
                         "locomotion": self.locomotion_actual # Herencia del estado global
                     }
                 # Resetear memoria temporal para la próxima habitación
@@ -418,14 +448,14 @@ class DiseñadorConectado:
         x_curr, y_curr = round(event.xdata * 2) / 2, round(event.ydata * 2) / 2
 
         # LÓGICA PARA HERRAMIENTAS DE GEOMETRÍA LINEAL (Muros, Puertas, Salidas)
-        if self.modo in ['muro_exterior', 'muro_interior', 'puerta_simple', 'puerta_doble', 'salida', 'frontera_virtual']:
+        if self.modo in self.LINEAR_AUTHORING_TYPES:
             if self.puntos_temp is None: return # Si no hay un primer clic, no hay nada que proyectar
             x_start, y_start = self.puntos_temp
             
             # --- RESTRICCIÓN 1: Bloqueo Magnético (Rail Vector) ---
             # Si estamos dibujando una puerta, forzamos la coordenada actual a proyectarse
             # sobre el vector del muro anfitrión (self.vector_muro_temp).
-            if self.modo in ['puerta_simple', 'puerta_doble', 'salida'] and self.vector_muro_temp:
+            if self.is_transfer_authoring_type(self.modo) and self.vector_muro_temp:
                 vx, vy = self.vector_muro_temp
                 dot = (x_curr - x_start) * vx + (y_curr - y_start) * vy
                 signo = 1 if dot >= 0 else -1
@@ -460,7 +490,7 @@ class DiseñadorConectado:
                 self.poly_temp.set_color(c)
 
         # LÓGICA PARA HERRAMIENTAS POLIGONALES LIBRES (Habitaciones)
-        elif self.modo in ['hitos', 'salida']:
+        elif self.modo == 'hitos':
             # Dibuja la "banda elástica" (Rubber-band) desde el último vértice hasta el ratón actual
             if hasattr(self, 'puntos_zona_temp') and len(self.puntos_zona_temp) > 0:
                 last_x, last_y = self.puntos_zona_temp[-1]
@@ -471,7 +501,7 @@ class DiseñadorConectado:
                 if len(puntos_dibujo) >= 3:
                     self.poly_temp.set_xy(puntos_dibujo)
                     self.poly_temp.set_visible(True)
-                    self.poly_temp.set_color('red' if self.modo == 'salida' else 'green')
+                    self.poly_temp.set_color('green')
                 else:
                     self.poly_temp.set_visible(False)
             
@@ -480,43 +510,40 @@ class DiseñadorConectado:
 
     def on_key(self, event):
         # --- NUEVOS MODOS DE MUROS ---
-        if event.key == 'm': self.modo = 'muro_exterior'; self.puntos_temp = None
-        elif event.key == 'n': self.modo = 'muro_interior'; self.puntos_temp = None
-        elif event.key == 'p': self.modo = 'puerta_simple'; self.puntos_temp = None
-        elif event.key == 'd': self.modo = 'puerta_doble'; self.puntos_temp = None
+        if event.key == 'm': self.cambiar_modo('muro_exterior')
+        elif event.key == 'n': self.cambiar_modo('muro_interior')
+        elif event.key == 'p': self.cambiar_modo('puerta_simple')
+        elif event.key == 'd': self.cambiar_modo('puerta_doble')
         elif event.key == 'o': self.ortogonal = not self.ortogonal # Alternar Diagonal    
         # --- MODOS CLÁSICOS ---
-        elif event.key == 'a': self.modo = 'agentes'
-        elif event.key == 'h': self.modo = 'hitos'
-        elif event.key == 's': self.modo = 'salida'; self.puntos_temp = None
-        elif event.key == 'v': self.modo = 'frontera_virtual'; self.puntos_temp = None # NUEVA
+        elif event.key == 'a': self.cambiar_modo('agentes')
+        elif event.key == 'h': self.cambiar_modo('hitos')
+        elif event.key == 's': self.cambiar_modo('salida')
+        elif event.key == 'v': self.cambiar_modo('frontera_virtual') # NUEVA
         # --- NUEVO: Etiquetas de Locomoción IndoorGML ---
         elif event.key == '1': self.locomotion_actual = ["Walking", "Rolling"] # Accesible universal
         elif event.key == '2': self.locomotion_actual = ["Walking"]            # No accesible (ej. terreno irregular)
         elif event.key == '3': self.locomotion_actual = ["Walking", "Step"]    # Escaleras / Desniveles
         # --- LÓGICA DE DESHACER (ACTUALIZADA) ---
         elif event.key == 'z':
-            if self.modo.startswith('muro') or self.modo.startswith('puerta'):
+            if self.modo in self.LINEAR_AUTHORING_TYPES:
                 if self.muros:
                     borrado = self.muros.pop()
-                    if borrado[1].startswith('puerta') and borrado[0] in self.hitos:
+                    if (self.is_transfer_authoring_type(borrado[1]) or self.is_virtual_boundary_type(borrado[1])) and borrado[0] in self.hitos:
                         del self.hitos[borrado[0]]
                         self.hitos_bounds = [b for b in self.hitos_bounds if b[0] != borrado[0]]
+                        self.propiedades_zonas.pop(borrado[0], None)
             elif self.modo == 'agentes' and self.agentes: self.agentes.pop()
-            elif self.modo in ['hitos', 'salida'] and self.hitos_bounds:
+            elif self.modo == 'hitos' and self.hitos_bounds:
                 borrado = self.hitos_bounds.pop()
                 if borrado[0] in self.hitos: del self.hitos[borrado[0]]
-            self.puntos_temp = None
-            self.poly_temp.set_visible(False)
-            self.linea_temp.set_data([], [])
+                self.propiedades_zonas.pop(borrado[0], None)
+            self.limpiar_temporales_autoria(limpiar_poligono=True)
 
         # --- SECCIÓN PARA EXPORTAR ---
         elif event.key == 'e': 
-            conexiones = self.calcular_conexiones()
-            timestamp = datetime.datetime.now().strftime("%H%M%S")
-            nombre_final = f"{self.nombre_archivo_base}_{timestamp}.json"
-            self.exportar_json_legacy(conexiones, nombre_final)
-            print(f"💾 Guardado rápido completado.")
+            self.exportar_indoor_model("indoor_model.json")
+            print("Guardado rapido Indoor Data Model completado.")
         
         elif event.key == 'i': 
             conexiones = self.calcular_conexiones()
@@ -606,28 +633,28 @@ class DiseñadorConectado:
         a los muros sólidos. Esto evita que los agentes colisionen con paredes invisibles 
         al intentar cruzar un umbral.
         """
-        poligonos_puertas = []
-        datos_puertas = []
+        poligonos_corte = []
+        datos_aperturas = []
         
         # 1. Agrupación de Geometría Sustractiva (Las "Herramientas de Corte")
         for id_muro, tipo, x1, y1, x2, y2 in self.muros:
-            if tipo.startswith('puerta'):
+            if self.is_opening_type(tipo):
                 grosor = self.GROSORES[tipo]
                 esquinas = self.calcular_esquinas_muro(x1, y1, x2, y2, grosor)
                 if esquinas:
                     poly = ShapelyPolygon(esquinas)
-                    poligonos_puertas.append(poly)
-                    datos_puertas.append((id_muro, tipo, esquinas))
+                    poligonos_corte.append(poly)
+                    datos_aperturas.append((id_muro, tipo, esquinas))
                     
         # unary_union fusiona todas las puertas superpuestas en un único "Súper-Polígono"
         # Optimizando masivamente la operación matemática de resta posterior.
-        todas_las_puertas = unary_union(poligonos_puertas) if poligonos_puertas else ShapelyPolygon()
+        todas_las_aperturas = unary_union(poligonos_corte) if poligonos_corte else ShapelyPolygon()
         
         muros_recortados = []
         
         # 2. Recorte del Sólido Base (Muros)
         for id_muro, tipo, x1, y1, x2, y2 in self.muros:
-            if tipo.startswith('puerta'): continue # Ignoramos las puertas, ya las usamos para cortar
+            if not self.is_solid_wall_type(tipo): continue # Puertas/salidas cortan; frontera_virtual no es solido.
             
             grosor = self.GROSORES[tipo]
             esquinas = self.calcular_esquinas_muro(x1, y1, x2, y2, grosor)
@@ -636,7 +663,7 @@ class DiseñadorConectado:
             poly_muro = ShapelyPolygon(esquinas)
             
             # MAGIA SHAPELY: Operación de Diferencia Booleana (Muro - Puertas)
-            muro_final = poly_muro.difference(todas_las_puertas)
+            muro_final = poly_muro.difference(todas_las_aperturas)
             
             if muro_final.is_empty: continue # El muro fue borrado por completo por una puerta enorme
             
@@ -648,9 +675,9 @@ class DiseñadorConectado:
                 # Extraemos las coordenadas matemáticas resultantes y quitamos el último punto 
                 # (redundante) para que el formato GeoJSON/Simulador lo procese correctamente.
                 coords = list(geom.exterior.coords)[:-1] 
-                muros_recortados.append((f"{id_muro}_part{i}", tipo, coords))
+                muros_recortados.append((f"{id_muro}_part{i + 1:03d}", tipo, coords))
                 
-        return muros_recortados, datos_puertas
+        return muros_recortados, datos_aperturas
 
     def _v2_point(self, x, y):
         return {"type": "Point", "coordinates": [float(x), float(y)]}
@@ -1259,6 +1286,7 @@ class DiseñadorConectado:
 
     def exportar_mlsm_core_v2(self, conexiones, nombre_archivo="escenario_mlsm_v2.json"):
         """
+        LEGACY/DEPRECATED transitional export.
         Exportacion paralela MLSM JSON v2.
         Traduce las estructuras actuales sin alterar el contrato v1 ni el dibujo.
         """
@@ -1362,6 +1390,115 @@ class DiseñadorConectado:
 
         self._v2_write_json(datos, nombre_archivo)
 
+    def build_authoring_snapshot(self):
+        authoring_elements = []
+        for nombre, tipo, x1, y1, x2, y2 in self.get_authoring_elements():
+            grosor = self.GROSORES.get(tipo)
+            footprint = self.calcular_esquinas_muro(x1, y1, x2, y2, grosor) if grosor else None
+            attrs = dict(self.propiedades_zonas.get(nombre, {}))
+            element = {
+                "name": nombre,
+                "type": tipo,
+                "level": "LEVEL_00",
+                "centerline": [(x1, y1), (x2, y2)],
+                "footprint": footprint,
+                "thicknessM": grosor,
+                "attributes": attrs,
+            }
+            if tipo in self.ANCHOS_PUERTA:
+                element["widthM"] = self.ANCHOS_PUERTA[tipo]
+            authoring_elements.append(element)
+
+        line_type_by_name = {element["name"]: element["type"] for element in authoring_elements}
+        space_footprints = []
+        for nombre, coords in self.get_space_footprints():
+            if not coords:
+                continue
+            space_footprints.append({
+                "name": nombre,
+                "level": "LEVEL_00",
+                "footprint": coords,
+                "centroid": self.get_space_centroids().get(nombre),
+                "attributes": dict(self.get_space_attributes().get(nombre, {})),
+                "authoringType": line_type_by_name.get(nombre),
+            })
+
+        return {
+            "modelName": self.nombre_archivo_base,
+            "canvas": {"width": self.ancho, "height": self.alto},
+            "crs": {
+                "type": "local",
+                "unit": "meters",
+                "origin": {"x": 0, "y": 0, "z": 0},
+                "axisOrder": "xyz",
+                "description": "Sistema local 2D de SpatialEngine.",
+            },
+            "levels": [
+                {
+                    "id": "LEVEL_00",
+                    "name": "Ground floor",
+                    "levelIndex": 0,
+                    "floorZ": 0.0,
+                    "ceilingZ": 3.0,
+                    "heightM": 3.0,
+                }
+            ],
+            "authoringElements": authoring_elements,
+            "spaceFootprints": space_footprints,
+        }
+
+    def _validar_indoor_model_si_posible(self, datos, schema_path):
+        try:
+            from jsonschema import Draft202012Validator
+        except ImportError:
+            print("Aviso: jsonschema no esta instalado; se omite validacion de indoor_model.json.")
+            return None
+
+        try:
+            with open(schema_path, "r", encoding="utf-8") as schema_file:
+                schema = json.load(schema_file)
+            errors = sorted(Draft202012Validator(schema).iter_errors(datos), key=lambda e: list(e.path))
+        except Exception as exc:
+            print(f"ERROR: no se pudo validar indoor_model.json contra el schema: {exc}")
+            return False
+
+        if errors:
+            print("ERROR: indoor_model.json no valida contra schemas/indoor/indoor_model.schema.json")
+            for error in errors[:50]:
+                path = "/".join(map(str, error.path)) or "<root>"
+                print(f" - {path}: {error.message}")
+            return False
+
+        print("OK: indoor_model.json valida contra schemas/indoor/indoor_model.schema.json")
+        return True
+
+    def exportar_indoor_model(self, nombre_archivo=None):
+        """
+        Nuevo flujo principal: exporta indoor_model.json basado en indoor_data_model.
+        No incluye agentes, spawns, beacons, hazards ni configuracion de simulacion.
+        """
+        snapshot = self.build_authoring_snapshot()
+        datos = build_indoor_model(snapshot)
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        carpeta_destino = os.path.join(repo_root, "outputs", "indoor_models")
+        os.makedirs(carpeta_destino, exist_ok=True)
+
+        if nombre_archivo is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo = f"{self.nombre_archivo_base}_indoor_model_{timestamp}.json"
+        if not nombre_archivo.endswith(".json"):
+            nombre_archivo += ".json"
+
+        ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
+        with open(ruta_completa, "w", encoding="utf-8") as f:
+            json.dump(datos, f, indent=2, ensure_ascii=False)
+
+        schema_path = os.path.join(repo_root, "schemas", "indoor", "indoor_model.schema.json")
+        self._validar_indoor_model_si_posible(datos, schema_path)
+        print(f"\nINDOOR DATA MODEL EXPORTADO A: '{ruta_completa}'")
+        return ruta_completa
+
     def verificar_visual_y_exportar(self):
         """
         PANTALLA DE VALIDACIÓN FINAL:
@@ -1419,13 +1556,10 @@ class DiseñadorConectado:
         plt.show() # Pausa la ejecución hasta que el usuario cierra la ventana
         
         # EXPORTACIÓN AUTOMÁTICA AL CERRAR
-        nombre_final = f"{self.nombre_archivo_base}_FINAL.json"
-        self.exportar_mlsm_core(conexiones_detectadas, nombre_final)
-        nombre_final_v2 = nombre_final.replace(".json", "_v2.json")
         try:
-            self.exportar_mlsm_core_v2(conexiones_detectadas, nombre_final_v2)
+            self.exportar_indoor_model()
         except Exception as exc:
-            print(f"\nWARNING: No se pudo exportar MLSM JSON v2: {exc}")
+            print(f"\nWARNING: No se pudo exportar indoor_model.json: {exc}")
 
     def generar_codigo(self, conexiones):
         print("\n" + "="*60)
@@ -1449,6 +1583,7 @@ class DiseñadorConectado:
 
     def exportar_mlsm_core(self, conexiones, nombre_archivo="escenario_mlsm.json"):
         """
+        LEGACY/DEPRECATED export.
         SERIALIZADOR DE DATOS:
         Empaqueta la geometría, topología y semántica en un perfil JSON híbrido 
         (MLSM Core) optimizado para el motor de simulación.
