@@ -1,0 +1,89 @@
+{
+  "scenarioId": "SCENARIO_MINIMAL_001",
+  "scenarioName": "minimal_scenario_for_minimal_indoor_model",
+  "metadata": {
+    "name": "minimal_scenario",
+    "description": "Minimal scenario overlay referencing minimal_indoor_model.json.",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "generator": "handcrafted_minimal_example"
+  },
+  "indoorModelRef": {
+    "path": "minimal_indoor_model.json",
+    "indoorModelId": "IF_MINIMAL_INDOOR_001",
+    "schemaRef": "../schemas/indoor/indoor_model.schema.json"
+  },
+  "population": {
+    "mobilityProfiles": [
+      {
+        "profileId": "MP_WALKING_ROLLING",
+        "label": "Default walking/rolling profile",
+        "locomotionTypes": [
+          "Walking",
+          "Rolling"
+        ],
+        "baseSpeedMps": 1.2,
+        "canUseStairs": false,
+        "canUseRamps": true,
+        "canUseElevators": true
+      }
+    ],
+    "agentGroups": [
+      {
+        "groupId": "AG_ROOM_A_001",
+        "count": 5,
+        "mobilityProfileRef": "MP_WALKING_ROLLING",
+        "spawnRef": "SPAWN_ROOM_A_001",
+        "distribution": "fixed"
+      }
+    ],
+    "agentSpawns": [
+      {
+        "spawnId": "SPAWN_ROOM_A_001",
+        "levelRef": "LEVEL_00",
+        "cellSpaceRef": "CS_L00_ROOM_A",
+        "nodeRef": "N_L00_ROOM_A",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            0.8,
+            1.0
+          ]
+        },
+        "capacity": 5,
+        "description": "Initial spawn inside Room A."
+      }
+    ],
+    "agents": []
+  },
+  "beacons": [],
+  "hazards": [],
+  "simulationConfig": {
+    "timeStepS": 0.5,
+    "maxSteps": 300,
+    "randomSeed": 1,
+    "routing": {
+      "sourceLayerRef": "TL_NAV_L00",
+      "sourceDualSpaceRef": "DS_NAV_L00",
+      "routeSelection": "shortest_path",
+      "deriveConnectivityFromEdges": true,
+      "useDynamicWeights": false,
+      "useBeaconRisk": false,
+      "useHazardRisk": false,
+      "useCongestion": false
+    },
+    "enabledOverlays": [
+      "population"
+    ]
+  },
+  "outputs": {
+    "outputFolder": "outputs/minimal_scenario",
+    "saveRoutes": true,
+    "saveMetrics": true,
+    "saveTimeSeries": false
+  },
+  "scenarioDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.1-draft",
+    "profile": "Scenario overlay referencing indoor_model.json"
+  }
+}

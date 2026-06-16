@@ -1,0 +1,520 @@
+{
+  "id": "IF_MINIMAL_INDOOR_001",
+  "featureType": "IndoorFeatures",
+  "metadata": {
+    "name": "minimal_indoor_model",
+    "description": "Minimal indoor_data_model example: two GeneralSpaces connected by one Door TransferSpace.",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "generator": "handcrafted_minimal_example"
+  },
+  "crs": {
+    "type": "local",
+    "unit": "meters",
+    "origin": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "axisOrder": "xyz",
+    "description": "Local 2D coordinate system with level-based Z."
+  },
+  "levels": [
+    {
+      "id": "LEVEL_00",
+      "name": "Ground floor",
+      "levelIndex": 0,
+      "floorZ": 0.0,
+      "ceilingZ": 3.0,
+      "heightM": 3.0,
+      "spatialExtent2D": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              4.2,
+              0
+            ],
+            [
+              4.2,
+              2
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      }
+    }
+  ],
+  "layers": [
+    {
+      "id": "TL_NAV_L00",
+      "featureType": "ThematicLayer",
+      "semanticExtension": true,
+      "theme": "TopographicNavigation",
+      "name": "Topographic navigation layer - level 00",
+      "level": "LEVEL_00",
+      "primalSpace": {
+        "id": "PS_NAV_L00",
+        "featureType": "PrimalSpaceLayer",
+        "creationDatetime": "2026-01-01T00:00:00Z",
+        "cellSpaceMember": [
+          {
+            "id": "CS_L00_ROOM_A",
+            "featureType": "CellSpace",
+            "cellSpaceName": "Room A",
+            "level": "LEVEL_00",
+            "poi": false,
+            "duality": "TL_NAV_L00:DS_NAV_L00:N_L00_ROOM_A",
+            "navigationType": "GeneralSpace",
+            "navigationClass": "NavigableSpace",
+            "category": "Room",
+            "function": "Education, training",
+            "locomotionTypes": [
+              "Walking",
+              "Rolling"
+            ],
+            "cellSpaceGeom": {
+              "geometry2D": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      0,
+                      0
+                    ],
+                    [
+                      2,
+                      0
+                    ],
+                    [
+                      2,
+                      2
+                    ],
+                    [
+                      0,
+                      2
+                    ],
+                    [
+                      0,
+                      0
+                    ]
+                  ]
+                ]
+              }
+            },
+            "boundedBy": [
+              "TL_NAV_L00:PS_NAV_L00:CB_L00_ROOM_A_DOOR_1"
+            ],
+            "sourceFeatureRefs": [
+              "SF_ROOM_A_POLYGON"
+            ]
+          },
+          {
+            "id": "CS_L00_DOOR_1",
+            "featureType": "CellSpace",
+            "cellSpaceName": "Door 1",
+            "level": "LEVEL_00",
+            "poi": false,
+            "duality": "TL_NAV_L00:DS_NAV_L00:N_L00_DOOR_1",
+            "navigationType": "TransferSpace",
+            "navigationClass": "NavigableSpace",
+            "category": "Door",
+            "function": "ConnectionSpace",
+            "locomotionTypes": [
+              "Walking",
+              "Rolling"
+            ],
+            "cellSpaceGeom": {
+              "geometry2D": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      2,
+                      0.8
+                    ],
+                    [
+                      2.2,
+                      0.8
+                    ],
+                    [
+                      2.2,
+                      1.2
+                    ],
+                    [
+                      2,
+                      1.2
+                    ],
+                    [
+                      2,
+                      0.8
+                    ]
+                  ]
+                ]
+              }
+            },
+            "boundedBy": [
+              "TL_NAV_L00:PS_NAV_L00:CB_L00_ROOM_A_DOOR_1",
+              "TL_NAV_L00:PS_NAV_L00:CB_L00_DOOR_1_ROOM_B"
+            ],
+            "sourceFeatureRefs": [
+              "SF_DOOR_1_CENTERLINE"
+            ]
+          },
+          {
+            "id": "CS_L00_ROOM_B",
+            "featureType": "CellSpace",
+            "cellSpaceName": "Room B",
+            "level": "LEVEL_00",
+            "poi": false,
+            "duality": "TL_NAV_L00:DS_NAV_L00:N_L00_ROOM_B",
+            "navigationType": "GeneralSpace",
+            "navigationClass": "NavigableSpace",
+            "category": "Room",
+            "function": "Laboratory",
+            "locomotionTypes": [
+              "Walking",
+              "Rolling"
+            ],
+            "cellSpaceGeom": {
+              "geometry2D": {
+                "type": "Polygon",
+                "coordinates": [
+                  [
+                    [
+                      2.2,
+                      0
+                    ],
+                    [
+                      4.2,
+                      0
+                    ],
+                    [
+                      4.2,
+                      2
+                    ],
+                    [
+                      2.2,
+                      2
+                    ],
+                    [
+                      2.2,
+                      0
+                    ]
+                  ]
+                ]
+              }
+            },
+            "boundedBy": [
+              "TL_NAV_L00:PS_NAV_L00:CB_L00_DOOR_1_ROOM_B"
+            ],
+            "sourceFeatureRefs": [
+              "SF_ROOM_B_POLYGON"
+            ]
+          }
+        ],
+        "cellBoundaryMember": [
+          {
+            "id": "CB_L00_ROOM_A_DOOR_1",
+            "featureType": "CellBoundary",
+            "isVirtual": false,
+            "duality": "TL_NAV_L00:DS_NAV_L00:E_L00_ROOM_A_DOOR_1",
+            "navigationBoundaryType": "NavigableBoundary",
+            "navigableBoundaryFunction": "ConnectionBoundary",
+            "traversable": true,
+            "cellRefs": [
+              "CS_L00_ROOM_A",
+              "CS_L00_DOOR_1"
+            ],
+            "cellBoundaryGeom": {
+              "geometry2D": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    2,
+                    0.8
+                  ],
+                  [
+                    2,
+                    1.2
+                  ]
+                ]
+              }
+            }
+          },
+          {
+            "id": "CB_L00_DOOR_1_ROOM_B",
+            "featureType": "CellBoundary",
+            "isVirtual": false,
+            "duality": "TL_NAV_L00:DS_NAV_L00:E_L00_DOOR_1_ROOM_B",
+            "navigationBoundaryType": "NavigableBoundary",
+            "navigableBoundaryFunction": "ConnectionBoundary",
+            "traversable": true,
+            "cellRefs": [
+              "CS_L00_DOOR_1",
+              "CS_L00_ROOM_B"
+            ],
+            "cellBoundaryGeom": {
+              "geometry2D": {
+                "type": "LineString",
+                "coordinates": [
+                  [
+                    2.2,
+                    0.8
+                  ],
+                  [
+                    2.2,
+                    1.2
+                  ]
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "dualSpace": {
+        "id": "DS_NAV_L00",
+        "featureType": "DualSpaceLayer",
+        "creationDatetime": "2026-01-01T00:00:00Z",
+        "isLogical": false,
+        "isDirected": false,
+        "nodeMember": [
+          {
+            "id": "N_L00_ROOM_A",
+            "featureType": "Node",
+            "duality": "TL_NAV_L00:PS_NAV_L00:CS_L00_ROOM_A",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                1,
+                1
+              ]
+            },
+            "connects": [
+              "TL_NAV_L00:DS_NAV_L00:E_L00_ROOM_A_DOOR_1"
+            ]
+          },
+          {
+            "id": "N_L00_DOOR_1",
+            "featureType": "Node",
+            "duality": "TL_NAV_L00:PS_NAV_L00:CS_L00_DOOR_1",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                2.1,
+                1
+              ]
+            },
+            "connects": [
+              "TL_NAV_L00:DS_NAV_L00:E_L00_ROOM_A_DOOR_1",
+              "TL_NAV_L00:DS_NAV_L00:E_L00_DOOR_1_ROOM_B"
+            ]
+          },
+          {
+            "id": "N_L00_ROOM_B",
+            "featureType": "Node",
+            "duality": "TL_NAV_L00:PS_NAV_L00:CS_L00_ROOM_B",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                3.2,
+                1
+              ]
+            },
+            "connects": [
+              "TL_NAV_L00:DS_NAV_L00:E_L00_DOOR_1_ROOM_B"
+            ]
+          }
+        ],
+        "edgeMember": [
+          {
+            "id": "E_L00_ROOM_A_DOOR_1",
+            "featureType": "Edge",
+            "duality": "TL_NAV_L00:PS_NAV_L00:CB_L00_ROOM_A_DOOR_1",
+            "weight": 1.0,
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  2.1,
+                  1
+                ]
+              ]
+            },
+            "connects": [
+              "TL_NAV_L00:DS_NAV_L00:N_L00_ROOM_A",
+              "TL_NAV_L00:DS_NAV_L00:N_L00_DOOR_1"
+            ],
+            "relationshipType": "connectivity",
+            "traversable": true,
+            "boundaryRef": "CB_L00_ROOM_A_DOOR_1",
+            "transferSpaceRef": "CS_L00_DOOR_1",
+            "locomotionTypes": [
+              "Walking",
+              "Rolling"
+            ],
+            "widthM": 0.9,
+            "capacityPersons": 1.0
+          },
+          {
+            "id": "E_L00_DOOR_1_ROOM_B",
+            "featureType": "Edge",
+            "duality": "TL_NAV_L00:PS_NAV_L00:CB_L00_DOOR_1_ROOM_B",
+            "weight": 1.0,
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [
+                  2.1,
+                  1
+                ],
+                [
+                  3.2,
+                  1
+                ]
+              ]
+            },
+            "connects": [
+              "TL_NAV_L00:DS_NAV_L00:N_L00_DOOR_1",
+              "TL_NAV_L00:DS_NAV_L00:N_L00_ROOM_B"
+            ],
+            "relationshipType": "connectivity",
+            "traversable": true,
+            "boundaryRef": "CB_L00_DOOR_1_ROOM_B",
+            "transferSpaceRef": "CS_L00_DOOR_1",
+            "locomotionTypes": [
+              "Walking",
+              "Rolling"
+            ],
+            "widthM": 0.9,
+            "capacityPersons": 1.0
+          }
+        ]
+      }
+    }
+  ],
+  "layerConnections": [],
+  "sourceFeatures": [
+    {
+      "id": "SF_ROOM_A_POLYGON",
+      "featureType": "SourceFeature",
+      "sourceType": "room_polygon",
+      "level": "LEVEL_00",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              2,
+              0
+            ],
+            [
+              2,
+              2
+            ],
+            [
+              0,
+              2
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      },
+      "derivedCellSpaceRefs": [
+        "CS_L00_ROOM_A"
+      ]
+    },
+    {
+      "id": "SF_DOOR_1_CENTERLINE",
+      "featureType": "SourceFeature",
+      "sourceType": "door_centerline",
+      "level": "LEVEL_00",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            2,
+            0.8
+          ],
+          [
+            2.2,
+            1.2
+          ]
+        ]
+      },
+      "derivedCellSpaceRefs": [
+        "CS_L00_DOOR_1"
+      ],
+      "derivedBoundaryRefs": [
+        "CB_L00_ROOM_A_DOOR_1",
+        "CB_L00_DOOR_1_ROOM_B"
+      ]
+    },
+    {
+      "id": "SF_ROOM_B_POLYGON",
+      "featureType": "SourceFeature",
+      "sourceType": "room_polygon",
+      "level": "LEVEL_00",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              2.2,
+              0
+            ],
+            [
+              4.2,
+              0
+            ],
+            [
+              4.2,
+              2
+            ],
+            [
+              2.2,
+              2
+            ],
+            [
+              2.2,
+              0
+            ]
+          ]
+        ]
+      },
+      "derivedCellSpaceRefs": [
+        "CS_L00_ROOM_B"
+      ]
+    }
+  ],
+  "indoorDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.1-draft",
+    "profile": "indoorjson_like",
+    "compatibility": "Conceptually aligned with IndoorGML 2.0 Core and Navigation; not a formal conformance claim.",
+    "supersedes": [
+      "mlsm_json_v2_transitional"
+    ]
+  }
+}

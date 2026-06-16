@@ -1,0 +1,704 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/indoor_data_model/scenario_model.schema.json",
+  "title": "Indoor Data Model — scenario_model.json",
+  "description": "Draft schema for scenario overlays and simulation configuration applied to an indoor_model.json. It references stable IDs from the indoor model and keeps dynamic/simulation data out of the spatial model.",
+  "type": "object",
+  "properties": {
+    "scenarioId": {
+      "type": "string"
+    },
+    "scenarioName": {
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "indoorModelRef": {
+      "$ref": "#/$defs/IndoorModelRef"
+    },
+    "population": {
+      "$ref": "#/$defs/Population"
+    },
+    "beacons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Beacon"
+      }
+    },
+    "hazards": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Hazard"
+      }
+    },
+    "simulationConfig": {
+      "$ref": "#/$defs/SimulationConfig"
+    },
+    "outputs": {
+      "$ref": "#/$defs/Outputs"
+    },
+    "scenarioDataModel": {
+      "$ref": "#/$defs/ScenarioDataModelInfo"
+    }
+  },
+  "required": [
+    "scenarioId",
+    "metadata",
+    "indoorModelRef",
+    "population",
+    "simulationConfig"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Metadata": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modifiedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "author": {
+          "type": "string"
+        },
+        "generator": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "ScenarioDataModelInfo": {
+      "type": "object",
+      "properties": {
+        "modelName": {
+          "const": "indoor_data_model"
+        },
+        "modelVersion": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "modelName",
+        "modelVersion",
+        "profile"
+      ],
+      "additionalProperties": false
+    },
+    "IndoorModelRef": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "indoorModelId": {
+          "type": "string"
+        },
+        "schemaRef": {
+          "type": "string"
+        },
+        "checksum": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "Population": {
+      "type": "object",
+      "properties": {
+        "mobilityProfiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MobilityProfile"
+          }
+        },
+        "agentGroups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentGroup"
+          }
+        },
+        "agentSpawns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentSpawn"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Agent"
+          }
+        }
+      },
+      "required": [
+        "mobilityProfiles",
+        "agentGroups",
+        "agentSpawns"
+      ],
+      "additionalProperties": false
+    },
+    "MobilityProfile": {
+      "type": "object",
+      "properties": {
+        "profileId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "locomotionTypes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "Walking",
+              "Rolling",
+              "Flying",
+              "Unspecified",
+              "Step"
+            ]
+          }
+        },
+        "baseSpeedMps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "canUseStairs": {
+          "type": "boolean"
+        },
+        "canUseRamps": {
+          "type": "boolean"
+        },
+        "canUseElevators": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "profileId",
+        "locomotionTypes",
+        "baseSpeedMps"
+      ],
+      "additionalProperties": false
+    },
+    "AgentGroup": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mobilityProfileRef": {
+          "type": "string"
+        },
+        "spawnRef": {
+          "type": "string"
+        },
+        "distribution": {
+          "enum": [
+            "fixed",
+            "random_within_space",
+            "random_near_point"
+          ]
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "groupId",
+        "count",
+        "mobilityProfileRef",
+        "spawnRef"
+      ],
+      "additionalProperties": false
+    },
+    "AgentSpawn": {
+      "type": "object",
+      "properties": {
+        "spawnId": {
+          "type": "string"
+        },
+        "levelRef": {
+          "type": "string"
+        },
+        "cellSpaceRef": {
+          "type": "string"
+        },
+        "nodeRef": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/Point"
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "spawnId",
+        "levelRef",
+        "position"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "cellSpaceRef"
+          ]
+        },
+        {
+          "required": [
+            "nodeRef"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "Agent": {
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "groupRef": {
+          "type": "string"
+        },
+        "mobilityProfileRef": {
+          "type": "string"
+        },
+        "initialPosition": {
+          "$ref": "#/$defs/Point"
+        },
+        "initialCellSpaceRef": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "agentId",
+        "mobilityProfileRef",
+        "initialPosition"
+      ],
+      "additionalProperties": false
+    },
+    "Beacon": {
+      "type": "object",
+      "properties": {
+        "beaconId": {
+          "type": "string"
+        },
+        "levelRef": {
+          "type": "string"
+        },
+        "position": {
+          "$ref": "#/$defs/Point"
+        },
+        "attachedTo": {
+          "$ref": "#/$defs/EntityRef"
+        },
+        "sensorTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "influence": {
+          "$ref": "#/$defs/Influence"
+        },
+        "affects": {
+          "$ref": "#/$defs/Affects"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "beaconId",
+        "levelRef",
+        "position"
+      ],
+      "additionalProperties": false
+    },
+    "Hazard": {
+      "type": "object",
+      "properties": {
+        "hazardId": {
+          "type": "string"
+        },
+        "hazardType": {
+          "enum": [
+            "fire",
+            "smoke",
+            "blocked_area",
+            "structural_risk",
+            "custom"
+          ]
+        },
+        "levelRef": {
+          "type": "string"
+        },
+        "initialPosition": {
+          "$ref": "#/$defs/Point"
+        },
+        "initialArea": {
+          "$ref": "#/$defs/Polygon"
+        },
+        "activation": {
+          "$ref": "#/$defs/Activation"
+        },
+        "growthModel": {
+          "$ref": "#/$defs/GrowthModel"
+        },
+        "affects": {
+          "$ref": "#/$defs/Affects"
+        },
+        "severity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "hazardId",
+        "hazardType",
+        "levelRef",
+        "activation"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "initialPosition"
+          ]
+        },
+        {
+          "required": [
+            "initialArea"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "SimulationConfig": {
+      "type": "object",
+      "properties": {
+        "timeStepS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "randomSeed": {
+          "type": "integer"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingConfig"
+        },
+        "enabledOverlays": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "population",
+              "beacons",
+              "hazards"
+            ]
+          }
+        }
+      },
+      "required": [
+        "timeStepS",
+        "maxSteps",
+        "routing"
+      ],
+      "additionalProperties": false
+    },
+    "RoutingConfig": {
+      "type": "object",
+      "properties": {
+        "sourceLayerRef": {
+          "type": "string"
+        },
+        "sourceDualSpaceRef": {
+          "type": "string"
+        },
+        "routeSelection": {
+          "enum": [
+            "shortest_path",
+            "least_risk",
+            "dynamic_weighted"
+          ]
+        },
+        "deriveConnectivityFromEdges": {
+          "type": "boolean"
+        },
+        "useDynamicWeights": {
+          "type": "boolean"
+        },
+        "useBeaconRisk": {
+          "type": "boolean"
+        },
+        "useHazardRisk": {
+          "type": "boolean"
+        },
+        "useCongestion": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sourceDualSpaceRef",
+        "routeSelection"
+      ],
+      "additionalProperties": false
+    },
+    "Outputs": {
+      "type": "object",
+      "properties": {
+        "outputFolder": {
+          "type": "string"
+        },
+        "saveRoutes": {
+          "type": "boolean"
+        },
+        "saveMetrics": {
+          "type": "boolean"
+        },
+        "saveTimeSeries": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Activation": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            "initial",
+            "scheduled",
+            "external_service"
+          ]
+        },
+        "startStep": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startTimeS": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "GrowthModel": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "static",
+            "linear_radius",
+            "external_field",
+            "custom"
+          ]
+        },
+        "initialRadiusM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "radiusPerStep": {
+          "type": "number"
+        },
+        "maxRadiusM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "Influence": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "radius",
+            "polygon",
+            "graph_refs",
+            "custom"
+          ]
+        },
+        "radiusM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "area": {
+          "$ref": "#/$defs/Polygon"
+        },
+        "attributes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "Affects": {
+      "type": "object",
+      "properties": {
+        "cellSpaceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "cellBoundaryRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "nodeRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "edgeRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "layerRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "EntityRef": {
+      "type": "object",
+      "properties": {
+        "entityType": {
+          "enum": [
+            "level",
+            "cell_space",
+            "cell_boundary",
+            "node",
+            "edge",
+            "source_feature"
+          ]
+        },
+        "entityId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "entityType",
+        "entityId"
+      ],
+      "additionalProperties": false
+    },
+    "Point": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Point"
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false
+    },
+    "Polygon": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "Polygon"
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "minItems": 4,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
