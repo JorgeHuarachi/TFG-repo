@@ -2,8 +2,11 @@
 
 import datetime
 
+from shapely.geometry import Point
+
 from .geometry import (
     contact_line,
+    extract_lines,
     footprint_from_centerline,
     iter_polygons,
     line_from_coords,
@@ -27,6 +30,15 @@ LEVEL_CODE = "L00"
 LAYER_ID = "TL_NAV_L00"
 PRIMAL_ID = "PS_NAV_L00"
 DUAL_ID = "DS_NAV_L00"
+WALL_CAP_STYLE = 3
+OPENING_CAP_STYLE = 2
+JOIN_STYLE = 2
+OVERLAP_AREA_TOLERANCE = 1e-6
+WALL_CONNECTION_TOLERANCE = 0.05
+WALL_EXTENSION_EPSILON = 0.02
+BOUNDARY_CONTACT_TOLERANCE = 0.01
+EXTERIOR_BOUNDARY_MIN_LENGTH = 0.05
+EXPORT_WALL_WALL_BOUNDARIES = False
 
 
 def is_wall_type(tipo):
@@ -97,6 +109,7 @@ class IndoorModelBuilder:
         self.source_by_line_name = {}
         self.source_by_space_name = {}
         self.line_by_name = {}
+        self.authoring_lines = []
         self.cells = []
         self.boundaries = []
         self.edges = []
@@ -104,18 +117,24 @@ class IndoorModelBuilder:
         self.node_connects = {}
         self.wall_parts = []
         self.wall_union = None
+        self.object_union = None
+        self.transfer_union = None
+        self.opening_union = None
+        self.overlap_warnings = []
 
     def build(self):
         self._prepare_authoring_lines()
         self._create_source_features()
         self._derive_wall_parts()
-        self._create_general_spaces()
+        self._create_object_spaces()
         self._create_transfer_spaces()
+        self._create_general_spaces()
         self._create_wall_spaces()
 
         if not self.cells:
             raise ValueError("No hay CellSpaces exportables para indoor_model.json.")
 
+        self._validate_cell_overlaps()
         self._create_boundaries()
         self._create_dual_space()
         self._sync_cell_boundary_refs()
@@ -128,20 +147,253 @@ class IndoorModelBuilder:
             tipo = prepared.get("type")
             prepared["level"] = prepared.get("level") or LEVEL_ID
             prepared["centerline"] = list(prepared.get("centerline") or [])
-            if prepared.get("footprint"):
-                prepared["_footprint_poly"] = polygon_from_coords(prepared["footprint"])
-            else:
-                prepared["_footprint_poly"] = footprint_from_centerline(
-                    prepared.get("centerline"),
-                    prepared.get("thicknessM") or 0.1,
-                )
+            prepared["attributes"] = dict(prepared.get("attributes") or {})
+            self.authoring_lines.append(prepared)
+
+        self._extend_solid_wall_centerlines()
+
+        for prepared in self.authoring_lines:
+            tipo = prepared.get("type")
+            prepared["_footprint_poly"] = self._derived_line_footprint(prepared)
             if tipo and prepared.get("name"):
                 self.line_by_name[prepared["name"]] = prepared
+
+    def _extend_solid_wall_centerlines(self):
+        wall_records = []
+        for line in self.authoring_lines:
+            if not is_solid_wall_type(line.get("type")):
+                continue
+            centerline = line_from_coords(line.get("centerline"))
+            if centerline is None:
+                continue
+            thickness = self._positive_float(line.get("thicknessM"), 0.1)
+            footprint = footprint_from_centerline(
+                line.get("centerline"),
+                thickness,
+                cap_style=WALL_CAP_STYLE,
+                join_style=JOIN_STYLE,
+            )
+            if footprint is None:
+                continue
+            wall_records.append(
+                {
+                    "line": line,
+                    "centerline": centerline,
+                    "polygon": footprint,
+                    "thickness": thickness,
+                }
+            )
+
+        for record in wall_records:
+            coords = list(record["line"].get("centerline") or [])
+            if len(coords) < 2:
+                continue
+
+            start_extension = self._wall_endpoint_extension(record, 0, wall_records)
+            end_extension = self._wall_endpoint_extension(record, -1, wall_records)
+            if start_extension <= 0 and end_extension <= 0:
+                record["line"]["_derived_centerline"] = coords
+                continue
+
+            derived = list(coords)
+            if start_extension > 0:
+                ux, uy = self._endpoint_outward_unit(coords, 0)
+                x, y = derived[0]
+                derived[0] = (float(x) + ux * start_extension, float(y) + uy * start_extension)
+            if end_extension > 0:
+                ux, uy = self._endpoint_outward_unit(coords, -1)
+                x, y = derived[-1]
+                derived[-1] = (float(x) + ux * end_extension, float(y) + uy * end_extension)
+
+            record["line"]["_derived_centerline"] = derived
+            record["line"]["_wall_centerline_extension"] = {
+                "startM": round(float(start_extension), 6),
+                "endM": round(float(end_extension), 6),
+                "reason": "junction_closure",
+            }
+
+    def _wall_endpoint_extension(self, record, endpoint_index, wall_records):
+        coords = list(record["line"].get("centerline") or [])
+        if len(coords) < 2:
+            return 0.0
+
+        endpoint = coords[0] if endpoint_index == 0 else coords[-1]
+        ux, uy = self._endpoint_outward_unit(coords, endpoint_index)
+        if ux == 0.0 and uy == 0.0:
+            return 0.0
+
+        point = Point(float(endpoint[0]), float(endpoint[1]))
+        extension = 0.0
+        for other in wall_records:
+            if other is record:
+                continue
+            other_polygon = other.get("polygon")
+            other_centerline = other.get("centerline")
+            if other_polygon is None or other_polygon.is_empty or other_centerline is None:
+                continue
+
+            try:
+                touches_receiver = (
+                    point.distance(other_polygon) <= WALL_CONNECTION_TOLERANCE
+                    or point.distance(other_centerline) <= WALL_CONNECTION_TOLERANCE
+                )
+            except Exception:
+                touches_receiver = False
+            if not touches_receiver:
+                continue
+
+            required = max(record["thickness"] / 2.0, other["thickness"] / 2.0) + WALL_EXTENSION_EPSILON
+            ray_length = max(required + other["thickness"] + WALL_CONNECTION_TOLERANCE + 0.5, 1.0)
+            ray = line_from_coords(
+                [
+                    (float(endpoint[0]), float(endpoint[1])),
+                    (float(endpoint[0]) + ux * ray_length, float(endpoint[1]) + uy * ray_length),
+                ]
+            )
+            if ray is None:
+                continue
+
+            try:
+                ray_overlap = ray.intersection(other_polygon)
+            except Exception:
+                ray_overlap = None
+            farthest = self._max_projected_distance(ray_overlap, point, (ux, uy))
+            if farthest is not None and farthest > 0:
+                required = max(required, farthest + WALL_EXTENSION_EPSILON)
+            extension = max(extension, required)
+
+        return extension
+
+    def _endpoint_outward_unit(self, coords, endpoint_index):
+        try:
+            if endpoint_index == 0:
+                x0, y0 = coords[0]
+                x1, y1 = coords[1]
+            else:
+                x0, y0 = coords[-1]
+                x1, y1 = coords[-2]
+            dx = float(x0) - float(x1)
+            dy = float(y0) - float(y1)
+            length = (dx * dx + dy * dy) ** 0.5
+        except Exception:
+            return 0.0, 0.0
+        if length <= 0:
+            return 0.0, 0.0
+        return dx / length, dy / length
+
+    def _max_projected_distance(self, geom, origin, unit):
+        if geom is None or geom.is_empty:
+            return None
+
+        ux, uy = unit
+        distances = []
+
+        def collect_coords(part):
+            if part is None or part.is_empty:
+                return
+            geom_type = getattr(part, "geom_type", "")
+            if geom_type in {"LineString", "LinearRing", "Point"}:
+                for x, y, *unused in part.coords:
+                    distances.append((float(x) - origin.x) * ux + (float(y) - origin.y) * uy)
+            elif hasattr(part, "geoms"):
+                for child in part.geoms:
+                    collect_coords(child)
+            elif geom_type == "Polygon" and hasattr(part, "exterior"):
+                collect_coords(part.exterior)
+
+        collect_coords(geom)
+        positive = [distance for distance in distances if distance > WALL_CONNECTION_TOLERANCE / -10.0]
+        return max(positive) if positive else None
+
+    def _positive_float(self, value, fallback):
+        try:
+            number = float(value)
+            return number if number > 0 else fallback
+        except (TypeError, ValueError):
+            return fallback
+
+    def _derived_line_footprint(self, line):
+        tipo = line.get("type")
+        if is_solid_wall_type(tipo):
+            return footprint_from_centerline(
+                line.get("_derived_centerline") or line.get("centerline"),
+                line.get("thicknessM") or 0.1,
+                cap_style=WALL_CAP_STYLE,
+                join_style=JOIN_STYLE,
+            )
+        if is_opening_type(tipo):
+            return self._opening_footprint(line)
+        if line.get("footprint"):
+            return polygon_from_coords(line["footprint"])
+        return footprint_from_centerline(
+            line.get("centerline"),
+            line.get("thicknessM") or 0.1,
+        )
+
+    def _opening_footprint(self, line):
+        thickness = self._opening_thickness(line)
+        centerline = self._opening_centerline(line)
+        poly = footprint_from_centerline(
+            centerline,
+            thickness,
+            cap_style=OPENING_CAP_STYLE,
+            join_style=JOIN_STYLE,
+        )
+        if poly is None and line.get("footprint"):
+            return polygon_from_coords(line["footprint"])
+        return poly
+
+    def _opening_thickness(self, line):
+        host_thickness = line.get("hostWallThicknessM")
+        try:
+            if host_thickness is not None and float(host_thickness) > 0:
+                return float(host_thickness)
+        except (TypeError, ValueError):
+            pass
+
+        attrs = line.setdefault("attributes", {})
+        attrs["openingThicknessSource"] = "opening_fallback"
+        attrs["warning"] = "opening_host_wall_metadata_missing"
+        try:
+            return float(line.get("thicknessM") or 0.1)
+        except (TypeError, ValueError):
+            return 0.1
+
+    def _opening_centerline(self, line):
+        coords = line.get("centerline") or []
+        geom_line = line_from_coords(coords)
+        if geom_line is None:
+            return coords
+
+        width = line.get("widthM")
+        try:
+            width = float(width) if width is not None else None
+        except (TypeError, ValueError):
+            width = None
+        if not width or width <= 0:
+            return coords
+
+        midpoint = geom_line.interpolate(0.5, normalized=True)
+        start = coords[0]
+        end = coords[-1]
+        dx = float(end[0]) - float(start[0])
+        dy = float(end[1]) - float(start[1])
+        length = (dx * dx + dy * dy) ** 0.5
+        if length <= 0:
+            unit = line.get("wallUnitVector") or (1.0, 0.0)
+            dx, dy = float(unit[0]), float(unit[1])
+            length = (dx * dx + dy * dy) ** 0.5 or 1.0
+        ux, uy = dx / length, dy / length
+        half_width = width / 2.0
+        return [
+            (midpoint.x - ux * half_width, midpoint.y - uy * half_width),
+            (midpoint.x + ux * half_width, midpoint.y + uy * half_width),
+        ]
 
     def _create_source_features(self):
         counters = {"wall": 0, "door": 0, "exit": 0, "virtual": 0, "room": 0, "other": 0}
 
-        for line in self.snapshot.get("authoringElements", []):
+        for line in self.authoring_lines:
             tipo = line.get("type")
             centerline = line.get("centerline") or []
             geom_line = line_from_coords(centerline)
@@ -169,6 +421,9 @@ class IndoorModelBuilder:
                 attrs["thicknessM"] = line.get("thicknessM")
             if line.get("widthM") is not None:
                 attrs["widthM"] = line.get("widthM")
+            for key in ("hostWallName", "hostWallType", "hostWallThicknessM", "hostWallRef"):
+                if line.get(key) is not None:
+                    attrs[key] = line.get(key)
 
             self._add_source_feature(
                 {
@@ -226,10 +481,51 @@ class IndoorModelBuilder:
             or attrs.get("clase_indoor") in {"TransferSpace", "AnchorSpace"}
         )
 
+    def _space_is_object(self, space):
+        attrs = space.get("attributes") or {}
+        markers = {
+            attrs.get("clase_indoor"),
+            attrs.get("navigationType"),
+            attrs.get("navigationClass"),
+            attrs.get("category"),
+            attrs.get("categoria"),
+        }
+        lowered = {str(value).strip().lower() for value in markers if value is not None}
+        return bool({"objectspace", "object", "column", "obstacle"} & lowered)
+
+    def _create_object_spaces(self):
+        object_polys = []
+        index = 1
+        for space in self.snapshot.get("spaceFootprints", []):
+            if not self._space_is_object(space):
+                continue
+            poly = polygon_from_coords(space.get("footprint"))
+            if poly is None:
+                continue
+            source_ref = self.source_by_space_name.get(space.get("name"))
+            attrs = dict(space.get("attributes") or {})
+            attrs["derivationStatus"] = "derived_from_object_footprint"
+            cell_id = f"CS_{LEVEL_CODE}_OBJ_{index:03d}"
+            index += 1
+            self._add_cell(
+                cell_id=cell_id,
+                name=space.get("name"),
+                polygon=poly,
+                navigation_type="ObjectSpace",
+                navigation_class="NonNavigableSpace",
+                category=attrs.get("categoria") or attrs.get("category") or "Object",
+                function=attrs.get("function") or attrs.get("funcion") or "Object",
+                locomotion=[],
+                source_refs=[source_ref] if source_ref else [],
+                attributes=attrs,
+            )
+            object_polys.append(poly)
+        self.object_union = union_polygons(object_polys)
+
     def _derive_wall_parts(self):
         openings = []
-        walls = []
-        for line in self.snapshot.get("authoringElements", []):
+        raw_walls = []
+        for line in self.authoring_lines:
             tipo = line.get("type")
             poly = self._line_footprint(line)
             if poly is None:
@@ -237,20 +533,67 @@ class IndoorModelBuilder:
             if is_opening_type(tipo):
                 openings.append(poly)
             elif is_solid_wall_type(tipo):
-                walls.append((line, poly))
+                raw_walls.append({"line": line, "polygon": poly})
 
         opening_union = union_polygons(openings)
+        self.opening_union = opening_union
+        junction_candidates = []
+        for index, wall_a in enumerate(raw_walls):
+            for wall_b in raw_walls[index + 1 :]:
+                try:
+                    intersection = wall_a["polygon"].intersection(wall_b["polygon"])
+                except Exception:
+                    continue
+                for part in iter_polygons(intersection):
+                    if part.area > OVERLAP_AREA_TOLERANCE:
+                        junction_candidates.append(part)
+
+        junction_union = union_polygons(junction_candidates)
         wall_polys = []
-        for line, wall_poly in walls:
+        try:
+            junction_geom = junction_union.difference(opening_union) if not opening_union.is_empty else junction_union
+        except Exception:
+            junction_geom = junction_union
+
+        junction_parts = iter_polygons(junction_geom)
+        for index, part in enumerate(junction_parts, start=1):
+            contributing_lines = []
+            for wall in raw_walls:
+                try:
+                    overlap_area = part.intersection(wall["polygon"]).area
+                except Exception:
+                    overlap_area = 0.0
+                if overlap_area > OVERLAP_AREA_TOLERANCE:
+                    contributing_lines.append(wall["line"])
+            self.wall_parts.append(
+                {
+                    "category": "WallJunction",
+                    "lines": contributing_lines,
+                    "polygon": part,
+                    "partIndex": index,
+                    "partCount": len(junction_parts),
+                }
+            )
+            wall_polys.append(part)
+
+        for wall in raw_walls:
+            line = wall["line"]
+            wall_poly = wall["polygon"]
             try:
-                derived = wall_poly.difference(opening_union) if not opening_union.is_empty else wall_poly
+                derived = wall_poly
+                if not opening_union.is_empty:
+                    derived = derived.difference(opening_union)
+                if not junction_union.is_empty:
+                    derived = derived.difference(junction_union)
             except Exception:
                 derived = wall_poly
             parts = iter_polygons(derived)
             for index, part in enumerate(parts, start=1):
                 self.wall_parts.append(
                     {
+                        "category": "WallSegment",
                         "line": line,
+                        "lines": [line],
                         "polygon": part,
                         "partIndex": index,
                         "partCount": len(parts),
@@ -269,7 +612,7 @@ class IndoorModelBuilder:
     def _create_general_spaces(self):
         index = 1
         for space in self.snapshot.get("spaceFootprints", []):
-            if self._space_is_transfer_or_virtual(space):
+            if self._space_is_transfer_or_virtual(space) or self._space_is_object(space):
                 continue
             source_ref = self.source_by_space_name.get(space.get("name"))
             original_poly = polygon_from_coords(space.get("footprint"))
@@ -278,14 +621,22 @@ class IndoorModelBuilder:
 
             attrs = dict(space.get("attributes") or {})
             try:
+                clipping_polys = []
                 if self.wall_union is not None and not self.wall_union.is_empty:
-                    derived = original_poly.difference(self.wall_union)
-                else:
-                    derived = original_poly
+                    clipping_polys.append(self.wall_union)
+                if self.object_union is not None and not self.object_union.is_empty:
+                    clipping_polys.append(self.object_union)
+                if self.transfer_union is not None and not self.transfer_union.is_empty:
+                    clipping_polys.append(self.transfer_union)
+                clipping_union = union_polygons(clipping_polys)
+                derived = original_poly.difference(clipping_union) if not clipping_union.is_empty else original_poly
                 parts = iter_polygons(derived)
                 if not parts:
                     raise ValueError("empty clipped geometry")
-                derivation_attrs = {"derivationStatus": "clipped_by_solid_walls"}
+                derivation_attrs = {
+                    "derivationStatus": "clipped_from_authoring_polygon",
+                    "clippedAgainst": ["NonNavigableSpace", "ObjectSpace", "TransferSpace"],
+                }
             except Exception:
                 parts = [original_poly]
                 derivation_attrs = {
@@ -321,7 +672,8 @@ class IndoorModelBuilder:
     def _create_transfer_spaces(self):
         door_index = 1
         exit_index = 1
-        for line in self.snapshot.get("authoringElements", []):
+        transfer_polys = []
+        for line in self.authoring_lines:
             tipo = line.get("type")
             if not is_transfer_authoring_type(tipo):
                 continue
@@ -330,14 +682,19 @@ class IndoorModelBuilder:
                 continue
             source_ref = self.source_by_line_name.get(line.get("name"))
             attrs = dict(line.get("attributes") or {})
+            for key in ("hostWallName", "hostWallType", "hostWallThicknessM", "hostWallRef", "widthM", "thicknessM"):
+                if line.get(key) is not None:
+                    attrs[key] = line.get(key)
             if is_exit_type(tipo):
                 cell_id = f"CS_{LEVEL_CODE}_EXIT_{exit_index:03d}"
                 exit_index += 1
                 function = "AnchorSpace"
+                category = "Exit"
             else:
                 cell_id = f"CS_{LEVEL_CODE}_DOOR_{door_index:03d}"
                 door_index += 1
                 function = "ConnectionSpace"
+                category = "Door"
 
             attrs.update(
                 {
@@ -351,49 +708,76 @@ class IndoorModelBuilder:
                 polygon=poly,
                 navigation_type="TransferSpace",
                 navigation_class="NavigableSpace",
-                category="Door",
+                category=category,
                 function=function,
                 locomotion=_normalize_locomotion(attrs.get("locomotion")),
                 source_refs=[source_ref] if source_ref else [],
                 attributes=attrs,
                 width_m=line.get("widthM"),
             )
+            transfer_polys.append(poly)
+        self.transfer_union = union_polygons(transfer_polys)
 
     def _create_wall_spaces(self):
         wall_indices = {}
         next_wall_index = 1
+        junction_index = 1
         for wall in self.wall_parts:
-            line = wall["line"]
-            wall_key = line.get("name") or id(line)
-            if wall_key not in wall_indices:
-                wall_indices[wall_key] = next_wall_index
-                next_wall_index += 1
-            wall_index = wall_indices[wall_key]
-            source_ref = self.source_by_line_name.get(line.get("name"))
-            base_id = f"CS_{LEVEL_CODE}_WALL_{wall_index:03d}"
-            cell_id = base_id if wall["partCount"] == 1 else f"{base_id}_PART_{wall['partIndex']:03d}"
+            category = wall.get("category") or "WallSegment"
+            lines = wall.get("lines") or ([wall["line"]] if wall.get("line") else [])
+            source_refs = self._source_refs_for_lines(lines)
+            source_names = [line.get("name") for line in lines if line.get("name")]
+
+            if category == "WallJunction":
+                base_id = f"CS_{LEVEL_CODE}_WALLJUNC_{junction_index:03d}"
+                cell_id = base_id
+                junction_index += 1
+                name = "Wall junction " + " + ".join(source_names) if source_names else base_id
+            else:
+                line = lines[0] if lines else {}
+                wall_key = line.get("name") or id(line)
+                if wall_key not in wall_indices:
+                    wall_indices[wall_key] = next_wall_index
+                    next_wall_index += 1
+                wall_index = wall_indices[wall_key]
+                base_id = f"CS_{LEVEL_CODE}_WALLSEG_{wall_index:03d}"
+                cell_id = base_id if wall["partCount"] == 1 else f"{base_id}_PART_{wall['partIndex']:03d}"
+                name = line.get("name") if wall["partCount"] == 1 else f"{line.get('name')} part {wall['partIndex']}"
+
             attrs = {
-                "originalName": line.get("name"),
-                "originalType": line.get("type"),
-                "thicknessM": line.get("thicknessM"),
-                "derivationStatus": "wall_footprint_clipped_by_openings",
+                "sourceWallNames": source_names,
+                "sourceWallTypes": [line.get("type") for line in lines if line.get("type")],
+                "derivationStatus": "wall_mass_partition",
             }
+            if category == "WallSegment" and lines:
+                attrs["originalName"] = lines[0].get("name")
+                attrs["originalType"] = lines[0].get("type")
+                attrs["thicknessM"] = lines[0].get("thicknessM")
+                if lines[0].get("_wall_centerline_extension"):
+                    attrs["centerlineExtension"] = lines[0]["_wall_centerline_extension"]
             if wall["partCount"] > 1:
                 attrs["partIndex"] = wall["partIndex"]
                 attrs["partCount"] = wall["partCount"]
 
             self._add_cell(
                 cell_id=cell_id,
-                name=line.get("name") if wall["partCount"] == 1 else f"{line.get('name')} part {wall['partIndex']}",
+                name=name,
                 polygon=wall["polygon"],
                 navigation_type="NonNavigableSpace",
                 navigation_class="NonNavigableSpace",
-                category="Wall",
+                category=category,
                 function="Wall",
                 locomotion=[],
-                source_refs=[source_ref] if source_ref else [],
+                source_refs=source_refs,
                 attributes=attrs,
             )
+
+    def _source_refs_for_lines(self, lines):
+        refs = []
+        for line in lines:
+            source_ref = self.source_by_line_name.get(line.get("name"))
+            _unique_append(refs, source_ref)
+        return refs
 
     def _add_cell(
         self,
@@ -434,6 +818,8 @@ class IndoorModelBuilder:
             "json": cell,
             "polygon": polygon,
             "navigationType": navigation_type,
+            "navigationClass": navigation_class,
+            "category": category,
             "function": function,
             "sourceRefs": cell["sourceFeatureRefs"],
             "locomotionTypes": locomotion,
@@ -457,22 +843,58 @@ class IndoorModelBuilder:
         values = source.setdefault("derivedBoundaryRefs", [])
         _unique_append(values, boundary_id)
 
+    def _validate_cell_overlaps(self):
+        for i, cell_a in enumerate(self.cells):
+            for cell_b in self.cells[i + 1 :]:
+                try:
+                    area = cell_a["polygon"].intersection(cell_b["polygon"]).area
+                except Exception:
+                    continue
+                if area <= OVERLAP_AREA_TOLERANCE:
+                    continue
+
+                warning = {
+                    "cellRefs": [cell_a["id"], cell_b["id"]],
+                    "navigationTypes": [cell_a["navigationType"], cell_b["navigationType"]],
+                    "intersectionAreaM2": round(float(area), 9),
+                }
+                self.overlap_warnings.append(warning)
+                for cell, other in ((cell_a, cell_b), (cell_b, cell_a)):
+                    attrs = cell["json"].setdefault("attributes", {})
+                    warnings = attrs.setdefault("cellSpaceOverlapWarnings", [])
+                    if len(warnings) < 20:
+                        warnings.append(
+                            {
+                                "otherCellRef": other["id"],
+                                "otherNavigationType": other["navigationType"],
+                                "intersectionAreaM2": warning["intersectionAreaM2"],
+                            }
+                        )
+                print(
+                    "WARNING indoor_model CellSpace overlap: "
+                    f"{cell_a['id']}({cell_a['navigationType']}) / "
+                    f"{cell_b['id']}({cell_b['navigationType']}) "
+                    f"area={warning['intersectionAreaM2']}"
+                )
+
     def _create_boundaries(self):
         used_ids = set()
         for i, cell_a in enumerate(self.cells):
             for cell_b in self.cells[i + 1 :]:
-                if not self._should_boundary_be_created(cell_a, cell_b):
+                boundary_role = self._boundary_role(cell_a, cell_b)
+                if boundary_role is None:
                     continue
-                tolerance = 0.20 if self._is_general_transfer_pair(cell_a, cell_b) else 0.0
+                tolerance = BOUNDARY_CONTACT_TOLERANCE if boundary_role == "general_transfer_contact" else 0.0
                 line = contact_line(cell_a["polygon"], cell_b["polygon"], min_length=0.05, tolerance=tolerance)
                 if line is None:
                     continue
 
                 boundary_id = self._boundary_id(cell_a["id"], cell_b["id"], used_ids)
                 edge_id = edge_id_for_boundary(boundary_id)
-                traversable = self._is_general_transfer_pair(cell_a, cell_b)
+                traversable = boundary_role == "general_transfer_contact"
                 is_anchor = traversable and self._transfer_cell(cell_a, cell_b).get("function") == "AnchorSpace"
                 boundary_type = "NavigableBoundary" if traversable else "NonNavigableBoundary"
+                relationship_type = "connectivity" if traversable else "adjacency"
                 source_refs = []
                 for source_ref in cell_a["sourceRefs"] + cell_b["sourceRefs"]:
                     _unique_append(source_refs, source_ref)
@@ -489,6 +911,8 @@ class IndoorModelBuilder:
                     "sourceFeatureRefs": source_refs,
                     "attributes": {
                         "derivationStatus": "geometry_contact",
+                        "boundaryRole": boundary_role,
+                        "relationshipType": relationship_type,
                     },
                 }
                 if traversable:
@@ -506,14 +930,122 @@ class IndoorModelBuilder:
                 )
                 for source_ref in source_refs:
                     self._add_source_boundary_ref(source_ref, boundary_id)
+        self._create_exterior_boundaries(used_ids)
+
+    def _create_exterior_boundaries(self, used_ids):
+        for cell in self.cells:
+            boundary_role = self._exterior_boundary_role(cell)
+            if boundary_role is None:
+                continue
+
+            traversable = boundary_role == "exterior_anchor"
+            boundary_type = "NavigableBoundary" if traversable else "NonNavigableBoundary"
+            relationship_type = "connectivity" if traversable else "adjacency"
+            for line in self._exposed_boundary_lines(cell):
+                boundary_id = self._exterior_boundary_id(cell["id"], boundary_role, used_ids)
+                source_refs = list(cell["sourceRefs"])
+                boundary = {
+                    "id": boundary_id,
+                    "featureType": "CellBoundary",
+                    "isVirtual": False,
+                    "cellBoundaryGeom": {"geometry2D": line_geojson(line)},
+                    "navigationBoundaryType": boundary_type,
+                    "traversable": traversable,
+                    "cellRefs": [cell["id"]],
+                    "sourceFeatureRefs": source_refs,
+                    "attributes": {
+                        "derivationStatus": "exposed_exterior_contact",
+                        "boundaryRole": boundary_role,
+                        "relationshipType": relationship_type,
+                    },
+                }
+                if traversable:
+                    boundary["navigableBoundaryFunction"] = "AnchorBoundary"
+
+                self.boundaries.append(
+                    {
+                        "json": boundary,
+                        "edgeId": None,
+                        "cellA": cell,
+                        "cellB": None,
+                        "traversable": traversable,
+                        "isAnchor": traversable,
+                    }
+                )
+                for source_ref in source_refs:
+                    self._add_source_boundary_ref(source_ref, boundary_id)
+
+    def _exterior_boundary_role(self, cell):
+        if cell["navigationType"] == "TransferSpace" and cell["function"] == "AnchorSpace":
+            return "exterior_anchor"
+        if cell["navigationType"] != "NonNavigableSpace" or cell["function"] != "Wall":
+            return None
+        source_wall_types = cell["json"].get("attributes", {}).get("sourceWallTypes") or []
+        return "outer_shell" if "muro_exterior" in source_wall_types else None
+
+    def _exposed_boundary_lines(self, cell):
+        try:
+            exposed = cell["polygon"].boundary
+        except Exception:
+            return []
+
+        for other in self.cells:
+            if other is cell:
+                continue
+            try:
+                shared = cell["polygon"].boundary.intersection(other["polygon"].buffer(BOUNDARY_CONTACT_TOLERANCE))
+                if not shared.is_empty:
+                    exposed = exposed.difference(shared.buffer(BOUNDARY_CONTACT_TOLERANCE, cap_style=2))
+            except Exception:
+                continue
+
+        return [
+            line
+            for line in extract_lines(exposed)
+            if line.length >= EXTERIOR_BOUNDARY_MIN_LENGTH
+        ]
+
+    def _exterior_boundary_id(self, cell_id, boundary_role, used_ids):
+        role_token = "ANCHOR" if boundary_role == "exterior_anchor" else "OUTER"
+        base = f"CB_{LEVEL_CODE}_{role_token}_{compact_cell_token(cell_id)}"
+        candidate = base
+        suffix = 2
+        while candidate in used_ids:
+            candidate = f"{base}_{suffix:02d}"
+            suffix += 1
+        used_ids.add(candidate)
+        return candidate
 
     def _should_boundary_be_created(self, cell_a, cell_b):
+        return self._boundary_role(cell_a, cell_b) is not None
+
+    def _boundary_role(self, cell_a, cell_b):
         types = {cell_a["navigationType"], cell_b["navigationType"]}
-        if types == {"NonNavigableSpace"}:
-            return False
-        if "GeneralSpace" in types:
-            return True
-        return False
+        if types == {"GeneralSpace", "TransferSpace"}:
+            return "general_transfer_contact"
+        if "GeneralSpace" in types and any(self._is_non_navigable_cell(cell) for cell in (cell_a, cell_b)):
+            return "general_non_navigable_contact"
+        if "TransferSpace" in types and any(
+            cell["navigationType"] == "NonNavigableSpace" for cell in (cell_a, cell_b)
+        ):
+            return "transfer_non_navigable_contact"
+        if (
+            EXPORT_WALL_WALL_BOUNDARIES
+            and types == {"NonNavigableSpace"}
+            and self._is_wall_cell(cell_a)
+            and self._is_wall_cell(cell_b)
+        ):
+            return "internal_wall_contact"
+        return None
+
+    def _is_non_navigable_cell(self, cell):
+        return cell["navigationClass"] == "NonNavigableSpace" or cell["navigationType"] in {
+            "NonNavigableSpace",
+            "ObjectSpace",
+        }
+
+    def _is_wall_cell(self, cell):
+        return cell["function"] == "Wall" and cell["json"].get("category") in {"WallSegment", "WallJunction"}
 
     def _is_general_transfer_pair(self, cell_a, cell_b):
         types = {cell_a["navigationType"], cell_b["navigationType"]}
@@ -555,6 +1087,8 @@ class IndoorModelBuilder:
             cell["nodeRef"] = node_ref
 
         for boundary in self.boundaries:
+            if boundary.get("cellB") is None or boundary.get("edgeId") is None:
+                continue
             cell_a = boundary["cellA"]
             cell_b = boundary["cellB"]
             edge_id = boundary["edgeId"]
@@ -581,6 +1115,7 @@ class IndoorModelBuilder:
                 "boundaryRef": boundary["json"]["id"],
                 "attributes": {
                     "boundaryType": boundary["json"]["navigationBoundaryType"],
+                    "boundaryRole": boundary["json"].get("attributes", {}).get("boundaryRole"),
                 },
             }
             if transfer is not None:
@@ -590,6 +1125,9 @@ class IndoorModelBuilder:
                     width = float(transfer["widthM"])
                     edge["widthM"] = width
                     edge["capacityPersons"] = max(1.0, round(width / 0.6, 2))
+                edge["attributes"]["transferSpaceRef"] = transfer["id"]
+                if edge.get("widthM") is not None:
+                    edge["attributes"]["widthM"] = edge["widthM"]
 
             self.edges.append(edge)
 

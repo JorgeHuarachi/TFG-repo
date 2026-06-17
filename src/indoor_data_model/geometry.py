@@ -60,12 +60,18 @@ def line_from_coords(coords):
     return line
 
 
-def footprint_from_centerline(coords, thickness):
+def footprint_from_centerline(coords, thickness, cap_style=2, join_style=2):
     line = line_from_coords(coords)
     if line is None:
         return None
     try:
-        return clean_polygon(line.buffer(float(thickness) / 2.0, cap_style=2, join_style=2))
+        return clean_polygon(
+            line.buffer(
+                float(thickness) / 2.0,
+                cap_style=cap_style,
+                join_style=join_style,
+            )
+        )
     except Exception:
         return None
 

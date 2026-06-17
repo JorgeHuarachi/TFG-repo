@@ -83,6 +83,8 @@ class DiseñadorConectado:
 
         # MAGIA CAD: Variables para la restricción de dibujo de puertas
         self.vector_muro_temp = None     # Guarda el vector direccional del muro donde se pegará la puerta
+        self.host_wall_metadata_temp = None
+        self.authoring_line_metadata = {}
 
         # --- MEMORIA SEMÁNTICA (IndoorGML) ---
         self.propiedades_zonas = {}                     # Diccionario: Nombre -> {Atributos IndoorGML}
@@ -151,6 +153,7 @@ class DiseñadorConectado:
         if limpiar_poligono:
             self.puntos_zona_temp = []
         self.vector_muro_temp = None
+        self.host_wall_metadata_temp = None
         self.poly_temp.set_visible(False)
         self.linea_temp.set_data([], [])
 
@@ -294,6 +297,7 @@ class DiseñadorConectado:
         mejor_dist = float('inf')
         mejor_punto = None
         mejor_vector = None
+        mejor_metadata = None
         
         # Iterar sobre todos los muros físicos construidos
         for id_muro, tipo, x1, y1, x2, y2 in self.muros:
@@ -324,10 +328,18 @@ class DiseñadorConectado:
                     # Normalizamos el vector del muro (longitud = 1) para usarlo luego al arrastrar el ratón
                     length = np.sqrt(l2)
                     mejor_vector = (dx/length, dy/length)
+                    mejor_metadata = {
+                        "hostWallName": id_muro,
+                        "hostWallType": tipo,
+                        "hostWallThicknessM": self.GROSORES.get(tipo),
+                        "hostWallRef": id_muro,
+                        "projectedPoint": (float(proj_x), float(proj_y)),
+                        "wallUnitVector": (float(mejor_vector[0]), float(mejor_vector[1])),
+                    }
 
         # Devuelve la coordenada corregida y la dirección del riel del muro              
         if mejor_punto:
-            return mejor_punto[0], mejor_punto[1], mejor_vector[0], mejor_vector[1]
+            return mejor_punto[0], mejor_punto[1], mejor_vector[0], mejor_vector[1], mejor_metadata
         return None
 
     def on_click(self, event):
@@ -352,6 +364,7 @@ class DiseñadorConectado:
                     if snap:
                         self.puntos_temp = (snap[0], snap[1])
                         self.vector_muro_temp = (snap[2], snap[3])
+                        self.host_wall_metadata_temp = snap[4] if len(snap) > 4 else None
                     else:
                         print("⛔ ERROR: Las puertas/salidas deben empezar SOBRE UN MURO.")
                         self.dibujar_interfaz("ERROR: Haz clic sobre un muro")
@@ -383,9 +396,16 @@ class DiseñadorConectado:
                 self.muros.append((nombre, self.modo, x_ini, y_ini, x, y))
                 
                 if es_puerta:
+                    if self.is_transfer_authoring_type(self.modo):
+                        metadata = dict(self.host_wall_metadata_temp or {})
+                        metadata["widthM"] = self.ANCHOS_PUERTA[self.modo]
+                        metadata["thicknessM"] = metadata.get("hostWallThicknessM") or self.GROSORES[self.modo]
+                        self.authoring_line_metadata[nombre] = metadata
+
                     cx, cy = x_ini + (x - x_ini)/2, y_ini + (y - y_ini)/2
                     self.hitos[nombre] = (cx, cy)
-                    esquinas_puerta = self.calcular_esquinas_muro(x_ini, y_ini, x, y, self.GROSORES[self.modo])
+                    grosor_puerta = self.authoring_line_metadata.get(nombre, {}).get("thicknessM", self.GROSORES[self.modo])
+                    esquinas_puerta = self.calcular_esquinas_muro(x_ini, y_ini, x, y, grosor_puerta)
                     self.hitos_bounds.append((nombre, esquinas_puerta))   
                     
                     # Semántica IndoorGML
@@ -396,6 +416,7 @@ class DiseñadorConectado:
                     self.cont_puerta += 1
                     self.puntos_temp = None
                     self.vector_muro_temp = None
+                    self.host_wall_metadata_temp = None
                 else:
                     self.cont_muro += 1
                     self.puntos_temp = (x, y) 
@@ -533,6 +554,7 @@ class DiseñadorConectado:
                         del self.hitos[borrado[0]]
                         self.hitos_bounds = [b for b in self.hitos_bounds if b[0] != borrado[0]]
                         self.propiedades_zonas.pop(borrado[0], None)
+                        self.authoring_line_metadata.pop(borrado[0], None)
             elif self.modo == 'agentes' and self.agentes: self.agentes.pop()
             elif self.modo == 'hitos' and self.hitos_bounds:
                 borrado = self.hitos_bounds.pop()
@@ -1394,7 +1416,9 @@ class DiseñadorConectado:
         authoring_elements = []
         for nombre, tipo, x1, y1, x2, y2 in self.get_authoring_elements():
             grosor = self.GROSORES.get(tipo)
-            footprint = self.calcular_esquinas_muro(x1, y1, x2, y2, grosor) if grosor else None
+            metadata = dict(self.authoring_line_metadata.get(nombre, {}))
+            snapshot_thickness = metadata.get("thicknessM", grosor)
+            footprint = self.calcular_esquinas_muro(x1, y1, x2, y2, snapshot_thickness) if snapshot_thickness else None
             attrs = dict(self.propiedades_zonas.get(nombre, {}))
             element = {
                 "name": nombre,
@@ -1402,11 +1426,27 @@ class DiseñadorConectado:
                 "level": "LEVEL_00",
                 "centerline": [(x1, y1), (x2, y2)],
                 "footprint": footprint,
-                "thicknessM": grosor,
+                "thicknessM": snapshot_thickness,
                 "attributes": attrs,
             }
             if tipo in self.ANCHOS_PUERTA:
                 element["widthM"] = self.ANCHOS_PUERTA[tipo]
+                if metadata:
+                    for key in (
+                        "hostWallName",
+                        "hostWallType",
+                        "hostWallThicknessM",
+                        "hostWallRef",
+                        "projectedPoint",
+                        "wallUnitVector",
+                    ):
+                        if metadata.get(key) is not None:
+                            element[key] = metadata[key]
+                    attrs["authoringThicknessM"] = grosor
+                    attrs["openingThicknessSource"] = "host_wall"
+                else:
+                    attrs["openingThicknessSource"] = "opening_fallback"
+                    attrs["warning"] = "opening_host_wall_metadata_missing"
             authoring_elements.append(element)
 
         line_type_by_name = {element["name"]: element["type"] for element in authoring_elements}
