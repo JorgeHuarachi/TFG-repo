@@ -35,7 +35,7 @@ OPENING_CAP_STYLE = 2
 JOIN_STYLE = 2
 OVERLAP_AREA_TOLERANCE = 1e-6
 WALL_CONNECTION_TOLERANCE = 0.05
-WALL_EXTENSION_EPSILON = 0.02
+WALL_EXTENSION_EPSILON = 0.002
 BOUNDARY_CONTACT_TOLERANCE = 0.01
 EXTERIOR_BOUNDARY_MIN_LENGTH = 0.05
 EXPORT_WALL_WALL_BOUNDARIES = False
@@ -242,8 +242,8 @@ class IndoorModelBuilder:
             if not touches_receiver:
                 continue
 
-            required = max(record["thickness"] / 2.0, other["thickness"] / 2.0) + WALL_EXTENSION_EPSILON
-            ray_length = max(required + other["thickness"] + WALL_CONNECTION_TOLERANCE + 0.5, 1.0)
+            desired_penetration = max(record["thickness"] / 2.0, other["thickness"] / 2.0)
+            ray_length = max(desired_penetration + other["thickness"] + WALL_CONNECTION_TOLERANCE + 0.5, 1.0)
             ray = line_from_coords(
                 [
                     (float(endpoint[0]), float(endpoint[1])),
@@ -259,10 +259,19 @@ class IndoorModelBuilder:
                 ray_overlap = None
             farthest = self._max_projected_distance(ray_overlap, point, (ux, uy))
             if farthest is not None and farthest > 0:
-                required = max(required, farthest + WALL_EXTENSION_EPSILON)
-            extension = max(extension, required)
+                desired_penetration = max(desired_penetration, farthest)
+            extension = max(
+                extension,
+                self._centerline_extension_for_penetration(desired_penetration, record["thickness"]),
+            )
 
         return extension
+
+    def _centerline_extension_for_penetration(self, desired_penetration, self_thickness):
+        cap_contribution = self_thickness / 2.0 if WALL_CAP_STYLE == 3 else 0.0
+        if desired_penetration <= cap_contribution + WALL_EXTENSION_EPSILON:
+            return 0.0
+        return max(0.0, desired_penetration - cap_contribution + WALL_EXTENSION_EPSILON)
 
     def _endpoint_outward_unit(self, coords, endpoint_index):
         try:
