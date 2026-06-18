@@ -2,7 +2,7 @@
 
 import datetime
 
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 
 from .geometry import (
     clean_boolean_polygon,
@@ -36,8 +36,10 @@ OPENING_CAP_STYLE = 2
 JOIN_STYLE = 2
 OVERLAP_AREA_TOLERANCE = 1e-6
 WALL_CONNECTION_TOLERANCE = 0.05
-WALL_EXTENSION_EPSILON = 0.002
-WALL_EXTENSION_ORTHOGONAL_DOT_TOLERANCE = 0.17364817766693033
+MIN_JUNCTION_SIN = 0.05
+WALL_MITER_LIMIT = 0.6
+JUNCTION_EPSILON = 0.002
+MIN_WALL_PART_AREA = 1e-6
 BOUNDARY_CONTACT_TOLERANCE = 0.01
 EXTERIOR_BOUNDARY_MIN_LENGTH = 0.05
 EXPORT_WALL_WALL_BOUNDARIES = False
@@ -168,163 +170,373 @@ class IndoorModelBuilder:
                 self.line_by_name[prepared["name"]] = prepared
 
     def _extend_solid_wall_centerlines(self):
-        wall_records = []
         for line in self.authoring_lines:
             if not is_solid_wall_type(line.get("type")):
                 continue
-            centerline = line_from_coords(line.get("centerline"))
-            if centerline is None:
-                continue
-            thickness = self._positive_float(line.get("thicknessM"), 0.1)
-            footprint = footprint_from_centerline(
-                line.get("centerline"),
-                thickness,
-                cap_style=WALL_CAP_STYLE,
-                join_style=JOIN_STYLE,
-            )
-            if footprint is None:
-                continue
-            wall_records.append(
-                {
-                    "line": line,
-                    "centerline": centerline,
-                    "polygon": footprint,
-                    "thickness": thickness,
-                }
-            )
-
-        for record in wall_records:
-            coords = list(record["line"].get("centerline") or [])
+            coords = list(line.get("centerline") or [])
             if len(coords) < 2:
                 continue
+            line["_derived_centerline"] = coords
 
-            start_extension = self._wall_endpoint_extension(record, 0, wall_records)
-            end_extension = self._wall_endpoint_extension(record, -1, wall_records)
-            if start_extension <= 0 and end_extension <= 0:
-                record["line"]["_derived_centerline"] = coords
-                continue
+    def _wall_pair_junction_candidates(self, wall_a, wall_b):
+        candidates = []
+        segments_a = self._wall_centerline_segments(wall_a)
+        segments_b = self._wall_centerline_segments(wall_b)
+        if not segments_a or not segments_b:
+            return candidates
 
-            derived = list(coords)
-            if start_extension > 0:
-                ux, uy = self._endpoint_outward_unit(coords, 0)
-                x, y = derived[0]
-                derived[0] = (float(x) + ux * start_extension, float(y) + uy * start_extension)
-            if end_extension > 0:
-                ux, uy = self._endpoint_outward_unit(coords, -1)
-                x, y = derived[-1]
-                derived[-1] = (float(x) + ux * end_extension, float(y) + uy * end_extension)
+        endpoints_a = self._wall_terminal_points(wall_a)
+        endpoints_b = self._wall_terminal_points(wall_b)
 
-            record["line"]["_derived_centerline"] = derived
-            record["line"]["_wall_centerline_extension"] = {
-                "startM": round(float(start_extension), 6),
-                "endM": round(float(end_extension), 6),
-                "reason": "junction_closure",
-            }
-
-    def _wall_endpoint_extension(self, record, endpoint_index, wall_records):
-        coords = list(record["line"].get("centerline") or [])
-        if len(coords) < 2:
-            return 0.0
-
-        endpoint = coords[0] if endpoint_index == 0 else coords[-1]
-        ux, uy = self._endpoint_outward_unit(coords, endpoint_index)
-        if ux == 0.0 and uy == 0.0:
-            return 0.0
-
-        point = Point(float(endpoint[0]), float(endpoint[1]))
-        extension = 0.0
-        for other in wall_records:
-            if other is record:
-                continue
-            other_polygon = other.get("polygon")
-            other_centerline = other.get("centerline")
-            if other_polygon is None or other_polygon.is_empty or other_centerline is None:
-                continue
-
-            try:
-                touches_receiver = (
-                    point.distance(other_polygon) <= WALL_CONNECTION_TOLERANCE
-                    or point.distance(other_centerline) <= WALL_CONNECTION_TOLERANCE
+        for endpoint_a in endpoints_a:
+            point_a = endpoint_a["point"]
+            for endpoint_b in endpoints_b:
+                point_b = endpoint_b["point"]
+                if point_a.distance(point_b) > WALL_CONNECTION_TOLERANCE:
+                    continue
+                seg_a = self._nearest_segment(point_a, segments_a)
+                seg_b = self._nearest_segment(point_b, segments_b)
+                sin_theta = self._segment_sin(seg_a, seg_b)
+                if sin_theta < MIN_JUNCTION_SIN:
+                    continue
+                point = Point((point_a.x + point_b.x) / 2.0, (point_a.y + point_b.y) / 2.0)
+                candidates.append(
+                    self._junction_candidate(
+                        "endpoint-endpoint",
+                        point,
+                        wall_a,
+                        wall_b,
+                        sin_theta,
+                        endpoint_a=endpoint_a["index"],
+                        endpoint_b=endpoint_b["index"],
+                        distance=point_a.distance(point_b),
+                    )
                 )
-            except Exception:
-                touches_receiver = False
-            if not touches_receiver:
-                continue
 
-            if not self._wall_axes_allow_endpoint_extension(record, other, point):
-                continue
+        for endpoint in endpoints_a:
+            point = endpoint["point"]
+            for segment_b in segments_b:
+                projected = self._project_point_to_segment(point, segment_b)
+                if projected is None or point.distance(projected) > WALL_CONNECTION_TOLERANCE:
+                    continue
+                if self._point_is_terminal(projected, endpoints_b):
+                    continue
+                segment_a = self._nearest_segment(point, segments_a)
+                sin_theta = self._segment_sin(segment_a, segment_b)
+                if sin_theta < MIN_JUNCTION_SIN:
+                    continue
+                candidates.append(
+                    self._junction_candidate(
+                        "endpoint-segment",
+                        projected,
+                        wall_a,
+                        wall_b,
+                        sin_theta,
+                        endpoint_a=endpoint["index"],
+                        distance=point.distance(projected),
+                    )
+                )
 
-            desired_penetration = max(record["thickness"] / 2.0, other["thickness"] / 2.0)
-            ray_length = max(desired_penetration + other["thickness"] + WALL_CONNECTION_TOLERANCE + 0.5, 1.0)
-            ray = line_from_coords(
-                [
-                    (float(endpoint[0]), float(endpoint[1])),
-                    (float(endpoint[0]) + ux * ray_length, float(endpoint[1]) + uy * ray_length),
-                ]
+        for endpoint in endpoints_b:
+            point = endpoint["point"]
+            for segment_a in segments_a:
+                projected = self._project_point_to_segment(point, segment_a)
+                if projected is None or point.distance(projected) > WALL_CONNECTION_TOLERANCE:
+                    continue
+                if self._point_is_terminal(projected, endpoints_a):
+                    continue
+                segment_b = self._nearest_segment(point, segments_b)
+                sin_theta = self._segment_sin(segment_a, segment_b)
+                if sin_theta < MIN_JUNCTION_SIN:
+                    continue
+                candidates.append(
+                    self._junction_candidate(
+                        "endpoint-segment",
+                        projected,
+                        wall_a,
+                        wall_b,
+                        sin_theta,
+                        endpoint_b=endpoint["index"],
+                        distance=point.distance(projected),
+                    )
+                )
+
+        for segment_a in segments_a:
+            for segment_b in segments_b:
+                sin_theta = self._segment_sin(segment_a, segment_b)
+                if sin_theta < MIN_JUNCTION_SIN:
+                    continue
+                try:
+                    intersection = segment_a["line"].intersection(segment_b["line"])
+                except Exception:
+                    continue
+                if intersection.is_empty or intersection.geom_type != "Point":
+                    continue
+                if self._point_is_terminal(intersection, endpoints_a) and self._point_is_terminal(
+                    intersection,
+                    endpoints_b,
+                ):
+                    continue
+                candidates.append(
+                    self._junction_candidate(
+                        "segment-segment",
+                        intersection,
+                        wall_a,
+                        wall_b,
+                        sin_theta,
+                    )
+                )
+
+        return candidates
+
+    def _junction_candidate(
+        self,
+        kind,
+        point,
+        wall_a,
+        wall_b,
+        sin_theta,
+        endpoint_a=None,
+        endpoint_b=None,
+        distance=0.0,
+    ):
+        pair = {
+            "kind": kind,
+            "wallA": wall_a["index"],
+            "wallB": wall_b["index"],
+            "sinTheta": sin_theta,
+            "extensions": {
+                wall_a["index"]: {0: 0.0, -1: 0.0},
+                wall_b["index"]: {0: 0.0, -1: 0.0},
+            },
+        }
+        if endpoint_a is not None:
+            pair["extensions"][wall_a["index"]][endpoint_a] = self._junction_extension_length(
+                wall_b["thickness"],
+                sin_theta,
+                distance,
             )
-            if ray is None:
-                continue
-
-            try:
-                ray_overlap = ray.intersection(other_polygon)
-            except Exception:
-                ray_overlap = None
-            farthest = self._max_projected_distance(ray_overlap, point, (ux, uy))
-            if farthest is not None and farthest > 0:
-                desired_penetration = max(desired_penetration, farthest)
-            extension = max(
-                extension,
-                self._centerline_extension_for_penetration(desired_penetration, record["thickness"]),
+        if endpoint_b is not None:
+            pair["extensions"][wall_b["index"]][endpoint_b] = self._junction_extension_length(
+                wall_a["thickness"],
+                sin_theta,
+                distance,
             )
+        return {
+            "kind": kind,
+            "point": point,
+            "wallIndices": {wall_a["index"], wall_b["index"]},
+            "pairs": [pair],
+        }
 
-        return extension
+    def _junction_extension_length(self, receiver_thickness, sin_theta, distance=0.0):
+        safe_sin = max(abs(float(sin_theta)), MIN_JUNCTION_SIN)
+        required = float(receiver_thickness) / (2.0 * safe_sin) + float(distance) + JUNCTION_EPSILON
+        return min(required, WALL_MITER_LIMIT)
 
-    def _wall_axes_allow_endpoint_extension(self, record, other, point):
-        own_axis = self._centerline_axis_unit_at_point(record.get("centerline"), point)
-        other_axis = self._centerline_axis_unit_at_point(other.get("centerline"), point)
-        if own_axis is None or other_axis is None:
-            return True
-
-        dot = abs(own_axis[0] * other_axis[0] + own_axis[1] * other_axis[1])
-        return dot <= WALL_EXTENSION_ORTHOGONAL_DOT_TOLERANCE
-
-    def _centerline_axis_unit_at_point(self, centerline, point):
+    def _wall_centerline_segments(self, wall):
+        centerline = wall.get("centerline")
         if centerline is None or centerline.is_empty:
-            return None
+            return []
         try:
             coords = list(centerline.coords)
         except Exception:
-            return None
+            return []
 
-        best_unit = None
-        best_distance = None
-        for start, end in zip(coords, coords[1:]):
+        segments = []
+        for index, (start, end) in enumerate(zip(coords, coords[1:])):
             try:
                 x0, y0 = start
                 x1, y1 = end
                 dx = float(x1) - float(x0)
                 dy = float(y1) - float(y0)
                 length = (dx * dx + dy * dy) ** 0.5
-                if length <= 0:
-                    continue
-                segment = line_from_coords([(x0, y0), (x1, y1)])
-                if segment is None:
-                    continue
-                distance = point.distance(segment)
+            except Exception:
+                continue
+            if length <= 0:
+                continue
+            segment_line = line_from_coords([(x0, y0), (x1, y1)])
+            if segment_line is None:
+                continue
+            segments.append(
+                {
+                    "index": index,
+                    "line": segment_line,
+                    "unit": (dx / length, dy / length),
+                    "length": length,
+                }
+            )
+        return segments
+
+    def _wall_terminal_points(self, wall):
+        try:
+            coords = list(wall["centerline"].coords)
+            start = coords[0]
+            end = coords[-1]
+        except Exception:
+            return []
+        return [
+            {"index": 0, "point": Point(float(start[0]), float(start[1]))},
+            {"index": -1, "point": Point(float(end[0]), float(end[1]))},
+        ]
+
+    def _nearest_segment(self, point, segments):
+        best_segment = None
+        best_distance = None
+        for segment in segments:
+            try:
+                distance = point.distance(segment["line"])
             except Exception:
                 continue
             if best_distance is None or distance < best_distance:
+                best_segment = segment
                 best_distance = distance
-                best_unit = (dx / length, dy / length)
-        return best_unit
+        return best_segment
 
-    def _centerline_extension_for_penetration(self, desired_penetration, self_thickness):
-        cap_contribution = self_thickness / 2.0 if WALL_CAP_STYLE == 3 else 0.0
-        if desired_penetration <= cap_contribution + WALL_EXTENSION_EPSILON:
+    def _project_point_to_segment(self, point, segment):
+        if segment is None:
+            return None
+        try:
+            projected_distance = segment["line"].project(point)
+            if projected_distance < -JUNCTION_EPSILON or projected_distance > segment["length"] + JUNCTION_EPSILON:
+                return None
+            return segment["line"].interpolate(projected_distance)
+        except Exception:
+            return None
+
+    def _point_is_terminal(self, point, endpoints):
+        for endpoint in endpoints:
+            try:
+                if point.distance(endpoint["point"]) <= WALL_CONNECTION_TOLERANCE:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _segment_sin(self, segment_a, segment_b):
+        if segment_a is None or segment_b is None:
             return 0.0
-        if WALL_CAP_STYLE == 3:
-            return max(0.0, desired_penetration - cap_contribution + WALL_EXTENSION_EPSILON)
-        return max(0.0, desired_penetration - cap_contribution)
+        ux, uy = segment_a["unit"]
+        vx, vy = segment_b["unit"]
+        return abs(ux * vy - uy * vx)
+
+    def _group_junction_candidates(self, candidates):
+        groups = []
+        for candidate in candidates:
+            target = None
+            for group in groups:
+                if candidate["point"].distance(group["point"]) <= WALL_CONNECTION_TOLERANCE:
+                    target = group
+                    break
+            if target is None:
+                groups.append(
+                    {
+                        "point": candidate["point"],
+                        "points": [candidate["point"]],
+                        "wallIndices": set(candidate["wallIndices"]),
+                        "pairs": list(candidate["pairs"]),
+                    }
+                )
+                continue
+            target["points"].append(candidate["point"])
+            target["wallIndices"].update(candidate["wallIndices"])
+            target["pairs"].extend(candidate["pairs"])
+            x = sum(point.x for point in target["points"]) / len(target["points"])
+            y = sum(point.y for point in target["points"]) / len(target["points"])
+            target["point"] = Point(x, y)
+        return groups
+
+    def _angle_aware_junction_polygons(self, raw_walls):
+        candidates = []
+        for index, wall_a in enumerate(raw_walls):
+            for wall_b in raw_walls[index + 1 :]:
+                candidates.extend(self._wall_pair_junction_candidates(wall_a, wall_b))
+
+        walls_by_index = {wall["index"]: wall for wall in raw_walls}
+        junctions = []
+        for group in self._group_junction_candidates(candidates):
+            polygon = self._junction_polygon_for_group(group, walls_by_index)
+            if polygon is None or polygon.is_empty:
+                continue
+            for part in iter_polygons(polygon):
+                if part.area > MIN_WALL_PART_AREA:
+                    junctions.append(part)
+        return junctions
+
+    def _junction_polygon_for_group(self, group, walls_by_index):
+        if not group["wallIndices"]:
+            return None
+
+        max_thickness = max(walls_by_index[index]["thickness"] for index in group["wallIndices"])
+        center = group["point"]
+        radius = max(WALL_MITER_LIMIT, max_thickness * 2.0) + WALL_CONNECTION_TOLERANCE + JUNCTION_EPSILON
+        local_envelope = box(center.x - radius, center.y - radius, center.x + radius, center.y + radius)
+
+        extensions = {
+            index: {0: 0.0, -1: 0.0}
+            for index in group["wallIndices"]
+        }
+        for pair in group["pairs"]:
+            for wall_index, endpoint_extensions in pair["extensions"].items():
+                if wall_index not in extensions:
+                    extensions[wall_index] = {0: 0.0, -1: 0.0}
+                for endpoint_index, extension in endpoint_extensions.items():
+                    extensions[wall_index][endpoint_index] = max(
+                        extensions[wall_index].get(endpoint_index, 0.0),
+                        extension,
+                    )
+
+        temporary_polygons = {}
+        for wall_index in group["wallIndices"]:
+            wall = walls_by_index[wall_index]
+            coords = self._extended_wall_coords(wall["line"], extensions.get(wall_index, {}))
+            temporary = footprint_from_centerline(
+                coords,
+                wall["thickness"],
+                cap_style=WALL_CAP_STYLE,
+                join_style=JOIN_STYLE,
+            )
+            if temporary is None or temporary.is_empty:
+                temporary = wall["polygon"]
+            temporary_polygons[wall_index] = temporary
+
+        local_masses = []
+        seen_pair_keys = set()
+        for pair in group["pairs"]:
+            wall_a = pair["wallA"]
+            wall_b = pair["wallB"]
+            pair_key = tuple(sorted((wall_a, wall_b)))
+            if pair_key in seen_pair_keys:
+                continue
+            seen_pair_keys.add(pair_key)
+            try:
+                local_mass = temporary_polygons[wall_a].intersection(temporary_polygons[wall_b]).intersection(
+                    local_envelope
+                )
+            except Exception:
+                continue
+            cleaned = clean_boolean_polygon(local_mass)
+            if cleaned.area > MIN_WALL_PART_AREA:
+                local_masses.append(cleaned)
+
+        return clean_boolean_polygon(union_polygons(local_masses))
+
+    def _extended_wall_coords(self, line, extensions):
+        coords = list(line.get("centerline") or [])
+        if len(coords) < 2:
+            return coords
+        extended = list(coords)
+        start_extension = max(0.0, float(extensions.get(0, 0.0) or 0.0))
+        end_extension = max(0.0, float(extensions.get(-1, 0.0) or 0.0))
+        if start_extension > 0:
+            ux, uy = self._endpoint_outward_unit(extended, 0)
+            x, y = extended[0]
+            extended[0] = (float(x) + ux * start_extension, float(y) + uy * start_extension)
+        if end_extension > 0:
+            ux, uy = self._endpoint_outward_unit(extended, -1)
+            x, y = extended[-1]
+            extended[-1] = (float(x) + ux * end_extension, float(y) + uy * end_extension)
+        return extended
 
     def _endpoint_outward_unit(self, coords, endpoint_index):
         try:
@@ -342,30 +554,6 @@ class IndoorModelBuilder:
         if length <= 0:
             return 0.0, 0.0
         return dx / length, dy / length
-
-    def _max_projected_distance(self, geom, origin, unit):
-        if geom is None or geom.is_empty:
-            return None
-
-        ux, uy = unit
-        distances = []
-
-        def collect_coords(part):
-            if part is None or part.is_empty:
-                return
-            geom_type = getattr(part, "geom_type", "")
-            if geom_type in {"LineString", "LinearRing", "Point"}:
-                for x, y, *unused in part.coords:
-                    distances.append((float(x) - origin.x) * ux + (float(y) - origin.y) * uy)
-            elif hasattr(part, "geoms"):
-                for child in part.geoms:
-                    collect_coords(child)
-            elif geom_type == "Polygon" and hasattr(part, "exterior"):
-                collect_coords(part.exterior)
-
-        collect_coords(geom)
-        positive = [distance for distance in distances if distance > WALL_CONNECTION_TOLERANCE / -10.0]
-        return max(positive) if positive else None
 
     def _positive_float(self, value, fallback):
         try:
@@ -595,24 +783,31 @@ class IndoorModelBuilder:
             if is_opening_type(tipo):
                 openings.append(poly)
             elif is_solid_wall_type(tipo):
-                raw_walls.append({"line": line, "polygon": poly})
+                centerline = line_from_coords(line.get("centerline"))
+                if centerline is None:
+                    continue
+                raw_walls.append(
+                    {
+                        "index": len(raw_walls),
+                        "line": line,
+                        "centerline": centerline,
+                        "polygon": poly,
+                        "thickness": self._positive_float(line.get("thicknessM"), 0.1),
+                    }
+                )
 
         opening_union = union_polygons(openings)
         self.opening_union = opening_union
-        junction_candidates = []
-        for index, wall_a in enumerate(raw_walls):
-            for wall_b in raw_walls[index + 1 :]:
-                try:
-                    # Recorte booleano diagonal: la interseccion pura es la Junction.
-                    intersection = clean_boolean_polygon(wall_a["polygon"].intersection(wall_b["polygon"]))
-                except Exception:
-                    continue
-                for part in iter_polygons(intersection):
-                    if part.area > OVERLAP_AREA_TOLERANCE:
-                        junction_candidates.append(part)
+        junction_candidates = self._angle_aware_junction_polygons(raw_walls)
 
         junction_union = clean_boolean_polygon(union_polygons(junction_candidates))
+        if not opening_union.is_empty and not junction_union.is_empty:
+            junction_union = clean_boolean_polygon(junction_union.difference(opening_union))
         wall_polys = []
+        assigned_wall_polys = []
+        if not junction_union.is_empty:
+            assigned_wall_polys.append(junction_union)
+        assigned_wall_union = union_polygons(assigned_wall_polys)
 
         junction_parts = iter_polygons(junction_union)
         for index, part in enumerate(junction_parts, start=1):
@@ -622,7 +817,17 @@ class IndoorModelBuilder:
                     overlap_area = part.intersection(wall["polygon"]).area
                 except Exception:
                     overlap_area = 0.0
-                if overlap_area > OVERLAP_AREA_TOLERANCE:
+                try:
+                    centerline_distance = part.distance(wall["centerline"])
+                except Exception:
+                    centerline_distance = None
+                if (
+                    overlap_area > OVERLAP_AREA_TOLERANCE
+                    or (
+                        centerline_distance is not None
+                        and centerline_distance <= wall["thickness"] / 2.0 + WALL_CONNECTION_TOLERANCE
+                    )
+                ):
                     contributing_lines.append(wall["line"])
             self.wall_parts.append(
                 {
@@ -643,12 +848,17 @@ class IndoorModelBuilder:
                 if not opening_union.is_empty:
                     derived = clean_boolean_polygon(derived.difference(opening_union))
                 if not junction_union.is_empty:
-                    # Recorte booleano diagonal: el segmento resta la misma WallJunction limpia.
                     derived = clean_boolean_polygon(derived.difference(junction_union))
+                if not assigned_wall_union.is_empty:
+                    derived = clean_boolean_polygon(derived.difference(assigned_wall_union))
             except Exception:
                 derived = wall_poly
             parts = iter_polygons(derived)
+            accepted_parts = []
             for index, part in enumerate(parts, start=1):
+                if part.area <= MIN_WALL_PART_AREA:
+                    continue
+                accepted_parts.append(part)
                 self.wall_parts.append(
                     {
                         "category": "WallSegment",
@@ -660,6 +870,9 @@ class IndoorModelBuilder:
                     }
                 )
                 wall_polys.append(part)
+            if accepted_parts:
+                assigned_wall_polys.extend(accepted_parts)
+                assigned_wall_union = clean_boolean_polygon(union_polygons(assigned_wall_polys))
         self.wall_union = union_polygons(wall_polys)
 
     def _line_footprint(self, line):
