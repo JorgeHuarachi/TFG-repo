@@ -39,6 +39,9 @@ WALL_EXTENSION_EPSILON = 0.002
 BOUNDARY_CONTACT_TOLERANCE = 0.01
 EXTERIOR_BOUNDARY_MIN_LENGTH = 0.05
 EXPORT_WALL_WALL_BOUNDARIES = False
+EDGE_MODE_NAVIGATION = "navigation"
+EDGE_MODE_ALL_ADJACENCY = "all_adjacency"
+EDGE_MODES = {EDGE_MODE_NAVIGATION, EDGE_MODE_ALL_ADJACENCY}
 
 
 def is_wall_type(tipo):
@@ -101,8 +104,12 @@ def _normalize_locomotion(values):
 
 
 class IndoorModelBuilder:
-    def __init__(self, snapshot):
+    def __init__(self, snapshot, edge_mode=EDGE_MODE_NAVIGATION):
+        if edge_mode not in EDGE_MODES:
+            allowed = ", ".join(sorted(EDGE_MODES))
+            raise ValueError(f"edge_mode no soportado: {edge_mode!r}. Valores permitidos: {allowed}.")
         self.snapshot = snapshot
+        self.edge_mode = edge_mode
         self.now = snapshot.get("createdAt") or _now_utc()
         self.source_features = []
         self.source_by_id = {}
@@ -899,11 +906,15 @@ class IndoorModelBuilder:
                     continue
 
                 boundary_id = self._boundary_id(cell_a["id"], cell_b["id"], used_ids)
-                edge_id = edge_id_for_boundary(boundary_id)
                 traversable = boundary_role == "general_transfer_contact"
                 is_anchor = traversable and self._transfer_cell(cell_a, cell_b).get("function") == "AnchorSpace"
                 boundary_type = "NavigableBoundary" if traversable else "NonNavigableBoundary"
                 relationship_type = "connectivity" if traversable else "adjacency"
+                edge_id = (
+                    edge_id_for_boundary(boundary_id)
+                    if self._should_export_edge(cell_a, cell_b, traversable)
+                    else None
+                )
                 source_refs = []
                 for source_ref in cell_a["sourceRefs"] + cell_b["sourceRefs"]:
                     _unique_append(source_refs, source_ref)
@@ -912,7 +923,6 @@ class IndoorModelBuilder:
                     "id": boundary_id,
                     "featureType": "CellBoundary",
                     "isVirtual": False,
-                    "duality": ref(LAYER_ID, DUAL_ID, edge_id),
                     "cellBoundaryGeom": {"geometry2D": line_geojson(line)},
                     "navigationBoundaryType": boundary_type,
                     "traversable": traversable,
@@ -924,6 +934,8 @@ class IndoorModelBuilder:
                         "relationshipType": relationship_type,
                     },
                 }
+                if edge_id is not None:
+                    boundary["duality"] = ref(LAYER_ID, DUAL_ID, edge_id)
                 if traversable:
                     boundary["navigableBoundaryFunction"] = "AnchorBoundary" if is_anchor else "ConnectionBoundary"
 
@@ -1028,6 +1040,22 @@ class IndoorModelBuilder:
     def _should_boundary_be_created(self, cell_a, cell_b):
         return self._boundary_role(cell_a, cell_b) is not None
 
+    def _should_export_edge(self, cell_a, cell_b, traversable):
+        if cell_b is None:
+            return False
+        if self.edge_mode == EDGE_MODE_ALL_ADJACENCY:
+            return True
+        if self._is_wall_junction_cell(cell_a) or self._is_wall_junction_cell(cell_b):
+            return False
+
+        types = {cell_a["navigationType"], cell_b["navigationType"]}
+        if traversable:
+            return types == {"GeneralSpace", "TransferSpace"} or types == {"GeneralSpace"}
+
+        if types == {"GeneralSpace", "NonNavigableSpace"}:
+            return self._is_wall_segment_cell(cell_a) or self._is_wall_segment_cell(cell_b)
+        return False
+
     def _boundary_role(self, cell_a, cell_b):
         types = {cell_a["navigationType"], cell_b["navigationType"]}
         if types == {"GeneralSpace", "TransferSpace"}:
@@ -1055,6 +1083,15 @@ class IndoorModelBuilder:
 
     def _is_wall_cell(self, cell):
         return cell["function"] == "Wall" and cell["json"].get("category") in {"WallSegment", "WallJunction"}
+
+    def _cell_category(self, cell):
+        return str(cell.get("category") or cell["json"].get("category") or "")
+
+    def _is_wall_segment_cell(self, cell):
+        return cell["function"] == "Wall" and self._cell_category(cell) == "WallSegment"
+
+    def _is_wall_junction_cell(self, cell):
+        return cell["function"] == "Wall" and self._cell_category(cell) == "WallJunction"
 
     def _is_general_transfer_pair(self, cell_a, cell_b):
         types = {cell_a["navigationType"], cell_b["navigationType"]}
@@ -1125,8 +1162,18 @@ class IndoorModelBuilder:
                 "attributes": {
                     "boundaryType": boundary["json"]["navigationBoundaryType"],
                     "boundaryRole": boundary["json"].get("attributes", {}).get("boundaryRole"),
+                    "edgeMode": self.edge_mode,
                 },
             }
+            if self.edge_mode == EDGE_MODE_ALL_ADJACENCY and not boundary["traversable"]:
+                edge["attributes"]["debugOnly"] = True
+            if (
+                self.edge_mode == EDGE_MODE_NAVIGATION
+                and not boundary["traversable"]
+                and (self._is_wall_segment_cell(cell_a) or self._is_wall_segment_cell(cell_b))
+            ):
+                edge["attributes"]["wallAdjacency"] = True
+                edge["attributes"]["wallBreakCandidate"] = True
             if transfer is not None:
                 edge["transferSpaceRef"] = transfer["id"]
                 edge["locomotionTypes"] = transfer.get("locomotionTypes") or ["Walking", "Rolling"]
@@ -1212,6 +1259,9 @@ class IndoorModelBuilder:
                         "isDirected": False,
                         "nodeMember": self.nodes,
                         "edgeMember": self.edges,
+                        "attributes": {
+                            "edgeMode": self.edge_mode,
+                        },
                     },
                 }
             ],
@@ -1248,5 +1298,5 @@ class IndoorModelBuilder:
         return polygon_geojson(extent)
 
 
-def build_indoor_model(snapshot):
-    return IndoorModelBuilder(snapshot).build()
+def build_indoor_model(snapshot, edge_mode=EDGE_MODE_NAVIGATION):
+    return IndoorModelBuilder(snapshot, edge_mode=edge_mode).build()

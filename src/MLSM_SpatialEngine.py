@@ -21,6 +21,8 @@ import numpy as np
 import json
 import datetime
 import os
+import subprocess
+import sys
 from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint, LineString as ShapelyLineString
 from shapely.ops import unary_union
 from indoor_data_model import build_indoor_model
@@ -173,28 +175,48 @@ class DiseñadorConectado:
         self.ax.invert_yaxis()
 
     def actualizar_titulo(self, error=None):
-        instrucciones = ""
         color = 'black'
         tit = ""
         # --- AQUÍ AÑADIMOS LOS NUEVOS MODOS ---
         if self.modo.startswith('muro') or self.modo in ['puerta_simple', 'puerta_doble', 'salida', 'frontera_virtual']:
             tit = f"MODO: {self.modo.replace('_', ' ').upper()}"
-            instrucciones = "[Clic Izq]: Dibujar | [m/n]: Muros | [p/d]: Puerta | [s]: Salida | [v]: Frontera Virtual | [o]: Ortogonal"
         elif self.modo == 'agentes':
             tit = "MODO: AGENTES"
             color = 'blue'
-            instrucciones = "[Clic]: Poner Agente\n[m]: Muros | [h]: Hitos | [s]: Salidas | [z]: Deshacer"
         elif self.modo == 'hitos':
             tit = "MODO: HITOS (Auto-Relleno)"
             color = 'green'
-            instrucciones = "Marca vértices de Habitación. [Doble Clic] para cerrar. | [1/2/3]: Locomotion"
         
         if error: tit, color = error, 'red'
         # Mostramos también el atributo IndoorGML actual
         estado_cad = f"Ortogonal: {'ON' if self.ortogonal else 'OFF'}"
         estado_indoor = f"Locomoción: {self.locomotion_actual}"
         self.ax.set_title(f"{tit} | {estado_cad} | {estado_indoor}", color=color, fontweight='bold', fontsize=10)
-        self.ax.set_xlabel(instrucciones, fontsize=10, backgroundcolor='#f0f0f0')
+        self.ax.set_xlabel("")
+
+    def texto_ayuda_teclas(self):
+        return (
+            "m exterior | n interior | p puerta | d doble | s salida | v virtual | h espacio | a agente | o ortogonal\n"
+            "1 walk/roll | 2 walk | 3 step | z undo | e export | x debug all adjacency | esc cancelar | ?/f1 ayuda"
+        )
+
+    def dibujar_ayuda_teclas(self):
+        self.ax.text(
+            0.01,
+            0.01,
+            self.texto_ayuda_teclas(),
+            transform=self.ax.transAxes,
+            ha='left',
+            va='bottom',
+            fontsize=8,
+            color='black',
+            zorder=30,
+            bbox=dict(facecolor='white', edgecolor='#808080', alpha=0.82, pad=4),
+        )
+
+    def imprimir_ayuda_teclas(self):
+        print("\nControles SpatialEngine:")
+        print(self.texto_ayuda_teclas().replace("\n", " | "))
 
     def calcular_esquinas_muro(self, x1, y1, x2, y2, grosor):
         """Calcula los 4 vértices de un rectángulo a partir de una línea central y un grosor."""
@@ -273,6 +295,7 @@ class DiseñadorConectado:
             ags = np.array(self.agentes)
             self.ax.scatter(ags[:,0], ags[:,1], c='blue', s=60, zorder=10, edgecolors='white')
         
+        self.dibujar_ayuda_teclas()
         self.fig.canvas.draw()
 
     def es_punto_valido_inicio(self, x, y):
@@ -530,23 +553,25 @@ class DiseñadorConectado:
         self.fig.canvas.draw_idle()
 
     def on_key(self, event):
+        key = (event.key or "").lower().strip()
+
         # --- NUEVOS MODOS DE MUROS ---
-        if event.key == 'm': self.cambiar_modo('muro_exterior')
-        elif event.key == 'n': self.cambiar_modo('muro_interior')
-        elif event.key == 'p': self.cambiar_modo('puerta_simple')
-        elif event.key == 'd': self.cambiar_modo('puerta_doble')
-        elif event.key == 'o': self.ortogonal = not self.ortogonal # Alternar Diagonal    
+        if key == 'm': self.cambiar_modo('muro_exterior')
+        elif key == 'n': self.cambiar_modo('muro_interior')
+        elif key == 'p': self.cambiar_modo('puerta_simple')
+        elif key == 'd': self.cambiar_modo('puerta_doble')
+        elif key == 'o': self.ortogonal = not self.ortogonal # Alternar Diagonal
         # --- MODOS CLÁSICOS ---
-        elif event.key == 'a': self.cambiar_modo('agentes')
-        elif event.key == 'h': self.cambiar_modo('hitos')
-        elif event.key == 's': self.cambiar_modo('salida')
-        elif event.key == 'v': self.cambiar_modo('frontera_virtual') # NUEVA
+        elif key == 'a': self.cambiar_modo('agentes')
+        elif key == 'h': self.cambiar_modo('hitos')
+        elif key == 's': self.cambiar_modo('salida')
+        elif key == 'v': self.cambiar_modo('frontera_virtual') # NUEVA
         # --- NUEVO: Etiquetas de Locomoción IndoorGML ---
-        elif event.key == '1': self.locomotion_actual = ["Walking", "Rolling"] # Accesible universal
-        elif event.key == '2': self.locomotion_actual = ["Walking"]            # No accesible (ej. terreno irregular)
-        elif event.key == '3': self.locomotion_actual = ["Walking", "Step"]    # Escaleras / Desniveles
+        elif key == '1': self.locomotion_actual = ["Walking", "Rolling"] # Accesible universal
+        elif key == '2': self.locomotion_actual = ["Walking"]            # No accesible (ej. terreno irregular)
+        elif key == '3': self.locomotion_actual = ["Walking", "Step"]    # Escaleras / Desniveles
         # --- LÓGICA DE DESHACER (ACTUALIZADA) ---
-        elif event.key == 'z':
+        elif key == 'z':
             if self.modo in self.LINEAR_AUTHORING_TYPES:
                 if self.muros:
                     borrado = self.muros.pop()
@@ -563,16 +588,29 @@ class DiseñadorConectado:
             self.limpiar_temporales_autoria(limpiar_poligono=True)
 
         # --- SECCIÓN PARA EXPORTAR ---
-        elif event.key == 'e': 
-            self.exportar_indoor_model("indoor_model.json")
+        elif key == 'e':
+            self.exportar_indoor_model(edge_mode="navigation")
             print("Guardado rapido Indoor Data Model completado.")
+
+        elif key == 'x':
+            self.exportar_indoor_model(edge_mode="all_adjacency")
+            print("Guardado debug Indoor Data Model all_adjacency completado.")
         
-        elif event.key == 'i': 
+        elif key == 'escape':
+            self.limpiar_temporales_autoria(limpiar_poligono=True)
+            print("Operacion actual cancelada.")
+
+        elif key in {'?', 'f1'}:
+            self.imprimir_ayuda_teclas()
+
+        elif key == 'i':
             conexiones = self.calcular_conexiones()
             timestamp = datetime.datetime.now().strftime("%H%M%S")
             nombre_final = f"{self.nombre_archivo_base}_IndoorGML_{timestamp}.json"
             self.exportar_indoor_gml(conexiones, nombre_final)
             print(f"🌍 Guardado en formato OGC IndoorGML 2.0 completado.")
+        else:
+            print(f"Tecla no asignada: {key or '<sin tecla>'}")
         self.dibujar_interfaz()
 
     def calcular_conexiones(self):
@@ -1512,13 +1550,43 @@ class DiseñadorConectado:
         print("OK: indoor_model.json valida contra schemas/indoor/indoor_model.schema.json")
         return True
 
-    def exportar_indoor_model(self, nombre_archivo=None):
+    def generar_visual_check_indoor_model(self, json_path, layers="all", labels="none"):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        visualizer_path = os.path.join(repo_root, "tools", "visualize_indoor_model.py")
+        carpeta_destino = os.path.join(repo_root, "outputs", "visual_checks")
+        os.makedirs(carpeta_destino, exist_ok=True)
+
+        json_path = os.path.abspath(json_path)
+        layer_suffix = str(layers).replace(",", "_")
+        png_path = os.path.join(
+            carpeta_destino,
+            f"{os.path.splitext(os.path.basename(json_path))[0]}_{layer_suffix}.png",
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                visualizer_path,
+                json_path,
+                "--layers",
+                layers,
+                "--labels",
+                labels,
+                "--save",
+                png_path,
+                "--no-show",
+            ],
+            check=True,
+        )
+        print(f"Visual check indoor_model generado en: '{png_path}'")
+        return png_path
+
+    def exportar_indoor_model(self, nombre_archivo=None, edge_mode="navigation"):
         """
         Nuevo flujo principal: exporta indoor_model.json basado en indoor_data_model.
         No incluye agentes, spawns, beacons, hazards ni configuracion de simulacion.
         """
         snapshot = self.build_authoring_snapshot()
-        datos = build_indoor_model(snapshot)
+        datos = build_indoor_model(snapshot, edge_mode=edge_mode)
 
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         carpeta_destino = os.path.join(repo_root, "outputs", "indoor_models")
@@ -1526,7 +1594,8 @@ class DiseñadorConectado:
 
         if nombre_archivo is None:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            nombre_archivo = f"{self.nombre_archivo_base}_indoor_model_{timestamp}.json"
+            mode_suffix = "_all_adjacency" if edge_mode == "all_adjacency" else ""
+            nombre_archivo = f"{self.nombre_archivo_base}_indoor_model{mode_suffix}_{timestamp}.json"
         if not nombre_archivo.endswith(".json"):
             nombre_archivo += ".json"
 
@@ -1536,7 +1605,11 @@ class DiseñadorConectado:
 
         schema_path = os.path.join(repo_root, "schemas", "indoor", "indoor_model.schema.json")
         self._validar_indoor_model_si_posible(datos, schema_path)
-        print(f"\nINDOOR DATA MODEL EXPORTADO A: '{ruta_completa}'")
+        print(f"\nINDOOR DATA MODEL EXPORTADO A: '{ruta_completa}' (edge_mode={edge_mode})")
+        try:
+            self.generar_visual_check_indoor_model(ruta_completa, layers="all", labels="none")
+        except Exception as exc:
+            print(f"WARNING: No se pudo generar visual check de indoor_model.json: {exc}")
         return ruta_completa
 
     def verificar_visual_y_exportar(self):
