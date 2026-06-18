@@ -6,6 +6,7 @@ from shapely.ops import unary_union
 
 MIN_AREA = 1e-9
 MIN_LENGTH = 1e-6
+BOOLEAN_CLEAN_EPSILON = 1e-8
 
 
 def _coord(value):
@@ -94,6 +95,19 @@ def clean_polygon(poly):
             return None
         return MultiPolygon(parts) if len(parts) > 1 else parts[0]
     return None
+
+
+def clean_boolean_polygon(geom, epsilon=BOOLEAN_CLEAN_EPSILON):
+    poly = clean_polygon(geom)
+    if poly is None:
+        return Polygon()
+    if epsilon and epsilon > 0:
+        try:
+            cleaned = poly.buffer(-epsilon, join_style=2).buffer(epsilon, join_style=2)
+            poly = clean_polygon(cleaned) or poly
+        except Exception:
+            pass
+    return poly
 
 
 def iter_polygons(geom):

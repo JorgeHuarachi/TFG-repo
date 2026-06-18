@@ -28,8 +28,8 @@ from shapely.ops import unary_union
 from indoor_data_model import build_indoor_model
 
 # --- CONFIGURACIÓN ---
-ANCHO = 15
-ALTO = 10
+ANCHO = 10
+ALTO = 6
 
 class DiseñadorConectado:
     LINEAR_AUTHORING_TYPES = {
@@ -94,7 +94,17 @@ class DiseñadorConectado:
 
         # Visual
         self.fig, self.ax = plt.subplots(figsize=(12, 8))
-        plt.subplots_adjust(bottom=0.15) 
+        plt.subplots_adjust(bottom=0.22, top=0.90)
+        self.texto_instrucciones = self.fig.text(
+            0.03,
+            0.03,
+            "",
+            ha='left',
+            va='bottom',
+            fontsize=8,
+            color='black',
+            bbox=dict(facecolor='white', edgecolor='#808080', alpha=0.9, pad=4),
+        )
         self.ax.set_aspect('equal')
         self.configurar_lienzo()
         self.fig.canvas.mpl_connect('button_press_event', self.on_click)
@@ -192,7 +202,7 @@ class DiseñadorConectado:
         estado_cad = f"Ortogonal: {'ON' if self.ortogonal else 'OFF'}"
         estado_indoor = f"Locomoción: {self.locomotion_actual}"
         self.ax.set_title(f"{tit} | {estado_cad} | {estado_indoor}", color=color, fontweight='bold', fontsize=10)
-        self.ax.set_xlabel("")
+        self.texto_instrucciones.set_text(self.texto_ayuda_teclas())
 
     def texto_ayuda_teclas(self):
         return (
@@ -201,18 +211,7 @@ class DiseñadorConectado:
         )
 
     def dibujar_ayuda_teclas(self):
-        self.ax.text(
-            0.01,
-            0.01,
-            self.texto_ayuda_teclas(),
-            transform=self.ax.transAxes,
-            ha='left',
-            va='bottom',
-            fontsize=8,
-            color='black',
-            zorder=30,
-            bbox=dict(facecolor='white', edgecolor='#808080', alpha=0.82, pad=4),
-        )
+        self.texto_instrucciones.set_text(self.texto_ayuda_teclas())
 
     def imprimir_ayuda_teclas(self):
         print("\nControles SpatialEngine:")

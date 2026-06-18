@@ -5,6 +5,7 @@ import datetime
 from shapely.geometry import Point
 
 from .geometry import (
+    clean_boolean_polygon,
     contact_line,
     extract_lines,
     footprint_from_centerline,
@@ -30,12 +31,13 @@ LEVEL_CODE = "L00"
 LAYER_ID = "TL_NAV_L00"
 PRIMAL_ID = "PS_NAV_L00"
 DUAL_ID = "DS_NAV_L00"
-WALL_CAP_STYLE = 3
+WALL_CAP_STYLE = 2
 OPENING_CAP_STYLE = 2
 JOIN_STYLE = 2
 OVERLAP_AREA_TOLERANCE = 1e-6
 WALL_CONNECTION_TOLERANCE = 0.05
 WALL_EXTENSION_EPSILON = 0.002
+WALL_EXTENSION_ORTHOGONAL_DOT_TOLERANCE = 0.17364817766693033
 BOUNDARY_CONTACT_TOLERANCE = 0.01
 EXTERIOR_BOUNDARY_MIN_LENGTH = 0.05
 EXPORT_WALL_WALL_BOUNDARIES = False
@@ -249,6 +251,9 @@ class IndoorModelBuilder:
             if not touches_receiver:
                 continue
 
+            if not self._wall_axes_allow_endpoint_extension(record, other, point):
+                continue
+
             desired_penetration = max(record["thickness"] / 2.0, other["thickness"] / 2.0)
             ray_length = max(desired_penetration + other["thickness"] + WALL_CONNECTION_TOLERANCE + 0.5, 1.0)
             ray = line_from_coords(
@@ -274,11 +279,52 @@ class IndoorModelBuilder:
 
         return extension
 
+    def _wall_axes_allow_endpoint_extension(self, record, other, point):
+        own_axis = self._centerline_axis_unit_at_point(record.get("centerline"), point)
+        other_axis = self._centerline_axis_unit_at_point(other.get("centerline"), point)
+        if own_axis is None or other_axis is None:
+            return True
+
+        dot = abs(own_axis[0] * other_axis[0] + own_axis[1] * other_axis[1])
+        return dot <= WALL_EXTENSION_ORTHOGONAL_DOT_TOLERANCE
+
+    def _centerline_axis_unit_at_point(self, centerline, point):
+        if centerline is None or centerline.is_empty:
+            return None
+        try:
+            coords = list(centerline.coords)
+        except Exception:
+            return None
+
+        best_unit = None
+        best_distance = None
+        for start, end in zip(coords, coords[1:]):
+            try:
+                x0, y0 = start
+                x1, y1 = end
+                dx = float(x1) - float(x0)
+                dy = float(y1) - float(y0)
+                length = (dx * dx + dy * dy) ** 0.5
+                if length <= 0:
+                    continue
+                segment = line_from_coords([(x0, y0), (x1, y1)])
+                if segment is None:
+                    continue
+                distance = point.distance(segment)
+            except Exception:
+                continue
+            if best_distance is None or distance < best_distance:
+                best_distance = distance
+                best_unit = (dx / length, dy / length)
+        return best_unit
+
     def _centerline_extension_for_penetration(self, desired_penetration, self_thickness):
         cap_contribution = self_thickness / 2.0 if WALL_CAP_STYLE == 3 else 0.0
         if desired_penetration <= cap_contribution + WALL_EXTENSION_EPSILON:
             return 0.0
-        return max(0.0, desired_penetration - cap_contribution + WALL_EXTENSION_EPSILON)
+        if WALL_CAP_STYLE == 3:
+            return max(0.0, desired_penetration - cap_contribution + WALL_EXTENSION_EPSILON)
+        return max(0.0, desired_penetration - cap_contribution)
 
     def _endpoint_outward_unit(self, coords, endpoint_index):
         try:
@@ -557,21 +603,18 @@ class IndoorModelBuilder:
         for index, wall_a in enumerate(raw_walls):
             for wall_b in raw_walls[index + 1 :]:
                 try:
-                    intersection = wall_a["polygon"].intersection(wall_b["polygon"])
+                    # Recorte booleano diagonal: la interseccion pura es la Junction.
+                    intersection = clean_boolean_polygon(wall_a["polygon"].intersection(wall_b["polygon"]))
                 except Exception:
                     continue
                 for part in iter_polygons(intersection):
                     if part.area > OVERLAP_AREA_TOLERANCE:
                         junction_candidates.append(part)
 
-        junction_union = union_polygons(junction_candidates)
+        junction_union = clean_boolean_polygon(union_polygons(junction_candidates))
         wall_polys = []
-        try:
-            junction_geom = junction_union.difference(opening_union) if not opening_union.is_empty else junction_union
-        except Exception:
-            junction_geom = junction_union
 
-        junction_parts = iter_polygons(junction_geom)
+        junction_parts = iter_polygons(junction_union)
         for index, part in enumerate(junction_parts, start=1):
             contributing_lines = []
             for wall in raw_walls:
@@ -598,9 +641,10 @@ class IndoorModelBuilder:
             try:
                 derived = wall_poly
                 if not opening_union.is_empty:
-                    derived = derived.difference(opening_union)
+                    derived = clean_boolean_polygon(derived.difference(opening_union))
                 if not junction_union.is_empty:
-                    derived = derived.difference(junction_union)
+                    # Recorte booleano diagonal: el segmento resta la misma WallJunction limpia.
+                    derived = clean_boolean_polygon(derived.difference(junction_union))
             except Exception:
                 derived = wall_poly
             parts = iter_polygons(derived)
