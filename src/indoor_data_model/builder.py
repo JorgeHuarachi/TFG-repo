@@ -2,7 +2,7 @@
 
 import datetime
 
-from shapely.geometry import Point, box
+from shapely.geometry import LineString, Point, Polygon, box
 
 from .geometry import (
     clean_boolean_polygon,
@@ -90,14 +90,14 @@ def _unique_append(values, value):
 
 
 def _normalize_locomotion(values):
-    allowed = {"Flying", "Rolling", "Walking", "Unspecified", "Step"}
+    allowed = {"Flying", "Rolling", "Walking", "Unspecified"}
     mapping = {
         "flying": "Flying",
         "rolling": "Rolling",
         "walking": "Walking",
         "unspecified": "Unspecified",
-        "step": "Step",
-        "stairs": "Step",
+        "step": "Walking",
+        "stairs": "Walking",
     }
     result = []
     for value in values or []:
@@ -115,6 +115,13 @@ class IndoorModelBuilder:
         self.snapshot = snapshot
         self.edge_mode = edge_mode
         self.now = snapshot.get("createdAt") or _now_utc()
+        self.level = self._snapshot_level()
+        self.level_id = self.level.get("id") or LEVEL_ID
+        self.level_index = int(self.level.get("levelIndex", self.level.get("order", 0)) or 0)
+        self.level_code = self._level_code(self.level_id)
+        self.layer_id = f"TL_NAV_{self.level_code}"
+        self.primal_id = f"PS_NAV_{self.level_code}"
+        self.dual_id = f"DS_NAV_{self.level_code}"
         self.source_features = []
         self.source_by_id = {}
         self.source_by_line_name = {}
@@ -128,10 +135,38 @@ class IndoorModelBuilder:
         self.node_connects = {}
         self.wall_parts = []
         self.wall_union = None
+        self.solid_wall_union = None
         self.object_union = None
         self.transfer_union = None
+        self.connector_union = None
         self.opening_union = None
         self.overlap_warnings = []
+        self.connector_endpoint_cells = {}
+        self.same_level_connector_boundary_by_connector = {}
+
+    def _snapshot_level(self):
+        levels = self.snapshot.get("levels") or []
+        if levels:
+            return dict(levels[0])
+        return {
+            "id": LEVEL_ID,
+            "name": "Ground floor",
+            "levelIndex": 0,
+            "floorZ": 0.0,
+            "ceilingZ": 3.0,
+            "heightM": 3.0,
+        }
+
+    def _level_code(self, level_id):
+        token = str(level_id or LEVEL_ID).upper()
+        if token.startswith("LEVEL_"):
+            token = token[len("LEVEL_") :]
+        if token.isdigit():
+            return f"L{int(token):02d}"
+        return normalize_token(token, "L00")
+
+    def _ref(self, container_id, object_id):
+        return ref(self.layer_id, container_id, object_id)
 
     def build(self):
         self._prepare_authoring_lines()
@@ -139,6 +174,7 @@ class IndoorModelBuilder:
         self._derive_wall_parts()
         self._create_object_spaces()
         self._create_transfer_spaces()
+        self._create_connector_spaces()
         self._create_general_spaces()
         self._create_wall_spaces()
 
@@ -156,7 +192,9 @@ class IndoorModelBuilder:
         for line in self.snapshot.get("authoringElements", []):
             prepared = dict(line)
             tipo = prepared.get("type")
-            prepared["level"] = prepared.get("level") or LEVEL_ID
+            prepared["level"] = prepared.get("level") or self.level_id
+            if prepared["level"] != self.level_id:
+                continue
             prepared["centerline"] = list(prepared.get("centerline") or [])
             prepared["attributes"] = dict(prepared.get("attributes") or {})
             self.authoring_lines.append(prepared)
@@ -641,7 +679,7 @@ class IndoorModelBuilder:
         ]
 
     def _create_source_features(self):
-        counters = {"wall": 0, "door": 0, "exit": 0, "virtual": 0, "room": 0, "other": 0}
+        counters = {"wall": 0, "door": 0, "exit": 0, "window": 0, "virtual": 0, "room": 0, "other": 0}
 
         for line in self.authoring_lines:
             tipo = line.get("type")
@@ -656,13 +694,15 @@ class IndoorModelBuilder:
                 key, source_type = "door", "door_centerline"
             elif is_exit_type(tipo):
                 key, source_type = "exit", "exit_centerline"
+            elif tipo in WINDOW_TYPES:
+                key, source_type = "window", "window_centerline"
             elif is_virtual_boundary_type(tipo):
                 key, source_type = "virtual", "virtual_boundary_line"
             else:
                 key, source_type = "other", "other"
 
             counters[key] += 1
-            source_id = f"SF_{LEVEL_CODE}_{normalize_token(key)}_{counters[key]:03d}"
+            source_id = f"SF_{self.level_code}_{normalize_token(key)}_{counters[key]:03d}"
             attrs = {
                 "originalName": line.get("name"),
                 "originalType": tipo,
@@ -680,7 +720,7 @@ class IndoorModelBuilder:
                     "id": source_id,
                     "featureType": "SourceFeature",
                     "sourceType": source_type,
-                    "level": line.get("level") or LEVEL_ID,
+                    "level": line.get("level") or self.level_id,
                     "geometry": line_geojson(geom_line),
                     "attributes": attrs,
                 }
@@ -689,19 +729,21 @@ class IndoorModelBuilder:
 
         for space in self.snapshot.get("spaceFootprints", []):
             name = space.get("name")
+            if (space.get("level") or self.level_id) != self.level_id:
+                continue
             if not name or self._space_is_transfer_or_virtual(space):
                 continue
             poly = polygon_from_coords(space.get("footprint"))
             if poly is None:
                 continue
             counters["room"] += 1
-            source_id = f"SF_{LEVEL_CODE}_ROOM_{counters['room']:03d}"
+            source_id = f"SF_{self.level_code}_ROOM_{counters['room']:03d}"
             self._add_source_feature(
                 {
                     "id": source_id,
                     "featureType": "SourceFeature",
                     "sourceType": "room_polygon",
-                    "level": space.get("level") or LEVEL_ID,
+                    "level": space.get("level") or self.level_id,
                     "geometry": polygon_geojson(poly),
                     "attributes": {
                         "originalName": name,
@@ -724,9 +766,12 @@ class IndoorModelBuilder:
         lower_name = str(name or "").lower()
         return (
             is_transfer_authoring_type(authoring_type)
+            or authoring_type in WINDOW_TYPES
             or is_non_solid_topology_type(authoring_type)
             or "puerta" in lower_name
             or "salida" in lower_name
+            or "ventana" in lower_name
+            or "window" in lower_name
             or "frontera" in lower_name
             or attrs.get("clase_indoor") in {"TransferSpace", "AnchorSpace"}
         )
@@ -747,6 +792,8 @@ class IndoorModelBuilder:
         object_polys = []
         index = 1
         for space in self.snapshot.get("spaceFootprints", []):
+            if (space.get("level") or self.level_id) != self.level_id:
+                continue
             if not self._space_is_object(space):
                 continue
             poly = polygon_from_coords(space.get("footprint"))
@@ -755,7 +802,7 @@ class IndoorModelBuilder:
             source_ref = self.source_by_space_name.get(space.get("name"))
             attrs = dict(space.get("attributes") or {})
             attrs["derivationStatus"] = "derived_from_object_footprint"
-            cell_id = f"CS_{LEVEL_CODE}_OBJ_{index:03d}"
+            cell_id = f"CS_{self.level_code}_OBJ_{index:03d}"
             index += 1
             self._add_cell(
                 cell_id=cell_id,
@@ -799,8 +846,11 @@ class IndoorModelBuilder:
         opening_union = union_polygons(openings)
         self.opening_union = opening_union
         junction_candidates = self._angle_aware_junction_polygons(raw_walls)
+        raw_wall_union = union_polygons([wall["polygon"] for wall in raw_walls])
+        raw_junction_union = clean_boolean_polygon(union_polygons(junction_candidates))
+        self.solid_wall_union = clean_boolean_polygon(union_polygons([raw_wall_union, raw_junction_union]))
 
-        junction_union = clean_boolean_polygon(union_polygons(junction_candidates))
+        junction_union = raw_junction_union
         if not opening_union.is_empty and not junction_union.is_empty:
             junction_union = clean_boolean_polygon(junction_union.difference(opening_union))
         wall_polys = []
@@ -883,8 +933,19 @@ class IndoorModelBuilder:
         return footprint_from_centerline(prepared.get("centerline"), prepared.get("thicknessM") or 0.1)
 
     def _create_general_spaces(self):
+        detected_spaces = [
+            space
+            for space in self.snapshot.get("detectedSpaces", [])
+            if (space.get("level") or self.level_id) == self.level_id
+        ]
+        if detected_spaces:
+            self._create_detected_general_spaces(detected_spaces)
+            return
+
         index = 1
         for space in self.snapshot.get("spaceFootprints", []):
+            if (space.get("level") or self.level_id) != self.level_id:
+                continue
             if self._space_is_transfer_or_virtual(space) or self._space_is_object(space):
                 continue
             source_ref = self.source_by_space_name.get(space.get("name"))
@@ -921,7 +982,7 @@ class IndoorModelBuilder:
                 derivation_attrs["splitFromAuthoringSpace"] = True
 
             for part_index, part in enumerate(parts, start=1):
-                base_id = f"CS_{LEVEL_CODE}_ROOM_{index:03d}"
+                base_id = f"CS_{self.level_code}_ROOM_{index:03d}"
                 cell_id = base_id if len(parts) == 1 else f"{base_id}_PART_{part_index:03d}"
                 cell_attrs = dict(attrs)
                 cell_attrs.update(derivation_attrs)
@@ -942,13 +1003,114 @@ class IndoorModelBuilder:
                 )
             index += 1
 
+    def _create_detected_general_spaces(self, detected_spaces):
+        clipping_union, clipping_labels = self._detected_general_space_clipping()
+        for index, space in enumerate(detected_spaces, start=1):
+            poly = self._polygon_from_detected_space(space)
+            if poly is None:
+                continue
+            attrs = dict(space.get("attributes") or {})
+            base_id = space.get("id") or f"CS_{self.level_code}_ROOM_{index:03d}"
+            name = attrs.get("name") or attrs.get("cellSpaceName") or base_id
+            derivation_attrs = {
+                "derivationStatus": "automatic_space_detection",
+                "sourceFaceId": space.get("sourceFaceId"),
+            }
+            parts = [poly]
+            if not clipping_union.is_empty:
+                try:
+                    clipped = clean_boolean_polygon(poly.difference(clipping_union))
+                    clipped_parts = iter_polygons(clipped)
+                    if clipped_parts:
+                        parts = clipped_parts
+                        derivation_attrs["clippedAgainst"] = clipping_labels
+                        if len(parts) > 1:
+                            derivation_attrs["splitFromDetectedSpace"] = True
+                except Exception:
+                    derivation_attrs["warning"] = "detected_space_not_clipped"
+
+            for part_index, part in enumerate(parts, start=1):
+                cell_id = base_id if len(parts) == 1 else f"{base_id}_PART_{part_index:03d}"
+                cell_attrs = dict(attrs)
+                cell_attrs.update(derivation_attrs)
+                if len(parts) > 1:
+                    cell_attrs["partIndex"] = part_index
+                self._add_cell(
+                    cell_id=cell_id,
+                    name=name if len(parts) == 1 else f"{name} part {part_index}",
+                    polygon=part,
+                    navigation_type="GeneralSpace",
+                    navigation_class="NavigableSpace",
+                    category=attrs.get("categoria") or attrs.get("category") or "Room",
+                    function=attrs.get("function") or attrs.get("funcion") or "General",
+                    locomotion=_normalize_locomotion(attrs.get("locomotion")),
+                    source_refs=[],
+                    attributes=cell_attrs,
+                )
+
+    def _detected_general_space_clipping(self):
+        clipping_polys = []
+        clipping_labels = []
+
+        def add_clipping(geom, label):
+            if geom is None or geom.is_empty:
+                return
+            clipping_polys.append(geom)
+            _unique_append(clipping_labels, label)
+
+        add_clipping(self.wall_union, "NonNavigableSpace")
+        add_clipping(self.object_union, "ObjectSpace")
+        transfer_polys = self._transfer_spaces_that_clip_general_spaces()
+        if transfer_polys:
+            clipping_polys.extend(transfer_polys)
+            _unique_append(clipping_labels, "TransferSpace")
+        return union_polygons(clipping_polys), clipping_labels
+
+    def _transfer_spaces_that_clip_general_spaces(self):
+        result = []
+        for cell in self.cells:
+            if cell["navigationType"] != "TransferSpace":
+                continue
+            category = self._cell_category(cell)
+            if category in {"Stair", "Ramp", "Elevator"} or cell["function"] == "VerticalConnectorEndpoint":
+                result.append(cell["polygon"])
+            elif category in {"Door", "Exit", "Window"} and self._opening_transfer_clips_general_space(cell):
+                result.append(cell["polygon"])
+        return result
+
+    def _opening_transfer_clips_general_space(self, cell):
+        attrs = cell["json"].get("attributes", {})
+        if attrs.get("hostWallName") or attrs.get("hostWallRef") or attrs.get("hostWallType"):
+            return True
+        if self.wall_union is None or self.wall_union.is_empty:
+            return False
+        try:
+            return cell["polygon"].buffer(BOUNDARY_CONTACT_TOLERANCE).intersects(self.wall_union)
+        except Exception:
+            return False
+
+    def _polygon_from_detected_space(self, space):
+        rings = space.get("polygon") or []
+        if not rings:
+            return None
+        try:
+            poly = Polygon(rings[0], rings[1:])
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+        except Exception:
+            return None
+        if poly.is_empty or poly.area <= MIN_WALL_PART_AREA:
+            return None
+        return poly
+
     def _create_transfer_spaces(self):
         door_index = 1
         exit_index = 1
+        window_index = 1
         transfer_polys = []
         for line in self.authoring_lines:
             tipo = line.get("type")
-            if not is_transfer_authoring_type(tipo):
+            if not is_opening_type(tipo):
                 continue
             poly = self._line_footprint(line)
             if poly is None:
@@ -959,15 +1121,25 @@ class IndoorModelBuilder:
                 if line.get(key) is not None:
                     attrs[key] = line.get(key)
             if is_exit_type(tipo):
-                cell_id = f"CS_{LEVEL_CODE}_EXIT_{exit_index:03d}"
+                cell_id = f"CS_{self.level_code}_EXIT_{exit_index:03d}"
                 exit_index += 1
                 function = "AnchorSpace"
                 category = "Exit"
+            elif tipo in WINDOW_TYPES:
+                cell_id = f"CS_{self.level_code}_WINDOW_{window_index:03d}"
+                window_index += 1
+                function = "ConnectionSpace"
+                category = "Window"
+                attrs.setdefault("windowType", "fixed")
+                attrs.setdefault("defaultTraversable", False)
+                attrs.setdefault("scenarioControllable", True)
+                attrs.setdefault("sillHeightM", 0.9)
             else:
-                cell_id = f"CS_{LEVEL_CODE}_DOOR_{door_index:03d}"
+                cell_id = f"CS_{self.level_code}_DOOR_{door_index:03d}"
                 door_index += 1
                 function = "ConnectionSpace"
                 category = "Door"
+                attrs.setdefault("defaultTraversable", True)
 
             attrs.update(
                 {
@@ -991,6 +1163,114 @@ class IndoorModelBuilder:
             transfer_polys.append(poly)
         self.transfer_union = union_polygons(transfer_polys)
 
+    def _create_connector_spaces(self):
+        connector_transfer_polys = []
+        coverage_polys = []
+        endpoint_index = 1
+        coverage_index = 1
+        level_endpoint_polys = []
+        for connector in self.snapshot.get("verticalConnectors", []):
+            for endpoint in connector.get("endpoints", []):
+                if (endpoint.get("level") or endpoint.get("level_id") or endpoint.get("levelId")) != self.level_id:
+                    continue
+                poly = polygon_from_coords(endpoint.get("footprint"))
+                if poly is not None:
+                    level_endpoint_polys.append(poly)
+        level_endpoint_union = union_polygons(level_endpoint_polys)
+        for connector in self.snapshot.get("verticalConnectors", []):
+            connector_type = connector.get("connectorType") or "Stair"
+            scope = connector.get("scope") or "same_level"
+            locomotion = _normalize_locomotion(connector.get("locomotionTypes"))
+            for endpoint in connector.get("endpoints", []):
+                if (endpoint.get("level") or endpoint.get("level_id") or endpoint.get("levelId")) != self.level_id:
+                    continue
+                poly = polygon_from_coords(endpoint.get("footprint"))
+                if poly is None:
+                    continue
+                endpoint_token = normalize_token(endpoint.get("id") or f"ENDPOINT_{endpoint_index:03d}")
+                cell_id = f"CS_{self.level_code}_{endpoint_token}"
+                attrs = dict(endpoint.get("attributes") or {})
+                attrs.update(
+                    {
+                        "connectorId": connector.get("id"),
+                        "connectorType": connector_type,
+                        "scope": scope,
+                        "entrySide": endpoint.get("entrySide"),
+                        "exitSide": endpoint.get("exitSide"),
+                        "openSides": endpoint.get("openSides") or [],
+                        "directionality": connector.get("directionality", "bidirectional"),
+                    }
+                )
+                if connector_type == "Stair":
+                    attrs.setdefault("requiresSteps", True)
+                    attrs.setdefault("wheelchairAccessible", False)
+                elif connector_type == "Ramp":
+                    attrs.setdefault("requiresSteps", False)
+                    attrs.setdefault("wheelchairAccessible", True)
+                    attrs.setdefault("slope", (connector.get("attributes") or {}).get("slope", 0.08))
+                elif connector_type == "Elevator":
+                    attrs.setdefault("requiresSteps", False)
+                    attrs.setdefault("wheelchairAccessible", True)
+                self._add_cell(
+                    cell_id=cell_id,
+                    name=endpoint.get("id") or cell_id,
+                    polygon=poly,
+                    navigation_type="TransferSpace",
+                    navigation_class="NavigableSpace",
+                    category=connector_type,
+                    function="VerticalConnectorEndpoint",
+                    locomotion=locomotion,
+                    source_refs=[],
+                    attributes=attrs,
+                )
+                self.connector_endpoint_cells[endpoint.get("id")] = cell_id
+                connector_transfer_polys.append(poly)
+                endpoint_index += 1
+
+                for coverage in attrs.get("sideCoverages", []):
+                    coverage_poly = polygon_from_coords(coverage)
+                    if coverage_poly is None:
+                        continue
+                    try:
+                        if self.wall_union is not None and not self.wall_union.is_empty:
+                            coverage_poly = clean_boolean_polygon(coverage_poly.difference(self.wall_union))
+                        if not level_endpoint_union.is_empty:
+                            coverage_poly = clean_boolean_polygon(coverage_poly.difference(level_endpoint_union))
+                        existing_coverage_union = union_polygons(coverage_polys)
+                        if not existing_coverage_union.is_empty:
+                            coverage_poly = clean_boolean_polygon(coverage_poly.difference(existing_coverage_union))
+                    except Exception:
+                        pass
+                    if coverage_poly is None or coverage_poly.is_empty:
+                        continue
+                    for coverage_part in iter_polygons(coverage_poly):
+                        coverage_id = f"CS_{self.level_code}_CONNCOVER_{coverage_index:03d}"
+                        self._add_cell(
+                            cell_id=coverage_id,
+                            name=f"{connector.get('id') or 'connector'} side coverage {coverage_index}",
+                            polygon=coverage_part,
+                            navigation_type="NonNavigableSpace",
+                            navigation_class="NonNavigableSpace",
+                            category="ConnectorSideCoverage",
+                            function="VerticalConnectorCoverage",
+                            locomotion=[],
+                            source_refs=[],
+                            attributes={
+                                "connectorId": connector.get("id"),
+                                "connectorType": connector_type,
+                                "derivationStatus": "connector_side_coverage",
+                            },
+                        )
+                        coverage_polys.append(coverage_part)
+                        coverage_index += 1
+
+        if connector_transfer_polys:
+            unions = [self.transfer_union, union_polygons(connector_transfer_polys)]
+            self.transfer_union = union_polygons(unions)
+        if coverage_polys:
+            unions = [self.object_union, union_polygons(coverage_polys)]
+            self.object_union = union_polygons(unions)
+
     def _create_wall_spaces(self):
         wall_indices = {}
         next_wall_index = 1
@@ -1002,7 +1282,7 @@ class IndoorModelBuilder:
             source_names = [line.get("name") for line in lines if line.get("name")]
 
             if category == "WallJunction":
-                base_id = f"CS_{LEVEL_CODE}_WALLJUNC_{junction_index:03d}"
+                base_id = f"CS_{self.level_code}_WALLJUNC_{junction_index:03d}"
                 cell_id = base_id
                 junction_index += 1
                 name = "Wall junction " + " + ".join(source_names) if source_names else base_id
@@ -1013,7 +1293,7 @@ class IndoorModelBuilder:
                     wall_indices[wall_key] = next_wall_index
                     next_wall_index += 1
                 wall_index = wall_indices[wall_key]
-                base_id = f"CS_{LEVEL_CODE}_WALLSEG_{wall_index:03d}"
+                base_id = f"CS_{self.level_code}_WALLSEG_{wall_index:03d}"
                 cell_id = base_id if wall["partCount"] == 1 else f"{base_id}_PART_{wall['partIndex']:03d}"
                 name = line.get("name") if wall["partCount"] == 1 else f"{line.get('name')} part {wall['partIndex']}"
 
@@ -1071,9 +1351,9 @@ class IndoorModelBuilder:
             "id": cell_id,
             "featureType": "CellSpace",
             "cellSpaceName": str(name or cell_id),
-            "level": LEVEL_ID,
+            "level": self.level_id,
             "poi": False,
-            "duality": ref(LAYER_ID, DUAL_ID, node_id),
+            "duality": self._ref(self.dual_id, node_id),
             "cellSpaceGeom": {"geometry2D": polygon_geojson(polygon)},
             "boundedBy": [],
             "navigationType": navigation_type,
@@ -1157,14 +1437,15 @@ class IndoorModelBuilder:
                 boundary_role = self._boundary_role(cell_a, cell_b)
                 if boundary_role is None:
                     continue
-                tolerance = BOUNDARY_CONTACT_TOLERANCE if boundary_role == "general_transfer_contact" else 0.0
+                tolerance = BOUNDARY_CONTACT_TOLERANCE if boundary_role.startswith("general_transfer_contact") else 0.0
                 line = contact_line(cell_a["polygon"], cell_b["polygon"], min_length=0.05, tolerance=tolerance)
                 if line is None:
                     continue
 
                 boundary_id = self._boundary_id(cell_a["id"], cell_b["id"], used_ids)
                 traversable = boundary_role == "general_transfer_contact"
-                is_anchor = traversable and self._transfer_cell(cell_a, cell_b).get("function") == "AnchorSpace"
+                transfer_cell = self._transfer_cell(cell_a, cell_b) if self._is_general_transfer_pair(cell_a, cell_b) else None
+                is_anchor = traversable and transfer_cell is not None and transfer_cell.get("function") == "AnchorSpace"
                 boundary_type = "NavigableBoundary" if traversable else "NonNavigableBoundary"
                 relationship_type = "connectivity" if traversable else "adjacency"
                 edge_id = (
@@ -1192,7 +1473,7 @@ class IndoorModelBuilder:
                     },
                 }
                 if edge_id is not None:
-                    boundary["duality"] = ref(LAYER_ID, DUAL_ID, edge_id)
+                    boundary["duality"] = self._ref(self.dual_id, edge_id)
                 if traversable:
                     boundary["navigableBoundaryFunction"] = "AnchorBoundary" if is_anchor else "ConnectionBoundary"
 
@@ -1208,6 +1489,8 @@ class IndoorModelBuilder:
                 )
                 for source_ref in source_refs:
                     self._add_source_boundary_ref(source_ref, boundary_id)
+        self._create_same_level_connector_boundaries(used_ids)
+        self._create_virtual_boundaries(used_ids)
         self._create_exterior_boundaries(used_ids)
 
     def _create_exterior_boundaries(self, used_ids):
@@ -1253,6 +1536,137 @@ class IndoorModelBuilder:
                 for source_ref in source_refs:
                     self._add_source_boundary_ref(source_ref, boundary_id)
 
+    def _create_virtual_boundaries(self, used_ids):
+        for record in self.snapshot.get("virtualBoundaries", []):
+            if (record.get("level") or self.level_id) != self.level_id:
+                continue
+            line = line_from_coords(record.get("line"))
+            if line is None:
+                continue
+            adjacent = self._cells_adjacent_to_virtual_line(line)
+            if len(adjacent) < 2:
+                continue
+            cell_a, cell_b = adjacent[0], adjacent[1]
+            base = f"CB_{self.level_code}_VIRTUAL_{normalize_token(record.get('id') or 'VB')}"
+            boundary_id = base
+            suffix = 2
+            while boundary_id in used_ids:
+                boundary_id = f"{base}_{suffix:02d}"
+                suffix += 1
+            used_ids.add(boundary_id)
+            edge_id = edge_id_for_boundary(boundary_id)
+            boundary = {
+                "id": boundary_id,
+                "featureType": "CellBoundary",
+                "isVirtual": True,
+                "duality": self._ref(self.dual_id, edge_id),
+                "cellBoundaryGeom": {"geometry2D": line_geojson(line)},
+                "navigationBoundaryType": "NavigableBoundary",
+                "navigableBoundaryFunction": "ConnectionBoundary",
+                "traversable": bool(record.get("traversable", True)),
+                "cellRefs": [cell_a["id"], cell_b["id"]],
+                "sourceFeatureRefs": [],
+                "attributes": {
+                    "derivationStatus": "manual_virtual_boundary"
+                    if not record.get("generatedAutomatically")
+                    else "automatic_virtual_boundary",
+                    "boundaryRole": "virtual_general_general_contact",
+                    "relationshipType": "connectivity",
+                    "virtualBoundaryRef": record.get("id"),
+                    "generatedAutomatically": bool(record.get("generatedAutomatically")),
+                    "generationReason": record.get("generationReason"),
+                },
+            }
+            self.boundaries.append(
+                {
+                    "json": boundary,
+                    "edgeId": edge_id,
+                    "cellA": cell_a,
+                    "cellB": cell_b,
+                    "traversable": boundary["traversable"],
+                    "isAnchor": False,
+                    "virtualBoundaryRef": record.get("id"),
+                }
+            )
+
+    def _create_same_level_connector_boundaries(self, used_ids):
+        cell_by_id = {cell["id"]: cell for cell in self.cells}
+        for connector in self.snapshot.get("verticalConnectors", []):
+            if (connector.get("scope") or "same_level") != "same_level":
+                continue
+            endpoints = [
+                endpoint
+                for endpoint in connector.get("endpoints", [])
+                if (endpoint.get("level") or endpoint.get("level_id") or endpoint.get("levelId")) == self.level_id
+            ]
+            if len(endpoints) < 2:
+                continue
+            endpoint_a, endpoint_b = endpoints[0], endpoints[-1]
+            cell_a = cell_by_id.get(self.connector_endpoint_cells.get(endpoint_a.get("id")))
+            cell_b = cell_by_id.get(self.connector_endpoint_cells.get(endpoint_b.get("id")))
+            if not cell_a or not cell_b or cell_a["id"] == cell_b["id"]:
+                continue
+            line = contact_line(cell_a["polygon"], cell_b["polygon"], min_length=0.05, tolerance=BOUNDARY_CONTACT_TOLERANCE)
+            if line is None:
+                continue
+            token = normalize_token(connector.get("id") or "CONNECTOR")
+            boundary_id = f"CB_{self.level_code}_VERT_{token}"
+            suffix = 2
+            while boundary_id in used_ids:
+                boundary_id = f"CB_{self.level_code}_VERT_{token}_{suffix:02d}"
+                suffix += 1
+            used_ids.add(boundary_id)
+            edge_id = f"E_{self.level_code}_VERT_{token}"
+            boundary = {
+                "id": boundary_id,
+                "featureType": "CellBoundary",
+                "isVirtual": False,
+                "duality": self._ref(self.dual_id, edge_id),
+                "cellBoundaryGeom": {"geometry2D": line_geojson(line)},
+                "navigationBoundaryType": "NavigableBoundary",
+                "navigableBoundaryFunction": "ConnectionBoundary",
+                "traversable": True,
+                "cellRefs": [cell_a["id"], cell_b["id"]],
+                "sourceFeatureRefs": [],
+                "attributes": {
+                    "derivationStatus": "same_level_connector_internal_boundary",
+                    "boundaryRole": "same_level_connector_internal_contact",
+                    "relationshipType": "vertical_connectivity",
+                    "connectorId": connector.get("id"),
+                    "connectorType": connector.get("connectorType"),
+                    "scope": connector.get("scope"),
+                    "locomotionTypes": _normalize_locomotion(connector.get("locomotionTypes")),
+                },
+            }
+            self.boundaries.append(
+                {
+                    "json": boundary,
+                    "edgeId": edge_id,
+                    "cellA": cell_a,
+                    "cellB": cell_b,
+                    "traversable": True,
+                    "isAnchor": False,
+                }
+            )
+            self.same_level_connector_boundary_by_connector[connector.get("id")] = boundary_id
+
+    def _cells_adjacent_to_virtual_line(self, line):
+        ranked = []
+        for cell in self.cells:
+            if cell["navigationType"] != "GeneralSpace":
+                continue
+            try:
+                shared = cell["polygon"].boundary.intersection(line.buffer(BOUNDARY_CONTACT_TOLERANCE, cap_style=2))
+                length = sum(part.length for part in extract_lines(shared))
+                if length <= 0:
+                    length = cell["polygon"].intersection(line.buffer(BOUNDARY_CONTACT_TOLERANCE, cap_style=2)).area
+            except Exception:
+                length = 0.0
+            if length > 0:
+                ranked.append((length, cell))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [cell for _, cell in ranked[:2]]
+
     def _exterior_boundary_role(self, cell):
         if cell["navigationType"] == "TransferSpace" and cell["function"] == "AnchorSpace":
             return "exterior_anchor"
@@ -1285,7 +1699,7 @@ class IndoorModelBuilder:
 
     def _exterior_boundary_id(self, cell_id, boundary_role, used_ids):
         role_token = "ANCHOR" if boundary_role == "exterior_anchor" else "OUTER"
-        base = f"CB_{LEVEL_CODE}_{role_token}_{compact_cell_token(cell_id)}"
+        base = f"CB_{self.level_code}_{role_token}_{compact_cell_token(cell_id)}"
         candidate = base
         suffix = 2
         while candidate in used_ids:
@@ -1308,14 +1722,14 @@ class IndoorModelBuilder:
         types = {cell_a["navigationType"], cell_b["navigationType"]}
         if traversable:
             return types == {"GeneralSpace", "TransferSpace"} or types == {"GeneralSpace"}
-
-        if types == {"GeneralSpace", "NonNavigableSpace"}:
-            return self._is_wall_segment_cell(cell_a) or self._is_wall_segment_cell(cell_b)
         return False
 
     def _boundary_role(self, cell_a, cell_b):
         types = {cell_a["navigationType"], cell_b["navigationType"]}
         if types == {"GeneralSpace", "TransferSpace"}:
+            transfer = self._transfer_cell(cell_a, cell_b)
+            if transfer["json"].get("attributes", {}).get("defaultTraversable") is False:
+                return "general_transfer_contact_blocked"
             return "general_transfer_contact"
         if "GeneralSpace" in types and any(self._is_non_navigable_cell(cell) for cell in (cell_a, cell_b)):
             return "general_non_navigable_contact"
@@ -1360,7 +1774,7 @@ class IndoorModelBuilder:
     def _boundary_id(self, cell_a_id, cell_b_id, used_ids):
         token_a = compact_cell_token(cell_a_id)
         token_b = compact_cell_token(cell_b_id)
-        base = f"CB_{LEVEL_CODE}_{token_a}_{token_b}"
+        base = f"CB_{self.level_code}_{token_a}_{token_b}"
         candidate = base
         suffix = 2
         while candidate in used_ids:
@@ -1373,13 +1787,13 @@ class IndoorModelBuilder:
         cell_by_id = {cell["id"]: cell for cell in self.cells}
         for cell in self.cells:
             point = node_point_for_polygon(cell["polygon"])
-            node_ref = ref(LAYER_ID, DUAL_ID, cell["nodeId"])
+            node_ref = self._ref(self.dual_id, cell["nodeId"])
             self.node_connects[cell["nodeId"]] = []
             self.nodes.append(
                 {
                     "id": cell["nodeId"],
                     "featureType": "Node",
-                    "duality": ref(LAYER_ID, PRIMAL_ID, cell["id"]),
+                    "duality": self._ref(self.primal_id, cell["id"]),
                     "geometry": point_geojson(point),
                     "connects": self.node_connects[cell["nodeId"]],
                     "attributes": {
@@ -1395,25 +1809,28 @@ class IndoorModelBuilder:
             cell_a = boundary["cellA"]
             cell_b = boundary["cellB"]
             edge_id = boundary["edgeId"]
-            edge_ref = ref(LAYER_ID, DUAL_ID, edge_id)
+            edge_ref = self._ref(self.dual_id, edge_id)
             _unique_append(self.node_connects[cell_a["nodeId"]], edge_ref)
             _unique_append(self.node_connects[cell_b["nodeId"]], edge_ref)
             node_a = node_point_for_polygon(cell_a["polygon"])
             node_b = node_point_for_polygon(cell_b["polygon"])
-            transfer = self._transfer_cell(cell_a, cell_b) if boundary["traversable"] else None
+            transfer = self._transfer_cell(cell_a, cell_b) if boundary["traversable"] and self._is_general_transfer_pair(cell_a, cell_b) else None
             distance = node_a.distance(node_b)
+            relationship_type = boundary["json"].get("attributes", {}).get("relationshipType")
+            if not relationship_type:
+                relationship_type = "connectivity" if boundary["traversable"] else "adjacency"
 
             edge = {
                 "id": edge_id,
                 "featureType": "Edge",
-                "duality": ref(LAYER_ID, PRIMAL_ID, boundary["json"]["id"]),
+                "duality": self._ref(self.primal_id, boundary["json"]["id"]),
                 "weight": round(float(distance if distance > 0 else 1.0), 6),
                 "geometry": line_geojson(line_from_coords([(node_a.x, node_a.y), (node_b.x, node_b.y)])),
                 "connects": [
-                    ref(LAYER_ID, DUAL_ID, cell_a["nodeId"]),
-                    ref(LAYER_ID, DUAL_ID, cell_b["nodeId"]),
+                    self._ref(self.dual_id, cell_a["nodeId"]),
+                    self._ref(self.dual_id, cell_b["nodeId"]),
                 ],
-                "relationshipType": "connectivity" if boundary["traversable"] else "adjacency",
+                "relationshipType": relationship_type,
                 "traversable": boundary["traversable"],
                 "boundaryRef": boundary["json"]["id"],
                 "attributes": {
@@ -1441,16 +1858,75 @@ class IndoorModelBuilder:
                 edge["attributes"]["transferSpaceRef"] = transfer["id"]
                 if edge.get("widthM") is not None:
                     edge["attributes"]["widthM"] = edge["widthM"]
+            if boundary.get("virtualBoundaryRef"):
+                edge["attributes"]["virtualBoundaryRef"] = boundary["virtualBoundaryRef"]
+                edge["attributes"]["sourceBoundaryType"] = "VirtualBoundary"
+            if relationship_type == "vertical_connectivity":
+                boundary_attrs = boundary["json"].get("attributes", {})
+                edge["locomotionTypes"] = boundary_attrs.get("locomotionTypes") or ["Walking"]
+                for key in ("connectorId", "connectorType", "scope"):
+                    if boundary_attrs.get(key) is not None:
+                        edge["attributes"][key] = boundary_attrs[key]
 
             self.edges.append(edge)
 
+        self._create_same_level_connector_edges()
+
         for cell in cell_by_id.values():
-            cell["json"]["duality"] = ref(LAYER_ID, DUAL_ID, cell["nodeId"])
+            cell["json"]["duality"] = self._ref(self.dual_id, cell["nodeId"])
+
+    def _create_same_level_connector_edges(self):
+        for connector in self.snapshot.get("verticalConnectors", []):
+            if self.same_level_connector_boundary_by_connector.get(connector.get("id")):
+                continue
+            endpoints = [
+                endpoint
+                for endpoint in connector.get("endpoints", [])
+                if (endpoint.get("level") or endpoint.get("level_id") or endpoint.get("levelId")) == self.level_id
+            ]
+            if len(endpoints) < 2:
+                continue
+            endpoint_a, endpoint_b = endpoints[0], endpoints[-1]
+            cell_a_id = self.connector_endpoint_cells.get(endpoint_a.get("id"))
+            cell_b_id = self.connector_endpoint_cells.get(endpoint_b.get("id"))
+            if not cell_a_id or not cell_b_id or cell_a_id == cell_b_id:
+                continue
+            cell_by_id = {cell["id"]: cell for cell in self.cells}
+            cell_a = cell_by_id.get(cell_a_id)
+            cell_b = cell_by_id.get(cell_b_id)
+            if not cell_a or not cell_b:
+                continue
+            node_a = node_point_for_polygon(cell_a["polygon"])
+            node_b = node_point_for_polygon(cell_b["polygon"])
+            edge_id = f"E_{self.level_code}_VERT_{normalize_token(connector.get('id') or 'CONNECTOR')}"
+            edge_ref = self._ref(self.dual_id, edge_id)
+            _unique_append(self.node_connects[cell_a["nodeId"]], edge_ref)
+            _unique_append(self.node_connects[cell_b["nodeId"]], edge_ref)
+            self.edges.append(
+                {
+                    "id": edge_id,
+                    "featureType": "Edge",
+                    "weight": round(float(node_a.distance(node_b) or 1.0), 6),
+                    "geometry": line_geojson(line_from_coords([(node_a.x, node_a.y), (node_b.x, node_b.y)])),
+                    "connects": [
+                        self._ref(self.dual_id, cell_a["nodeId"]),
+                        self._ref(self.dual_id, cell_b["nodeId"]),
+                    ],
+                    "relationshipType": "vertical_connectivity",
+                    "traversable": True,
+                    "locomotionTypes": _normalize_locomotion(connector.get("locomotionTypes")),
+                    "attributes": {
+                        "connectorId": connector.get("id"),
+                        "connectorType": connector.get("connectorType"),
+                        "scope": connector.get("scope"),
+                    },
+                }
+            )
 
     def _sync_cell_boundary_refs(self):
         cell_by_id = {cell["id"]: cell for cell in self.cells}
         for boundary in self.boundaries:
-            boundary_ref = ref(LAYER_ID, PRIMAL_ID, boundary["json"]["id"])
+            boundary_ref = self._ref(self.primal_id, boundary["json"]["id"])
             for cell_id in boundary["json"].get("cellRefs", []):
                 cell = cell_by_id.get(cell_id)
                 if cell:
@@ -1484,32 +1960,38 @@ class IndoorModelBuilder:
             },
             "levels": [
                 {
-                    "id": LEVEL_ID,
-                    "name": "Ground floor",
-                    "levelIndex": 0,
-                    "floorZ": 0.0,
-                    "ceilingZ": 3.0,
-                    "heightM": 3.0,
+                    "id": self.level_id,
+                    "name": self.level.get("name") or f"Level {self.level_index:02d}",
+                    "order": self.level.get("order", self.level_index),
+                    "levelIndex": self.level_index,
+                    "elevationM": self.level.get("elevationM", self.level.get("floorZ", 0.0)),
+                    "floorZ": self.level.get("floorZ", self.level.get("elevationM", 0.0)),
+                    "ceilingZ": self.level.get(
+                        "ceilingZ",
+                        float(self.level.get("elevationM", self.level.get("floorZ", 0.0)) or 0.0)
+                        + float(self.level.get("heightM", 3.0) or 3.0),
+                    ),
+                    "heightM": self.level.get("heightM", 3.0),
                     "spatialExtent2D": level_extent,
                 }
             ],
             "layers": [
                 {
-                    "id": LAYER_ID,
+                    "id": self.layer_id,
                     "featureType": "ThematicLayer",
                     "semanticExtension": True,
                     "theme": "Physical",
-                    "name": "Physical navigation layer - level 00",
-                    "level": LEVEL_ID,
+                    "name": f"Physical navigation layer - {self.level_id}",
+                    "level": self.level_id,
                     "primalSpace": {
-                        "id": PRIMAL_ID,
+                        "id": self.primal_id,
                         "featureType": "PrimalSpaceLayer",
                         "creationDatetime": self.now,
                         "cellSpaceMember": cell_json,
                         "cellBoundaryMember": boundary_json,
                     },
                     "dualSpace": {
-                        "id": DUAL_ID,
+                        "id": self.dual_id,
                         "featureType": "DualSpaceLayer",
                         "creationDatetime": self.now,
                         "isLogical": False,
@@ -1523,6 +2005,7 @@ class IndoorModelBuilder:
                 }
             ],
             "layerConnections": [],
+            "verticalConnectors": self.snapshot.get("verticalConnectors", []),
             "sourceFeatures": self.source_features,
             "indoorDataModel": {
                 "modelName": "indoor_data_model",
@@ -1534,6 +2017,8 @@ class IndoorModelBuilder:
         }
 
     def _level_extent(self):
+        if self.level.get("spatialExtent2D"):
+            return self.level["spatialExtent2D"]
         width = float(self.snapshot.get("canvas", {}).get("width", 0) or 0)
         height = float(self.snapshot.get("canvas", {}).get("height", 0) or 0)
         if width > 0 and height > 0:
@@ -1555,5 +2040,225 @@ class IndoorModelBuilder:
         return polygon_geojson(extent)
 
 
+class MultiLevelIndoorModelBuilder:
+    def __init__(self, snapshot, edge_mode=EDGE_MODE_NAVIGATION):
+        self.snapshot = snapshot
+        self.edge_mode = edge_mode
+        self.now = snapshot.get("createdAt") or _now_utc()
+
+    def build(self):
+        levels = self._levels()
+        subdocuments = []
+        for level in levels:
+            level_snapshot = self._snapshot_for_level(level)
+            try:
+                subdocuments.append(IndoorModelBuilder(level_snapshot, edge_mode=self.edge_mode).build())
+            except ValueError:
+                # Empty levels are still represented in levels[], but they do not
+                # create a ThematicLayer until they contain exportable cells.
+                continue
+        if not subdocuments:
+            raise ValueError("No hay CellSpaces exportables para indoor_model.json.")
+
+        first = subdocuments[0]
+        root = {
+            "id": "IF_" + normalize_token(self.snapshot.get("modelName") or "indoor_model", "BUILDING"),
+            "featureType": "IndoorFeatures",
+            "metadata": dict(first.get("metadata") or {}),
+            "crs": self.snapshot.get("crs") or first.get("crs"),
+            "levels": [self._normalize_level(level) for level in levels],
+            "layers": [],
+            "layerConnections": [],
+            "verticalConnectors": self.snapshot.get("verticalConnectors", []),
+            "sourceFeatures": [],
+            "indoorDataModel": first.get("indoorDataModel"),
+        }
+        root["metadata"]["modifiedAt"] = self.now
+        for document in subdocuments:
+            root["layers"].extend(document.get("layers", []))
+            root["sourceFeatures"].extend(document.get("sourceFeatures", []))
+        root["layerConnections"].extend(self._inter_level_connections())
+        return root
+
+    def _levels(self):
+        levels = [dict(level) for level in (self.snapshot.get("levels") or [])]
+        if not levels:
+            levels = [
+                {
+                    "id": LEVEL_ID,
+                    "name": "Ground floor",
+                    "levelIndex": 0,
+                    "order": 0,
+                    "floorZ": 0.0,
+                    "ceilingZ": 3.0,
+                    "heightM": 3.0,
+                }
+            ]
+        return sorted(levels, key=lambda level: (level.get("order", level.get("levelIndex", 0)), level.get("id", "")))
+
+    def _snapshot_for_level(self, level):
+        level_id = level.get("id") or LEVEL_ID
+        copy_snapshot = dict(self.snapshot)
+        copy_snapshot["levels"] = [level]
+        copy_snapshot["authoringElements"] = [
+            line
+            for line in self.snapshot.get("authoringElements", [])
+            if (line.get("level") or level_id) == level_id
+        ]
+        copy_snapshot["spaceFootprints"] = [
+            space
+            for space in self.snapshot.get("spaceFootprints", [])
+            if (space.get("level") or level_id) == level_id
+        ]
+        copy_snapshot["detectedSpaces"] = [
+            space
+            for space in self.snapshot.get("detectedSpaces", [])
+            if (space.get("level") or level_id) == level_id
+        ]
+        copy_snapshot["virtualBoundaries"] = [
+            boundary
+            for boundary in self.snapshot.get("virtualBoundaries", [])
+            if (boundary.get("level") or level_id) == level_id
+        ]
+        copy_snapshot["verticalConnectors"] = [
+            connector
+            for connector in self.snapshot.get("verticalConnectors", [])
+            if any((endpoint.get("level") or endpoint.get("levelId")) == level_id for endpoint in connector.get("endpoints", []))
+        ]
+        return copy_snapshot
+
+    def _normalize_level(self, level):
+        normalized = dict(level)
+        normalized.setdefault("levelIndex", normalized.get("order", 0))
+        normalized.setdefault("order", normalized.get("levelIndex", 0))
+        normalized.setdefault("elevationM", normalized.get("floorZ", 0.0))
+        normalized.setdefault("floorZ", normalized.get("elevationM", 0.0))
+        normalized.setdefault("heightM", 3.0)
+        normalized.setdefault("ceilingZ", float(normalized.get("floorZ") or 0.0) + float(normalized.get("heightM") or 3.0))
+        return normalized
+
+    def _inter_level_connections(self):
+        connections = []
+        for connector in self.snapshot.get("verticalConnectors", []):
+            endpoints = sorted(connector.get("endpoints", []), key=lambda endpoint: endpoint.get("level") or "")
+            if len(endpoints) < 2:
+                continue
+            for index, endpoint_a in enumerate(endpoints[:-1], start=1):
+                endpoint_b = endpoints[index]
+                level_a = endpoint_a.get("level")
+                level_b = endpoint_b.get("level")
+                if not level_a or not level_b or level_a == level_b:
+                    continue
+                code_a = self._level_code(level_a)
+                code_b = self._level_code(level_b)
+                cell_a = f"CS_{code_a}_{normalize_token(endpoint_a.get('id') or 'ENDPOINT')}"
+                cell_b = f"CS_{code_b}_{normalize_token(endpoint_b.get('id') or 'ENDPOINT')}"
+                node_a = node_id_for_cell(cell_a)
+                node_b = node_id_for_cell(cell_b)
+                connections.append(
+                    {
+                        "id": f"ILC_{normalize_token(connector.get('id') or 'CONNECTOR')}_{index:03d}",
+                        "featureType": "InterLayerConnection",
+                        "connectedLayers": [f"TL_NAV_{code_a}", f"TL_NAV_{code_b}"],
+                        "connectedNodes": [
+                            ref(f"TL_NAV_{code_a}", f"DS_NAV_{code_a}", node_a),
+                            ref(f"TL_NAV_{code_b}", f"DS_NAV_{code_b}", node_b),
+                        ],
+                        "connectedCells": [
+                            ref(f"TL_NAV_{code_a}", f"PS_NAV_{code_a}", cell_a),
+                            ref(f"TL_NAV_{code_b}", f"PS_NAV_{code_b}", cell_b),
+                        ],
+                        "typeOfTopoExpression": "OTHERS",
+                        "comment": f"{connector.get('connectorType')} inter-level connector {connector.get('id')}",
+                        "attributes": {
+                            "relationshipType": "vertical_connectivity",
+                            "connectorId": connector.get("id"),
+                            "connectorType": connector.get("connectorType"),
+                            "directionality": connector.get("directionality", "bidirectional"),
+                            "locomotionTypes": _normalize_locomotion(connector.get("locomotionTypes")),
+                        },
+                    }
+                )
+        return connections
+
+    def _level_code(self, level_id):
+        token = str(level_id or LEVEL_ID).upper()
+        if token.startswith("LEVEL_"):
+            token = token[len("LEVEL_") :]
+        if token.isdigit():
+            return f"L{int(token):02d}"
+        return normalize_token(token, "L00")
+
+
+def _requires_multilevel_builder(snapshot):
+    levels = snapshot.get("levels") or []
+    if len(levels) > 1:
+        return True
+    return bool(snapshot.get("verticalConnectors"))
+
+
 def build_indoor_model(snapshot, edge_mode=EDGE_MODE_NAVIGATION):
+    if _requires_multilevel_builder(snapshot):
+        return MultiLevelIndoorModelBuilder(snapshot, edge_mode=edge_mode).build()
     return IndoorModelBuilder(snapshot, edge_mode=edge_mode).build()
+
+
+def derive_wall_mass_from_snapshot(snapshot, level_id=None):
+    """Return final wall geometries for one level without building full CellSpaces."""
+    level_snapshot = _single_level_snapshot(snapshot, level_id)
+    builder = IndoorModelBuilder(level_snapshot)
+    builder._prepare_authoring_lines()
+    builder._derive_wall_parts()
+    return {
+        "levelId": builder.level_id,
+        "wallParts": [
+            {
+                "category": part.get("category"),
+                "polygon": part.get("polygon"),
+                "lines": part.get("lines") or ([part.get("line")] if part.get("line") else []),
+            }
+            for part in builder.wall_parts
+        ],
+        "wallUnion": builder.wall_union,
+        "solidWallUnion": builder.solid_wall_union,
+    }
+
+
+def _single_level_snapshot(snapshot, level_id=None):
+    levels = [dict(level) for level in (snapshot.get("levels") or [])]
+    if level_id is None:
+        level = levels[0] if levels else {"id": LEVEL_ID, "name": "Ground floor", "levelIndex": 0, "order": 0}
+        level_id = level.get("id") or LEVEL_ID
+    else:
+        level = next((level for level in levels if level.get("id") == level_id), None)
+        if level is None:
+            level = {"id": level_id, "name": str(level_id), "levelIndex": 0, "order": 0}
+
+    copy_snapshot = dict(snapshot)
+    copy_snapshot["levels"] = [level]
+    copy_snapshot["authoringElements"] = [
+        line
+        for line in snapshot.get("authoringElements", [])
+        if (line.get("level") or level_id) == level_id
+    ]
+    copy_snapshot["spaceFootprints"] = [
+        space
+        for space in snapshot.get("spaceFootprints", [])
+        if (space.get("level") or level_id) == level_id
+    ]
+    copy_snapshot["detectedSpaces"] = [
+        space
+        for space in snapshot.get("detectedSpaces", [])
+        if (space.get("level") or level_id) == level_id
+    ]
+    copy_snapshot["virtualBoundaries"] = [
+        boundary
+        for boundary in snapshot.get("virtualBoundaries", [])
+        if (boundary.get("level") or level_id) == level_id
+    ]
+    copy_snapshot["verticalConnectors"] = [
+        connector
+        for connector in snapshot.get("verticalConnectors", [])
+        if any((endpoint.get("level") or endpoint.get("levelId")) == level_id for endpoint in connector.get("endpoints", []))
+    ]
+    return copy_snapshot

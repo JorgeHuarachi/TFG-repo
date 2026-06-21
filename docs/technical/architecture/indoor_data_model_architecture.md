@@ -1652,3 +1652,92 @@ La arquitectura puede considerarse estable cuando:
 - el visualizador puede mostrar CellSpaces, CellBoundaries, Nodes y Edges;
 - EvacEngine puede derivar una ruta desde el dual layer y scenario model;
 - las decisiones sobre puertas, muros, boundaries y ObjectSpaces están implementadas o claramente marcadas como pendientes.
+---
+
+## 31. Ampliacion implementada en SpatialEngine
+
+La autoria de SpatialEngine queda separada en `src/indoor_authoring`:
+
+- `BuildingAuthoringState` mantiene edificio, niveles, nivel activo, configuracion y contadores.
+- `LevelAuthoringState` mantiene centerlines de muros, puertas, salidas, ventanas, VirtualBoundary manuales y automaticas, columnas, espacios manuales y espacios detectados.
+- `SnapshotHistory` implementa undo/redo por snapshots profundos para operaciones completas.
+- `detect_spaces()` y `detect_all_levels()` regeneran solo espacios detectados, VirtualBoundary automaticas y reportes de deteccion.
+- `VerticalConnector` modela `Stair`, `Ramp` y `Elevator` con endpoints, scope `same_level`/`inter_level`, sides abiertos y locomotion.
+
+Los aliases legacy (`muros`, `hitos`, `hitos_bounds`, `propiedades_zonas`) se reconstruyen desde el estado tipado para mantener exportadores transicionales.
+
+## 32. Niveles y capas
+
+Cada nivel exportado genera una ThematicLayer fisica:
+
+```text
+LEVEL_00 -> TL_NAV_L00 / PS_NAV_L00 / DS_NAV_L00
+LEVEL_01 -> TL_NAV_L01 / PS_NAV_L01 / DS_NAV_L01
+```
+
+Los conectores inter-planta se serializan como `InterLayerConnection` en `layerConnections`, con metadata de `vertical_connectivity`.
+
+## 33. Locomotion
+
+`Step` deja de ser locomotion principal. Los valores oficiales del perfil son:
+
+```text
+Walking
+Rolling
+Flying
+Unspecified
+```
+
+Escaleras y desniveles se expresan con atributos:
+
+```text
+requiresSteps
+stepCount
+wheelchairAccessible
+slope
+riseM
+runM
+maxGradient
+```
+
+## 34. Ventanas, columnas y VirtualBoundary
+
+Las ventanas se exportan como:
+
+```text
+CellSpace / TransferSpace
+category: Window
+function: ConnectionSpace
+defaultTraversable: false
+scenarioControllable: true
+```
+
+Las columnas se exportan como:
+
+```text
+CellSpace / ObjectSpace
+category: Column
+traversable: false
+```
+
+Una `VirtualBoundary` siempre es una `CellBoundary` lineal 1D con `isVirtual: true`; no se exporta como `CellSpace`, `TransferSpace` ni geometria 2D con grosor. Las vistas de grafo pueden crear un nodo logico `VirtualTransferNode` en su punto medio.
+
+## 35. Vistas derivadas de grafo
+
+El `DualSpaceLayer` sigue siendo la fuente de verdad. `src/indoor_data_model/graph_views.py` deriva:
+
+- `base_dual`;
+- `space_adjacency`;
+- `space_connectivity` / `space_transfer_connectivity`;
+- `room_adjacency`;
+- `room_to_room_accessibility` / `room_to_room`;
+- `room_transfer_connectivity` como alias legacy de `space_connectivity`;
+- `transfer_to_transfer`;
+- `door_to_door`;
+- `vertical_connectivity`.
+
+`space_connectivity` opera sobre `GeneralSpace` ya divididos e inserta `TransferSpace` y `VirtualTransferNode` como nodos intermedios. `room_adjacency` y `room_to_room_accessibility` operan sobre habitaciones logicas, agrupando `GeneralSpace` separados por `VirtualBoundary`. `vertical_connectivity` combina edges same-level de conectores y `InterLayerConnection` de `layerConnections[]`.
+
+Las vistas derivadas no son capas IndoorGML separadas. Por tanto, no se conectan entre si mediante `InterLayerConnection`. La relacion entre una vista y otra debe entenderse como lineage de grafo: `space_connectivity` deriva del dual base, `room_adjacency` agrega `GeneralSpace` en habitaciones logicas, `room_to_room_accessibility` filtra `room_adjacency`, y `transfer_to_transfer`/`door_to_door` especializan conexiones dentro de cada `GeneralSpace`. Si se quiere persistir esa relacion, conviene usar metadata propia tipo `graphMappings` o `viewLineage`, con relaciones como `derived_from`, `aggregates`, `filters` o `specializes`.
+
+Estas vistas pueden visualizarse con `tools/visualize_indoor_model.py --graph-view ...` sin contaminar el core del `indoor_model.json`.
