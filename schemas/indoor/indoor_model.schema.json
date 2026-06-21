@@ -32,6 +32,11 @@
           "items": { "$ref": "#/$defs/InterLayerConnection" },
           "uniqueItems": true
         },
+        "verticalConnectors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/VerticalConnector" },
+          "uniqueItems": true
+        },
         "sourceFeatures": {
           "type": "array",
           "items": { "$ref": "#/$defs/SourceFeature" },
@@ -99,6 +104,8 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "levelIndex": { "type": "integer" },
+        "order": { "type": "integer" },
+        "elevationM": { "type": "number" },
         "floorZ": { "type": "number" },
         "ceilingZ": { "type": "number" },
         "heightM": { "type": "number" },
@@ -336,6 +343,8 @@
         },
         "typeOfTopoExpression": { "type": "string", "enum": ["CONTAINS", "OVERLAPS", "EQUALS", "WITHIN", "CROSSES", "OTHERS"] },
         "comment": { "type": "string" }
+        ,
+        "attributes": { "$ref": "#/$defs/FreeformAttributes" }
       },
       "required": ["id", "featureType", "connectedLayers", "typeOfTopoExpression"],
       "additionalProperties": false
@@ -405,7 +414,65 @@
     },
     "LocomotionType": {
       "type": "string",
-      "enum": ["Flying", "Rolling", "Walking", "Unspecified", "Step"]
+      "enum": ["Flying", "Rolling", "Walking", "Unspecified"]
+    },
+    "ConnectorEndpoint": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "level": { "type": "string" },
+        "footprint": {
+          "oneOf": [
+            { "$ref": "#/$defs/Polygon" },
+            {
+              "type": "array",
+              "minItems": 4,
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 3,
+                "items": { "type": "number" }
+              }
+            }
+          ]
+        },
+        "entrySide": { "type": "string", "enum": ["north", "south", "east", "west"] },
+        "exitSide": { "type": "string", "enum": ["north", "south", "east", "west"] },
+        "openSides": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["north", "south", "east", "west"] },
+          "uniqueItems": true
+        },
+        "attributes": { "$ref": "#/$defs/FreeformAttributes" }
+      },
+      "required": ["id", "level", "footprint"],
+      "additionalProperties": false
+    },
+    "VerticalConnector": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "connectorType": { "type": "string", "enum": ["Stair", "Ramp", "Elevator"] },
+        "scope": { "type": "string", "enum": ["same_level", "inter_level"] },
+        "endpoints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConnectorEndpoint" },
+          "minItems": 1
+        },
+        "sourceLevel": { "type": "string" },
+        "targetLevel": { "type": "string" },
+        "fromElevationM": { "type": "number" },
+        "toElevationM": { "type": "number" },
+        "directionality": { "type": "string" },
+        "locomotionTypes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LocomotionType" },
+          "uniqueItems": true
+        },
+        "attributes": { "$ref": "#/$defs/FreeformAttributes" }
+      },
+      "required": ["id", "connectorType", "scope", "endpoints", "sourceLevel"],
+      "additionalProperties": false
     },
     "Point": {
       "type": "object",

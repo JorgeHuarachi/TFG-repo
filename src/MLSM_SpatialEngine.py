@@ -17,19 +17,23 @@ Características principales:
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.path import Path
 import numpy as np
 import json
 import datetime
 import os
 import subprocess
 import sys
-from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint, LineString as ShapelyLineString
+from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint, LineString as ShapelyLineString, box as ShapelyBox
+from shapely.geometry.polygon import orient as orient_polygon
 from shapely.ops import unary_union
-from indoor_data_model import build_indoor_model
+from indoor_data_model import build_indoor_model, derive_wall_mass_from_snapshot
+from indoor_authoring import BuildingAuthoringState, SnapshotHistory, detect_spaces
+from indoor_authoring.connectors import create_elevator_connector, create_tile_chain_connector
 
 # --- CONFIGURACIÓN ---
-ANCHO = 10
-ALTO = 6
+ANCHO = 30
+ALTO = 20
 
 class DiseñadorConectado:
     LINEAR_AUTHORING_TYPES = {
@@ -38,6 +42,7 @@ class DiseñadorConectado:
         "puerta_simple",
         "puerta_doble",
         "salida",
+        "ventana",
         "frontera_virtual",
     }
     POLYGON_AUTHORING_TYPES = {"hitos"}
@@ -52,6 +57,11 @@ class DiseñadorConectado:
         self.agentes = []      # Spawns iniciales para la simulación
         self.hitos = {}        # Diccionario de nodos matemáticos (Nombre -> Coordenadas X,Y)
         self.hitos_bounds = [] # Guarda el polígono delimitador exacto de cada nodo para el grafo 
+        self.authoring_state = BuildingAuthoringState(
+            project_id=nombre_archivo,
+            building_id=f"BUILDING_{nombre_archivo}",
+        )
+        self.history = SnapshotHistory(self.authoring_state)
         # Aclaracion conceptual: self.muros contiene elementos de autoria lineal
         # (muros, puertas, salidas y fronteras virtuales), no solo muros solidos.
         # self.hitos_bounds contiene footprints/poligonos de espacios, no boundaries MLSM/IndoorGML.
@@ -70,11 +80,12 @@ class DiseñadorConectado:
             'muro_interior': 0.15,          # Tabiques (delgados)
             'puerta_simple': 0.15,
             'puerta_doble': 0.15,
+            'ventana': 0.15,
             'salida': 0.20,                 # La salida ahora tiene grosor
             'frontera_virtual': 0.05        # Fina: Actúa como puente topológico, no como obstáculo físico
         }
         
-        self.ANCHOS_PUERTA = {'puerta_simple': 0.9, 'puerta_doble': 1.8, 'salida': 2.0}  
+        self.ANCHOS_PUERTA = {'puerta_simple': 0.9, 'puerta_doble': 1.8, 'salida': 2.0, 'ventana': 1.2}
         self.RADIO_AGENTE = 0.25 # 50cm de diámetro por defecto
 
         # --- MÁQUINA DE ESTADOS (STATE MACHINE) ---
@@ -87,6 +98,19 @@ class DiseñadorConectado:
         self.vector_muro_temp = None     # Guarda el vector direccional del muro donde se pegará la puerta
         self.host_wall_metadata_temp = None
         self.authoring_line_metadata = {}
+        self.connector_scope = "same_level"
+        self.connector_entry_side = None
+        self.connector_exit_side = None
+        self.connector_side_focus = "entry"
+        self.connector_tile_size = 1.0
+        self.connector_tiles_temp = []
+        self.connector_candidate_tile = None
+        self.auto_visual_checks_on_export = os.environ.get("MLSM_AUTO_VISUAL_CHECKS", "").lower() in {
+            "1",
+            "true",
+            "yes",
+            "si",
+        }
 
         # --- MEMORIA SEMÁNTICA (IndoorGML) ---
         self.propiedades_zonas = {}                     # Diccionario: Nombre -> {Atributos IndoorGML}
@@ -136,11 +160,41 @@ class DiseñadorConectado:
     def get_agent_spawns(self):
         return self.agentes
 
+    def _sync_legacy_from_authoring_state(self):
+        level = self.authoring_state.active_level
+        self.muros = level.legacy_lines()
+        self.hitos = level.legacy_space_centroids()
+        self.hitos_bounds = level.legacy_space_bounds()
+        self.propiedades_zonas = level.legacy_attributes()
+        self.cont_hab = self.authoring_state.counters.get("space", self.cont_hab)
+        self.cont_muro = self.authoring_state.counters.get("wall", self.cont_muro)
+        self.cont_puerta = self.authoring_state.counters.get("opening", self.cont_puerta)
+
+    def _checkpoint(self, label):
+        self.history.checkpoint(label, self.authoring_state)
+
+    def _restore_authoring_state(self, state):
+        if state is None:
+            print("No hay operacion disponible en historial.")
+            return False
+        self.authoring_state = state
+        self._sync_legacy_from_authoring_state()
+        self.limpiar_temporales_autoria(limpiar_poligono=True)
+        return True
+
+    def _next_counter(self, name):
+        value = self.authoring_state.next_counter(name)
+        self._sync_legacy_from_authoring_state()
+        return value
+
     def is_wall_type(self, tipo):
         return tipo in ["muro_exterior", "muro_interior"]
 
     def is_door_type(self, tipo):
         return tipo in ["puerta_simple", "puerta_doble"]
+
+    def is_window_type(self, tipo):
+        return tipo in ["ventana", "ventana_practicable"]
 
     def is_exit_type(self, tipo):
         return tipo == "salida"
@@ -149,13 +203,13 @@ class DiseñadorConectado:
         return tipo == "frontera_virtual"
 
     def is_opening_type(self, tipo):
-        return self.is_door_type(tipo) or self.is_exit_type(tipo) or tipo in ["ventana", "ventana_practicable"]
+        return self.is_door_type(tipo) or self.is_exit_type(tipo) or self.is_window_type(tipo)
 
     def is_solid_wall_type(self, tipo):
         return self.is_wall_type(tipo)
 
     def is_transfer_authoring_type(self, tipo):
-        return self.is_door_type(tipo) or self.is_exit_type(tipo)
+        return self.is_door_type(tipo) or self.is_exit_type(tipo) or self.is_window_type(tipo)
 
     def is_non_solid_topology_type(self, tipo):
         return self.is_virtual_boundary_type(tipo)
@@ -166,12 +220,22 @@ class DiseñadorConectado:
             self.puntos_zona_temp = []
         self.vector_muro_temp = None
         self.host_wall_metadata_temp = None
+        self.connector_candidate_tile = None
         self.poly_temp.set_visible(False)
         self.linea_temp.set_data([], [])
+        if limpiar_poligono:
+            self.connector_tiles_temp = []
+            self.connector_entry_side = None
+            self.connector_exit_side = None
+            self.connector_side_focus = "entry"
 
     def cambiar_modo(self, nuevo_modo):
         self.modo = nuevo_modo
         self.limpiar_temporales_autoria(limpiar_poligono=True)
+        if nuevo_modo in {"escalera", "rampa", "ascensor"}:
+            self.connector_entry_side = None
+            self.connector_exit_side = None
+            self.connector_side_focus = "entry"
 
     def configurar_lienzo(self):
         self.ax.set_xlim(-1, self.ancho)
@@ -188,8 +252,10 @@ class DiseñadorConectado:
         color = 'black'
         tit = ""
         # --- AQUÍ AÑADIMOS LOS NUEVOS MODOS ---
-        if self.modo.startswith('muro') or self.modo in ['puerta_simple', 'puerta_doble', 'salida', 'frontera_virtual']:
+        if self.modo.startswith('muro') or self.modo in ['puerta_simple', 'puerta_doble', 'salida', 'ventana', 'frontera_virtual']:
             tit = f"MODO: {self.modo.replace('_', ' ').upper()}"
+        elif self.modo in ['columna', 'escalera', 'rampa', 'ascensor']:
+            tit = f"MODO: {self.modo.upper()}"
         elif self.modo == 'agentes':
             tit = "MODO: AGENTES"
             color = 'blue'
@@ -201,13 +267,18 @@ class DiseñadorConectado:
         # Mostramos también el atributo IndoorGML actual
         estado_cad = f"Ortogonal: {'ON' if self.ortogonal else 'OFF'}"
         estado_indoor = f"Locomoción: {self.locomotion_actual}"
-        self.ax.set_title(f"{tit} | {estado_cad} | {estado_indoor}", color=color, fontweight='bold', fontsize=10)
+        level = self.authoring_state.active_level
+        detectado = "detected" if level.detected_spaces and not level.geometry_dirty else "dirty"
+        estado_nivel = f"Nivel: {level.id} ({detectado})"
+        estado_connector = f"Scope: {self.connector_scope} lado:{self.connector_side_focus} entry:{self.connector_entry_side or '-'} exit:{self.connector_exit_side or '-'}"
+        self.ax.set_title(f"{tit} | {estado_nivel} | {estado_cad} | {estado_indoor} | {estado_connector}", color=color, fontweight='bold', fontsize=10)
         self.texto_instrucciones.set_text(self.texto_ayuda_teclas())
 
     def texto_ayuda_teclas(self):
         return (
-            "m exterior | n interior | p puerta | d doble | s salida | v virtual | h espacio | a agente | o ortogonal\n"
-            "1 walk/roll | 2 walk | 3 step | z undo | e export | x debug all adjacency | esc cancelar | ?/f1 ayuda"
+            "m exterior | n interior | p puerta | d doble | s salida | w ventana | v virtual | h espacio | c columna\n"
+            "f detectar | t escalera | r rampa | l ascensor | b same/inter | tab entry/exit | flechas lado | backspace tile\n"
+            "[ ] nivel | + nivel | 1 walk/roll | 2 walk | z undo | y redo | e export | x all adjacency | esc cancelar | ?/f1 ayuda"
         )
 
     def dibujar_ayuda_teclas(self):
@@ -240,6 +311,380 @@ class DiseñadorConectado:
         
         return [p1, p2, p3, p4]
 
+    def _is_opening_marker(self, nombre, attrs):
+        categoria = str(attrs.get("categoria") or attrs.get("category") or "").lower()
+        nom_lower = str(nombre).lower()
+        return (
+            categoria in {"door", "window", "transition", "virtualboundary"}
+            or "puerta" in nom_lower
+            or "salida" in nom_lower
+            or "ventana" in nom_lower
+            or "frontera" in nom_lower
+        )
+
+    def _opening_style(self, nombre, attrs):
+        categoria = str(attrs.get("categoria") or attrs.get("category") or "").lower()
+        nom_lower = str(nombre).lower()
+        if categoria == "window" or "ventana" in nom_lower:
+            return "#5dade2", "W", "--"
+        if categoria == "transition" or "salida" in nom_lower:
+            return "#e74c3c", "S", "-"
+        if categoria == "virtualboundary" or "frontera" in nom_lower:
+            return "#00bcd4", "V", ":"
+        return "#f39c12", "D", "-"
+
+    def _draw_opening_marker(self, nombre, coords, attrs):
+        if not coords or len(coords) < 3:
+            return
+        color, etiqueta, estilo = self._opening_style(nombre, attrs)
+        poly = patches.Polygon(
+            coords,
+            closed=True,
+            facecolor=color,
+            edgecolor="black",
+            linewidth=1.2,
+            linestyle=estilo,
+            alpha=0.82,
+            zorder=7,
+        )
+        self.ax.add_patch(poly)
+        try:
+            shp = ShapelyPolygon(coords)
+            cx, cy = shp.representative_point().x, shp.representative_point().y
+        except Exception:
+            cx = sum(p[0] for p in coords) / len(coords)
+            cy = sum(p[1] for p in coords) / len(coords)
+        self.ax.text(
+            cx,
+            cy,
+            etiqueta,
+            ha="center",
+            va="center",
+            fontsize=7,
+            fontweight="bold",
+            color="black",
+            bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=0.2),
+            zorder=8,
+        )
+
+    def _connector_candidate_is_valid(self, tile):
+        if tile is None:
+            return False
+        tile_key = self._connector_tile_key(tile)
+        if any(self._connector_tile_key(existing) == tile_key for existing in self.connector_tiles_temp):
+            return False
+        if not self.connector_tiles_temp:
+            return True
+        last_key = self._connector_tile_key(self.connector_tiles_temp[-1])
+        return abs(tile_key[0] - last_key[0]) + abs(tile_key[1] - last_key[1]) == 1
+
+    def _connector_tile_key(self, tile):
+        size = self.connector_tile_size
+        return (int(round(float(tile[0]) / size)), int(round(float(tile[1]) / size)))
+
+    def _snap_connector_tile_origin(self, x, y):
+        size = self.connector_tile_size
+        snapped_x = float(np.floor(float(x) / size + 0.5) * size)
+        snapped_y = float(np.floor(float(y) / size + 0.5) * size)
+        return (snapped_x, snapped_y)
+
+    def _normalized_connector_tiles(self, tiles):
+        return [self._snap_connector_tile_origin(tile[0], tile[1]) for tile in tiles]
+
+    def _connector_chain_error(self, tiles):
+        seen = set()
+        previous = None
+        for index, tile in enumerate(tiles, start=1):
+            key = self._connector_tile_key(tile)
+            if key in seen:
+                return f"tile {index} duplica otro tile"
+            seen.add(key)
+            if previous is not None:
+                distance = abs(key[0] - previous[0]) + abs(key[1] - previous[1])
+                if distance != 1:
+                    return f"tile {index} no comparte lado con el tile {index - 1}"
+            previous = key
+        return None
+
+    def _side_vector(self, side):
+        return {
+            "west": (-1, 0),
+            "east": (1, 0),
+            "north": (0, -1),
+            "south": (0, 1),
+        }.get(side, (0, 0))
+
+    def _side_midpoint(self, tile, side):
+        x, y = tile
+        size = self.connector_tile_size
+        return {
+            "west": (x, y + size / 2),
+            "east": (x + size, y + size / 2),
+            "north": (x + size / 2, y),
+            "south": (x + size / 2, y + size),
+        }.get(side, (x + size / 2, y + size / 2))
+
+    def _draw_rect_side_marker(self, bounds, side, label, color):
+        if not side:
+            return
+        minx, miny, maxx, maxy = bounds
+        midpoint_by_side = {
+            "west": (minx, (miny + maxy) / 2),
+            "east": (maxx, (miny + maxy) / 2),
+            "north": ((minx + maxx) / 2, miny),
+            "south": ((minx + maxx) / 2, maxy),
+        }
+        mx, my = midpoint_by_side.get(side, ((minx + maxx) / 2, (miny + maxy) / 2))
+        vx, vy = self._side_vector(side)
+        inward = label == "ENTRY"
+        if inward:
+            start = (mx + vx * 0.45, my + vy * 0.45)
+            end = (mx - vx * 0.12, my - vy * 0.12)
+        else:
+            start = (mx - vx * 0.12, my - vy * 0.12)
+            end = (mx + vx * 0.45, my + vy * 0.45)
+        self.ax.annotate(
+            "",
+            xy=end,
+            xytext=start,
+            arrowprops=dict(arrowstyle="->", color=color, lw=2.0),
+            zorder=9,
+        )
+        self.ax.text(
+            start[0],
+            start[1],
+            label,
+            ha="center",
+            va="center",
+            fontsize=5.5,
+            fontweight="bold",
+            color=color,
+            bbox=dict(facecolor="white", edgecolor=color, alpha=0.85, pad=0.15),
+            zorder=10,
+        )
+
+    def _draw_connector_side_marker(self, tile, side, label, color):
+        if not side:
+            return
+        x, y = tile
+        size = self.connector_tile_size
+        self._draw_rect_side_marker((x, y, x + size, y + size), side, label, color)
+
+    def _connector_footprint_from_tiles(self, tile_origins, tile_size=None):
+        tile_size = float(tile_size or self.connector_tile_size)
+        tiles = [ShapelyBox(x, y, x + tile_size, y + tile_size) for x, y in tile_origins]
+        return unary_union(tiles) if tiles else None
+
+    def _connector_side_coverages_for_footprint(self, footprint, open_sides):
+        if footprint is None or footprint.is_empty:
+            return []
+        minx, miny, maxx, maxy = footprint.bounds
+        thickness = 0.12
+        side_boxes = {
+            "north": ShapelyBox(minx, miny - thickness, maxx, miny),
+            "south": ShapelyBox(minx, maxy, maxx, maxy + thickness),
+            "east": ShapelyBox(maxx, miny, maxx + thickness, maxy),
+            "west": ShapelyBox(minx - thickness, miny, minx, maxy),
+        }
+        pieces = [geom for side, geom in side_boxes.items() if side not in set(open_sides or [])]
+        if not pieces:
+            return []
+        try:
+            coverage = unary_union(pieces).difference(footprint)
+        except Exception:
+            coverage = unary_union(pieces)
+        return self._iter_visual_polygons(coverage)
+
+    def _draw_connector_coverages(self, coverages, zorder=5):
+        for coverage in coverages:
+            self._add_polygon_with_holes(
+                coverage,
+                facecolor="#7f8c8d",
+                edgecolor="#34495e",
+                linewidth=1.0,
+                alpha=0.30,
+                hatch="///",
+                zorder=zorder,
+            )
+
+    def _draw_connector_draft_coverage(self):
+        if self.modo not in {"escalera", "rampa"}:
+            return
+        tiles = list(self.connector_tiles_temp)
+        if self.connector_candidate_tile is not None and self._connector_candidate_is_valid(self.connector_candidate_tile):
+            tiles.append(self.connector_candidate_tile)
+        tiles = self._normalized_connector_tiles(tiles)
+        if not tiles:
+            return
+        footprint = self._connector_footprint_from_tiles(tiles)
+        open_sides = [side for side in (self.connector_entry_side, self.connector_exit_side) if side]
+        self._draw_connector_coverages(self._connector_side_coverages_for_footprint(footprint, open_sides), zorder=2.8)
+
+    def _draw_committed_connectors(self, level_id):
+        for connector in self.authoring_state.vertical_connectors:
+            endpoints = [endpoint for endpoint in connector.endpoints if endpoint.level_id == level_id]
+            if not endpoints:
+                continue
+            attrs = getattr(connector, "attributes", {}) or {}
+            tile_size = float(attrs.get("tileSizeM", self.connector_tile_size) or self.connector_tile_size)
+            tile_origins = attrs.get("tileOrigins") or []
+            if connector.connector_type == "Stair":
+                color = "#8e44ad"
+                short_label = "STAIR"
+            elif connector.connector_type == "Ramp":
+                color = "#16a085"
+                short_label = "RAMP"
+            else:
+                color = "#2e86c1"
+                short_label = "ELEV"
+            for index, origin in enumerate(tile_origins, start=1):
+                tx, ty = float(origin[0]), float(origin[1])
+                self.ax.add_patch(
+                    patches.Rectangle(
+                        (tx, ty),
+                        tile_size,
+                        tile_size,
+                        facecolor=color,
+                        edgecolor=color,
+                        alpha=0.22,
+                        linewidth=1.0,
+                        zorder=5,
+                    )
+                )
+                self.ax.text(
+                    tx + tile_size / 2,
+                    ty + tile_size / 2,
+                    str(index),
+                    ha="center",
+                    va="center",
+                    fontsize=6,
+                    fontweight="bold",
+                    color=color,
+                    zorder=6,
+                )
+            for endpoint in endpoints:
+                if not endpoint.footprint or len(endpoint.footprint) < 3:
+                    continue
+                coverage_polys = []
+                for coverage in endpoint.attributes.get("sideCoverages", []):
+                    try:
+                        coverage_polys.append(ShapelyPolygon(coverage))
+                    except Exception:
+                        continue
+                self._draw_connector_coverages(coverage_polys, zorder=4.8)
+                self.ax.add_patch(
+                    patches.Polygon(
+                        endpoint.footprint,
+                        closed=True,
+                        facecolor=color,
+                        edgecolor=color,
+                        alpha=0.18,
+                        linewidth=1.8,
+                        zorder=5,
+                    )
+                )
+                try:
+                    shp = ShapelyPolygon(endpoint.footprint)
+                    cx, cy = shp.representative_point().x, shp.representative_point().y
+                    bounds = shp.bounds
+                except Exception:
+                    cx = sum(p[0] for p in endpoint.footprint) / len(endpoint.footprint)
+                    cy = sum(p[1] for p in endpoint.footprint) / len(endpoint.footprint)
+                    xs = [p[0] for p in endpoint.footprint]
+                    ys = [p[1] for p in endpoint.footprint]
+                    bounds = (min(xs), min(ys), max(xs), max(ys))
+                self.ax.text(
+                    cx,
+                    cy,
+                    short_label,
+                    ha="center",
+                    va="center",
+                    fontsize=6,
+                    fontweight="bold",
+                    color=color,
+                    bbox=dict(facecolor="white", edgecolor=color, alpha=0.78, pad=0.15),
+                    zorder=8,
+                )
+                self._draw_rect_side_marker(bounds, endpoint.entry_side, "ENTRY", "#1e8449")
+                self._draw_rect_side_marker(bounds, endpoint.exit_side, "EXIT", "#922b21")
+
+    def _iter_visual_polygons(self, geometry):
+        if geometry is None or geometry.is_empty:
+            return []
+        geoms = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
+        return [geom for geom in geoms if isinstance(geom, ShapelyPolygon) and not geom.is_empty and geom.area > 1e-9]
+
+    def _add_polygon_with_holes(self, polygon, **style):
+        polygon = orient_polygon(polygon, sign=1.0)
+        vertices = []
+        codes = []
+
+        def add_ring(coords):
+            ring = list(coords)
+            if len(ring) < 4:
+                return
+            vertices.extend(ring)
+            codes.extend([Path.MOVETO] + [Path.LINETO] * (len(ring) - 2) + [Path.CLOSEPOLY])
+
+        add_ring(polygon.exterior.coords)
+        for interior in polygon.interiors:
+            add_ring(interior.coords)
+        if vertices:
+            self.ax.add_patch(patches.PathPatch(Path(vertices, codes), **style))
+
+    def _visual_wall_mass(self):
+        try:
+            result = derive_wall_mass_from_snapshot(self.build_authoring_snapshot(), self.authoring_state.active_level_id)
+            wall_union = result.get("wallUnion")
+            if wall_union is not None and not wall_union.is_empty:
+                return wall_union
+        except Exception:
+            pass
+
+        wall_polys = []
+        opening_polys = []
+        for id_muro, tipo, x1, y1, x2, y2 in self.muros:
+            if self.is_solid_wall_type(tipo):
+                line = ShapelyLineString([(x1, y1), (x2, y2)])
+                if line.is_empty or line.length <= 0:
+                    continue
+                thickness = self.GROSORES.get(tipo, 0.15)
+                try:
+                    # Square caps are visual-only: they fill wall junctions so the UI does
+                    # not show false triangular slivers at corners or T contacts.
+                    wall_polys.append(line.buffer(thickness / 2.0, cap_style=3, join_style=2))
+                except Exception:
+                    esquinas = self.calcular_esquinas_muro(x1, y1, x2, y2, thickness)
+                    if esquinas:
+                        wall_polys.append(ShapelyPolygon(esquinas))
+            elif self.is_opening_type(tipo):
+                thickness = self.GROSORES.get(tipo, 0.15)
+                esquinas = self.calcular_esquinas_muro(x1, y1, x2, y2, thickness)
+                if esquinas:
+                    opening_polys.append(ShapelyPolygon(esquinas))
+
+        if not wall_polys:
+            return None
+        try:
+            wall_mass = unary_union(wall_polys)
+            if opening_polys:
+                wall_mass = wall_mass.difference(unary_union(opening_polys))
+            return wall_mass.buffer(0)
+        except Exception:
+            return unary_union(wall_polys)
+
+    def _draw_visual_wall_mass(self):
+        wall_mass = self._visual_wall_mass()
+        for polygon in self._iter_visual_polygons(wall_mass):
+            self._add_polygon_with_holes(
+                polygon,
+                facecolor="#9aa0a6",
+                edgecolor="black",
+                linewidth=1.1,
+                alpha=0.92,
+                zorder=2,
+            )
+
     def dibujar_interfaz(self, error=None):
         self.ax.clear()
         self.configurar_lienzo()
@@ -249,13 +694,74 @@ class DiseñadorConectado:
         self.ax.add_line(self.linea_temp)
         self.ax.add_patch(plt.Rectangle((-0.5, -0.5), self.ancho, self.alto, fill=False, edgecolor='black', linewidth=2))
 
+        level = self.authoring_state.active_level
+        for space in level.detected_spaces:
+            if space.polygon:
+                exterior = space.polygon[0]
+                poly = patches.Polygon(exterior, closed=True, facecolor='#7fb3d5', edgecolor='#2874a6', alpha=0.18, zorder=1)
+                self.ax.add_patch(poly)
+                try:
+                    shp = ShapelyPolygon(exterior)
+                    self.ax.text(shp.representative_point().x, shp.representative_point().y, space.id, ha='center', va='center', fontsize=5, color='#1b4f72')
+                except Exception:
+                    pass
+
+        self._draw_connector_draft_coverage()
+
+        for idx, (tile_x, tile_y) in enumerate(self.connector_tiles_temp, start=1):
+            self.ax.add_patch(
+                patches.Rectangle(
+                    (tile_x, tile_y),
+                    self.connector_tile_size,
+                    self.connector_tile_size,
+                    facecolor='#a3e4d7',
+                    edgecolor='#117a65',
+                    alpha=0.45,
+                    zorder=3,
+                )
+            )
+            self.ax.text(
+                tile_x + self.connector_tile_size / 2,
+                tile_y + self.connector_tile_size / 2,
+                str(idx),
+                ha="center",
+                va="center",
+                fontsize=7,
+                fontweight="bold",
+                color="#0b5345",
+                zorder=4,
+            )
+        if self.connector_tiles_temp:
+            self._draw_connector_side_marker(self.connector_tiles_temp[0], self.connector_entry_side, "ENTRY", "#1e8449")
+            self._draw_connector_side_marker(self.connector_tiles_temp[-1], self.connector_exit_side, "EXIT", "#922b21")
+        if self.modo in {"escalera", "rampa"} and self.connector_candidate_tile is not None:
+            valid_candidate = self._connector_candidate_is_valid(self.connector_candidate_tile)
+            color = "#27ae60" if valid_candidate else "#c0392b"
+            self.ax.add_patch(
+                patches.Rectangle(
+                    self.connector_candidate_tile,
+                    self.connector_tile_size,
+                    self.connector_tile_size,
+                    facecolor=color,
+                    edgecolor=color,
+                    linestyle="--",
+                    linewidth=1.6,
+                    alpha=0.18 if valid_candidate else 0.28,
+                    zorder=3,
+                )
+            )
 
         # Hitos
         # Hitos (Ahora Poligonales)
         for item in self.hitos_bounds:
             if len(item) == 2: # Nos aseguramos de que sea el nuevo formato (nombre, esquinas)
                 nombre, coords = item[0], item[1]
+                prop = getattr(self, 'propiedades_zonas', {}).get(nombre, {})
+                if self._is_opening_marker(nombre, prop):
+                    continue
                 if "Salida" in nombre: c = 'red'
+                elif "Ventana" in nombre: c = 'skyblue'
+                elif "Columna" in nombre: c = 'gold'
                 elif "Puerta" in nombre: c = 'orange'
                 else: c = 'green'
                 
@@ -265,29 +771,28 @@ class DiseñadorConectado:
                 cx, cy = self.hitos[nombre]
 
                 # --- NUEVO: Extraer iniciales de la locomoción (W, R, S) ---
-                prop = getattr(self, 'propiedades_zonas', {}).get(nombre, {})
                 locs = prop.get("locomotion", [])
                 etiqueta_loc = "+".join([l[0] for l in locs]) # Convierte ["Walking", "Rolling"] en "W+R"
                 texto_final = f"{nombre}\n[{etiqueta_loc}]" if etiqueta_loc else nombre
 
                 self.ax.text(cx, cy, nombre, ha='center', va='center', fontsize=6, fontweight='bold', bbox=dict(facecolor='white', alpha=0.5, pad=0.1))
 
-        # Dibujar muros con grosor paramétrico y directriz visible
+        # Dibujar muros como una masa visual unificada para evitar picos falsos en junctions.
+        self._draw_visual_wall_mass()
         for muro in self.muros:
             id_muro, tipo, x1, y1, x2, y2 = muro
             
             if tipo in ['muro_exterior', 'muro_interior']:
-                grosor = self.GROSORES[tipo]
-                esquinas = self.calcular_esquinas_muro(x1, y1, x2, y2, grosor)
-                
-                if esquinas:
-                    # 1. Dibujar el Polígono sólido (Grosor real BIM)
-                    color = 'dimgray' if tipo == 'muro_exterior' else 'silver'
-                    poligono = patches.Polygon(esquinas, closed=True, facecolor=color, edgecolor='black', alpha=0.9, zorder=2)
-                    self.ax.add_patch(poligono)
-                    
-                    # 2. Dibujar la Directriz (Línea central roja punteada)
-                    self.ax.plot([x1, x2], [y1, y2], color='red', linestyle='-', linewidth=1.0, zorder=3)
+                self.ax.plot([x1, x2], [y1, y2], color='red', linestyle='-', linewidth=1.0, zorder=3)
+
+        for item in self.hitos_bounds:
+            if len(item) == 2:
+                nombre, coords = item[0], item[1]
+                prop = getattr(self, 'propiedades_zonas', {}).get(nombre, {})
+                if self._is_opening_marker(nombre, prop):
+                    self._draw_opening_marker(nombre, coords, prop)
+
+        self._draw_committed_connectors(level.id)
 
         # Agentes
         if self.agentes:
@@ -415,6 +920,7 @@ class DiseñadorConectado:
                 es_puerta = self.is_transfer_authoring_type(self.modo) or self.is_virtual_boundary_type(self.modo)
                 nombre = f"{self.modo.capitalize()}_{self.cont_puerta if es_puerta else self.cont_muro}"
                 
+                self._checkpoint(f"add_{self.modo}")
                 self.muros.append((nombre, self.modo, x_ini, y_ini, x, y))
                 
                 if es_puerta:
@@ -432,18 +938,119 @@ class DiseñadorConectado:
                     
                     # Semántica IndoorGML
                     clase_indoor = "AnchorSpace" if self.modo == 'salida' else "TransferSpace"
-                    categoria = "VirtualBoundary" if self.modo == 'frontera_virtual' else ("Transition" if self.modo == 'salida' else "Door")
-                    self.propiedades_zonas[nombre] = {"clase_indoor": clase_indoor, "categoria": categoria, "locomotion": self.locomotion_actual}
+                    categoria = "VirtualBoundary" if self.modo == 'frontera_virtual' else ("Window" if self.modo == 'ventana' else ("Transition" if self.modo == 'salida' else "Door"))
+                    attrs = {"clase_indoor": clase_indoor, "categoria": categoria, "locomotion": self.locomotion_actual, "footprint": esquinas_puerta}
+                    if self.modo == 'ventana':
+                        attrs.update({
+                            "windowType": "fixed",
+                            "defaultTraversable": False,
+                            "scenarioControllable": True,
+                            "sillHeightM": 0.9,
+                        })
+                    attrs.update(self.authoring_line_metadata.get(nombre, {}))
+                    self.propiedades_zonas[nombre] = attrs
+                    self.authoring_state.add_line_to_active(
+                        nombre,
+                        self.modo,
+                        (x_ini, y_ini),
+                        (x, y),
+                        thickness_m=grosor_puerta,
+                        width_m=self.ANCHOS_PUERTA.get(self.modo),
+                        attributes=attrs,
+                    )
 
                     self.cont_puerta += 1
+                    self.authoring_state.counters["opening"] = self.cont_puerta
                     self.puntos_temp = None
                     self.vector_muro_temp = None
                     self.host_wall_metadata_temp = None
                 else:
+                    self.authoring_state.add_line_to_active(
+                        nombre,
+                        self.modo,
+                        (x_ini, y_ini),
+                        (x, y),
+                        thickness_m=self.GROSORES.get(self.modo),
+                        attributes={"locomotion": self.locomotion_actual},
+                    )
                     self.cont_muro += 1
+                    self.authoring_state.counters["wall"] = self.cont_muro
                     self.puntos_temp = (x, y) 
 
+                self._sync_legacy_from_authoring_state()
                 self.poly_temp.set_visible(False); self.linea_temp.set_data([], [])
+                self.dibujar_interfaz()
+
+        elif self.modo in {'escalera', 'rampa'} and event.button == 1:
+            tile = self._snap_connector_tile_origin(event.xdata, event.ydata)
+            if not self._connector_candidate_is_valid(tile):
+                self.connector_candidate_tile = tile
+                self.dibujar_interfaz("ERROR: tile no contiguo")
+                print("El siguiente tile de escalera/rampa debe compartir lado con el anterior y no repetirse.")
+                return
+            self.connector_tiles_temp.append(tile)
+            self.connector_candidate_tile = None
+            print(f"Tile {len(self.connector_tiles_temp)} anadido. Pulsa Enter para cerrar el conector.")
+            self.dibujar_interfaz()
+
+        elif self.modo == 'ascensor' and event.button == 1:
+            if self.puntos_temp is None:
+                self.puntos_temp = (x, y)
+            else:
+                if not self.connector_entry_side or not self.connector_exit_side:
+                    self.dibujar_interfaz("ERROR: falta entry/exit")
+                    print("Selecciona entry y exit con flechas antes de cerrar el ascensor.")
+                    return
+                x0, y0 = self.puntos_temp
+                coords = [(x0, y0), (x, y0), (x, y), (x0, y)]
+                served = [self.authoring_state.active_level_id]
+                if self.connector_scope == "inter_level":
+                    levels = self.authoring_state.sorted_levels()
+                    idx = next((i for i, level in enumerate(levels) if level.id == self.authoring_state.active_level_id), 0)
+                    if idx + 1 < len(levels):
+                        served.append(levels[idx + 1].id)
+                self._checkpoint("add_elevator")
+                create_elevator_connector(
+                    self.authoring_state,
+                    coords,
+                    served,
+                    entry_side=self.connector_entry_side,
+                    exit_side=self.connector_exit_side,
+                )
+                self.limpiar_temporales_autoria(limpiar_poligono=True)
+                self._sync_legacy_from_authoring_state()
+                self.dibujar_interfaz()
+
+        elif self.modo == 'columna' and event.button == 1:
+            if self.puntos_temp is None:
+                self.puntos_temp = (x, y)
+            else:
+                x0, y0 = self.puntos_temp
+                if x == x0 or y == y0:
+                    self.dibujar_interfaz("ERROR: columna necesita area")
+                    return
+                self._checkpoint("add_column")
+                coords = [(x0, y0), (x, y0), (x, y), (x0, y)]
+                nombre = f"Columna_{self.authoring_state.next_counter('column')}"
+                poly_shapely = ShapelyPolygon(coords)
+                attrs = {
+                    "clase_indoor": "ObjectSpace",
+                    "navigationType": "ObjectSpace",
+                    "navigationClass": "NonNavigableSpace",
+                    "categoria": "Column",
+                    "category": "Column",
+                    "function": "Column",
+                    "traversable": False,
+                }
+                self.authoring_state.add_area_to_active(
+                    nombre,
+                    "columna",
+                    coords,
+                    centroid=(poly_shapely.centroid.x, poly_shapely.centroid.y),
+                    attributes=attrs,
+                )
+                self.limpiar_temporales_autoria(limpiar_poligono=True)
+                self._sync_legacy_from_authoring_state()
                 self.dibujar_interfaz()
 
         # 1. GENERACIÓN DE HITOS POLIGONALES (Múltiples Clics)
@@ -451,6 +1058,7 @@ class DiseñadorConectado:
             # Si el clic actual coincide exactamente con el último clic (Doble Clic), cerramos la forma
             if len(self.puntos_zona_temp) > 0 and x == self.puntos_zona_temp[-1][0] and y == self.puntos_zona_temp[-1][1]:
                 if len(self.puntos_zona_temp) >= 3:
+                    self._checkpoint("add_manual_space")
                     nombre_final = f"Habitacion_{self.cont_hab}"
                     self.cont_hab += 1
                     # MAGIA SHAPELY: Usamos el polígono para calcular el Centro de Masa (Centroide)
@@ -467,6 +1075,15 @@ class DiseñadorConectado:
                         "categoria": "Room",
                         "locomotion": self.locomotion_actual # Herencia del estado global
                     }
+                    self.authoring_state.add_area_to_active(
+                        nombre_final,
+                        "hitos",
+                        list(self.puntos_zona_temp),
+                        centroid=(cx, cy),
+                        attributes=self.propiedades_zonas[nombre_final],
+                    )
+                    self.authoring_state.counters["space"] = self.cont_hab
+                    self._sync_legacy_from_authoring_state()
                 # Resetear memoria temporal para la próxima habitación
                 self.puntos_zona_temp = []
                 self.poly_temp.set_visible(False)
@@ -547,6 +1164,16 @@ class DiseñadorConectado:
                     self.poly_temp.set_color('green')
                 else:
                     self.poly_temp.set_visible(False)
+        elif self.modo in {'columna', 'ascensor'} and self.puntos_temp is not None:
+            x0, y0 = self.puntos_temp
+            coords = [(x0, y0), (x_curr, y0), (x_curr, y_curr), (x0, y_curr)]
+            self.poly_temp.set_xy(coords)
+            self.poly_temp.set_visible(True)
+            self.poly_temp.set_color('gold' if self.modo == 'columna' else '#76d7c4')
+        elif self.modo in {'escalera', 'rampa'}:
+            self.connector_candidate_tile = self._snap_connector_tile_origin(event.xdata, event.ydata)
+            self.poly_temp.set_visible(False)
+            self.linea_temp.set_data([], [])
             
         # Pide a Matplotlib que redibuje el frame lo antes posible
         self.fig.canvas.draw_idle()
@@ -559,32 +1186,118 @@ class DiseñadorConectado:
         elif key == 'n': self.cambiar_modo('muro_interior')
         elif key == 'p': self.cambiar_modo('puerta_simple')
         elif key == 'd': self.cambiar_modo('puerta_doble')
+        elif key == 'w': self.cambiar_modo('ventana')
         elif key == 'o': self.ortogonal = not self.ortogonal # Alternar Diagonal
         # --- MODOS CLÁSICOS ---
         elif key == 'a': self.cambiar_modo('agentes')
         elif key == 'h': self.cambiar_modo('hitos')
+        elif key == 'c': self.cambiar_modo('columna')
         elif key == 's': self.cambiar_modo('salida')
         elif key == 'v': self.cambiar_modo('frontera_virtual') # NUEVA
+        elif key == 't': self.cambiar_modo('escalera')
+        elif key == 'r': self.cambiar_modo('rampa')
+        elif key == 'l': self.cambiar_modo('ascensor')
+        elif key == 'b':
+            self.connector_scope = "inter_level" if self.connector_scope == "same_level" else "same_level"
+            print(f"Scope de conector: {self.connector_scope}")
+        elif key == 'tab':
+            self.connector_side_focus = "exit" if self.connector_side_focus == "entry" else "entry"
+            print(f"Editando lado {self.connector_side_focus}.")
+        elif key in {'left', 'right', 'up', 'down'}:
+            side = {'left': 'west', 'right': 'east', 'up': 'north', 'down': 'south'}[key]
+            if self.connector_side_focus == "entry":
+                self.connector_entry_side = side
+                self.connector_side_focus = "exit"
+                print(f"Entry side seleccionado: {side}")
+            else:
+                self.connector_exit_side = side
+                print(f"Exit side seleccionado: {side}")
+        elif key in {'backspace', 'delete'} and self.modo in {'escalera', 'rampa'}:
+            if self.connector_tiles_temp:
+                removed = self.connector_tiles_temp.pop()
+                print(f"Tile eliminado: {removed}")
+            else:
+                print("No hay tiles de conector que borrar.")
         # --- NUEVO: Etiquetas de Locomoción IndoorGML ---
         elif key == '1': self.locomotion_actual = ["Walking", "Rolling"] # Accesible universal
         elif key == '2': self.locomotion_actual = ["Walking"]            # No accesible (ej. terreno irregular)
-        elif key == '3': self.locomotion_actual = ["Walking", "Step"]    # Escaleras / Desniveles
+        elif key == '3': self.locomotion_actual = ["Walking"]
         # --- LÓGICA DE DESHACER (ACTUALIZADA) ---
         elif key == 'z':
-            if self.modo in self.LINEAR_AUTHORING_TYPES:
-                if self.muros:
-                    borrado = self.muros.pop()
-                    if (self.is_transfer_authoring_type(borrado[1]) or self.is_virtual_boundary_type(borrado[1])) and borrado[0] in self.hitos:
-                        del self.hitos[borrado[0]]
-                        self.hitos_bounds = [b for b in self.hitos_bounds if b[0] != borrado[0]]
-                        self.propiedades_zonas.pop(borrado[0], None)
-                        self.authoring_line_metadata.pop(borrado[0], None)
-            elif self.modo == 'agentes' and self.agentes: self.agentes.pop()
-            elif self.modo == 'hitos' and self.hitos_bounds:
-                borrado = self.hitos_bounds.pop()
-                if borrado[0] in self.hitos: del self.hitos[borrado[0]]
-                self.propiedades_zonas.pop(borrado[0], None)
+            self._restore_authoring_state(self.history.undo(self.authoring_state))
+        elif key == 'y':
+            self._restore_authoring_state(self.history.redo(self.authoring_state))
+
+        elif key in {'+', '='}:
+            self._checkpoint("add_level")
+            level = self.authoring_state.add_level()
+            self._sync_legacy_from_authoring_state()
+            print(f"Nivel anadido y activo: {level.id}")
+        elif key == '[':
+            level = self.authoring_state.previous_level()
             self.limpiar_temporales_autoria(limpiar_poligono=True)
+            self._sync_legacy_from_authoring_state()
+            print(f"Nivel activo: {level.id}")
+        elif key == ']':
+            level = self.authoring_state.next_level()
+            self.limpiar_temporales_autoria(limpiar_poligono=True)
+            self._sync_legacy_from_authoring_state()
+            print(f"Nivel activo: {level.id}")
+
+        elif key == 'f':
+            self._checkpoint("detect_spaces")
+            result = detect_spaces(self.authoring_state, self.authoring_state.active_level_id)
+            self._sync_legacy_from_authoring_state()
+            if result.ok:
+                print(f"{result.report.get('detectedSpaces', 0)} espacios detectados en {result.level_id}; autoria manual preservada.")
+            else:
+                print(f"ERROR deteccion {result.level_id}: {result.report.get('message')}")
+
+        elif key in {'enter', 'return'} and self.modo in {'escalera', 'rampa'}:
+            if not self.connector_entry_side or not self.connector_exit_side:
+                self.dibujar_interfaz("ERROR: falta entry/exit")
+                print("Selecciona entry y exit con flechas antes de cerrar el conector.")
+                return
+            if not self.connector_tiles_temp:
+                self.dibujar_interfaz("ERROR: sin tiles")
+                print("Dibuja al menos un tile para la escalera/rampa.")
+                return
+            connector_tiles = self._normalized_connector_tiles(self.connector_tiles_temp)
+            chain_error = self._connector_chain_error(connector_tiles)
+            if chain_error:
+                self.connector_tiles_temp = connector_tiles
+                self.dibujar_interfaz(f"ERROR: {chain_error}")
+                print(f"No se puede cerrar la escalera/rampa: {chain_error}. Borra el ultimo tile con Backspace o cancela con Esc.")
+                return
+            connector_type = "Stair" if self.modo == "escalera" else "Ramp"
+            target_level = None
+            if self.connector_scope == "inter_level":
+                levels = self.authoring_state.sorted_levels()
+                idx = next((i for i, level in enumerate(levels) if level.id == self.authoring_state.active_level_id), 0)
+                target_level = levels[idx + 1].id if idx + 1 < len(levels) else None
+            self._checkpoint("add_vertical_connector")
+            try:
+                connector = create_tile_chain_connector(
+                    self.authoring_state,
+                    connector_type,
+                    connector_tiles,
+                    self.connector_entry_side,
+                    self.connector_exit_side,
+                    scope=self.connector_scope,
+                    target_level_id=target_level,
+                    tile_size_m=self.connector_tile_size,
+                )
+            except ValueError as exc:
+                self.dibujar_interfaz(f"ERROR: {exc}")
+                print(f"No se puede cerrar la escalera/rampa: {exc}. Borra el ultimo tile con Backspace o cancela con Esc.")
+                return
+            self.connector_tiles_temp = []
+            self.connector_candidate_tile = None
+            self.connector_entry_side = None
+            self.connector_exit_side = None
+            self.connector_side_focus = "entry"
+            self._sync_legacy_from_authoring_state()
+            print(f"Conector cerrado: {connector.id}. Puedes elegir otra herramienta o dibujar otro conector.")
 
         # --- SECCIÓN PARA EXPORTAR ---
         elif key == 'e':
@@ -1450,6 +2163,26 @@ class DiseñadorConectado:
         self._v2_write_json(datos, nombre_archivo)
 
     def build_authoring_snapshot(self):
+        if hasattr(self, "authoring_state"):
+            for level in self.authoring_state.levels:
+                level.spatial_extent_2d = [
+                    (0.0, 0.0),
+                    (float(self.ancho), 0.0),
+                    (float(self.ancho), float(self.alto)),
+                    (0.0, float(self.alto)),
+                ]
+            return self.authoring_state.to_snapshot(
+                model_name=self.nombre_archivo_base,
+                canvas={"width": self.ancho, "height": self.alto},
+                crs={
+                    "type": "local",
+                    "unit": "meters",
+                    "origin": {"x": 0, "y": 0, "z": 0},
+                    "axisOrder": "xyz",
+                    "description": "Sistema local 2D de SpatialEngine.",
+                },
+            )
+
         authoring_elements = []
         for nombre, tipo, x1, y1, x2, y2 in self.get_authoring_elements():
             grosor = self.GROSORES.get(tipo)
@@ -1549,33 +2282,41 @@ class DiseñadorConectado:
         print("OK: indoor_model.json valida contra schemas/indoor/indoor_model.schema.json")
         return True
 
-    def generar_visual_check_indoor_model(self, json_path, layers="all", labels="none"):
+    def generar_visual_check_indoor_model(self, json_path, layers="all", labels="none", level=None, graph_view=None, preset=None):
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         visualizer_path = os.path.join(repo_root, "tools", "visualize_indoor_model.py")
         carpeta_destino = os.path.join(repo_root, "outputs", "visual_checks")
         os.makedirs(carpeta_destino, exist_ok=True)
 
         json_path = os.path.abspath(json_path)
-        layer_suffix = str(layers).replace(",", "_")
+        layer_suffix = str(preset or layers).replace(",", "_")
+        if level:
+            layer_suffix += f"_{level}"
+        if graph_view:
+            layer_suffix += f"_{graph_view}"
         png_path = os.path.join(
             carpeta_destino,
             f"{os.path.splitext(os.path.basename(json_path))[0]}_{layer_suffix}.png",
         )
-        subprocess.run(
-            [
-                sys.executable,
-                visualizer_path,
-                json_path,
-                "--layers",
-                layers,
-                "--labels",
-                labels,
-                "--save",
-                png_path,
-                "--no-show",
-            ],
-            check=True,
-        )
+        cmd = [
+            sys.executable,
+            visualizer_path,
+            json_path,
+            "--labels",
+            labels,
+            "--save",
+            png_path,
+            "--no-show",
+        ]
+        if preset:
+            cmd.extend(["--preset", preset])
+        else:
+            cmd.extend(["--layers", layers])
+        if level:
+            cmd.extend(["--level", level])
+        if graph_view:
+            cmd.extend(["--graph-view", graph_view])
+        subprocess.run(cmd, check=True)
         print(f"Visual check indoor_model generado en: '{png_path}'")
         return png_path
 
@@ -1584,6 +2325,11 @@ class DiseñadorConectado:
         Nuevo flujo principal: exporta indoor_model.json basado en indoor_data_model.
         No incluye agentes, spawns, beacons, hazards ni configuracion de simulacion.
         """
+        for level in self.authoring_state.sorted_levels():
+            if level.geometry_dirty or not level.detected_spaces:
+                result = detect_spaces(self.authoring_state, level.id)
+                if not result.ok:
+                    print(f"WARNING: no se pudieron detectar espacios en {level.id}: {result.report.get('message')}")
         snapshot = self.build_authoring_snapshot()
         datos = build_indoor_model(snapshot, edge_mode=edge_mode)
 
@@ -1605,10 +2351,26 @@ class DiseñadorConectado:
         schema_path = os.path.join(repo_root, "schemas", "indoor", "indoor_model.schema.json")
         self._validar_indoor_model_si_posible(datos, schema_path)
         print(f"\nINDOOR DATA MODEL EXPORTADO A: '{ruta_completa}' (edge_mode={edge_mode})")
-        try:
-            self.generar_visual_check_indoor_model(ruta_completa, layers="all", labels="none")
-        except Exception as exc:
-            print(f"WARNING: No se pudo generar visual check de indoor_model.json: {exc}")
+        if self.auto_visual_checks_on_export:
+            try:
+                self.generar_visual_check_indoor_model(ruta_completa, preset="basic")
+                for level in snapshot.get("levels", []):
+                    level_id = level.get("id")
+                    if level_id:
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="basic", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="spaces", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="navigable-boundaries", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="non-navigable", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="graph-base-dual", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="graph-room-adjacency", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="graph-room-transfer", level=level_id)
+                        self.generar_visual_check_indoor_model(ruta_completa, preset="graph-door-to-door", level=level_id)
+                if snapshot.get("verticalConnectors"):
+                    self.generar_visual_check_indoor_model(ruta_completa, preset="graph-vertical")
+            except Exception as exc:
+                print(f"WARNING: No se pudo generar visual check de indoor_model.json: {exc}")
+        else:
+            print("Visual checks no generados automaticamente. Usa tools/visualize_indoor_model.py para las vistas que necesites.")
         return ruta_completa
 
     def verificar_visual_y_exportar(self):
