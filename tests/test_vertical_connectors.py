@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
@@ -24,6 +25,32 @@ def cell_polygon(cell):
     return Polygon(coords[0], coords[1:])
 
 
+def assert_cellspace_endpoint(testcase, endpoint_id):
+    testcase.assertTrue(endpoint_id.startswith("CS_"), endpoint_id)
+    testcase.assertNotIn(":", endpoint_id)
+    testcase.assertFalse(endpoint_id.startswith("N_"), endpoint_id)
+
+
+def reachable_component(node_id, edges):
+    graph = {}
+    for edge in edges:
+        connects = edge.get("connects") or []
+        if len(connects) != 2:
+            continue
+        left, right = connects
+        graph.setdefault(left, set()).add(right)
+        graph.setdefault(right, set()).add(left)
+    seen = set()
+    pending = [node_id]
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(sorted(graph.get(current, set()) - seen))
+    return seen
+
+
 class VerticalConnectorsTests(unittest.TestCase):
     def test_ramp_same_level_has_endpoint_edge(self):
         state = BuildingAuthoringState()
@@ -42,6 +69,22 @@ class VerticalConnectorsTests(unittest.TestCase):
         self.assertEqual(1, len(connector_boundaries))
         self.assertEqual("NavigableBoundary", connector_boundaries[0]["navigationBoundaryType"])
         self.assertEqual("vertical_connectivity", connector_boundaries[0]["attributes"]["relationshipType"])
+
+        views = derive_graph_views(model)
+        vertical = views["vertical_connectivity"]
+        space = views["space_connectivity"]
+        vertical_nodes = {node["id"] for node in vertical["nodes"]}
+        space_nodes = {node["id"] for node in space["nodes"]}
+        self.assertEqual(1, len(vertical["edges"]))
+        derived_edge = vertical["edges"][0]
+        self.assertEqual("vertical_connectivity", derived_edge["relationshipType"])
+        self.assertEqual(["Walking", "Rolling"], derived_edge["locomotionTypes"])
+        self.assertTrue(derived_edge["sourceConnectedNodeRefs"])
+        self.assertTrue(all(":" in ref and ":N_" in ref for ref in derived_edge["sourceConnectedNodeRefs"]))
+        for endpoint_id in derived_edge["connects"]:
+            assert_cellspace_endpoint(self, endpoint_id)
+            self.assertIn(endpoint_id, vertical_nodes)
+            self.assertIn(endpoint_id, space_nodes)
 
     def test_stair_inter_level_and_elevator_three_levels(self):
         state = BuildingAuthoringState()
@@ -63,9 +106,169 @@ class VerticalConnectorsTests(unittest.TestCase):
         vertical = derive_graph_views(model)["vertical_connectivity"]
         self.assertGreaterEqual(len(vertical["edges"]), 3)
 
+    def test_inter_level_stair_uses_cellspace_ids_in_multilevel_views(self):
+        state = BuildingAuthoringState()
+        state.add_level()
+        state.set_active_level("LEVEL_00")
+        create_tile_chain_connector(
+            state,
+            "Stair",
+            [(1, 1), (2, 1)],
+            "west",
+            "east",
+            scope="inter_level",
+            target_level_id="LEVEL_01",
+        )
+
+        views = derive_graph_views(build_indoor_model(state.to_snapshot("stair_interlevel", {"width": 5, "height": 4})))
+        vertical = views["vertical_connectivity"]
+        multilevel = views["multilevel_space_connectivity"]
+        vertical_nodes = {node["id"]: node for node in vertical["nodes"]}
+        multilevel_nodes = {node["id"] for node in multilevel["nodes"]}
+        stair_edges = [edge for edge in vertical["edges"] if edge.get("connectorType") == "Stair"]
+
+        self.assertEqual(1, len(stair_edges))
+        edge = stair_edges[0]
+        self.assertEqual(2, len(edge["connects"]))
+        self.assertNotEqual(vertical_nodes[edge["connects"][0]]["level"], vertical_nodes[edge["connects"][1]]["level"])
+        self.assertTrue(edge["sourceConnectedCellRefs"])
+        self.assertTrue(edge["sourceConnectedNodeRefs"])
+        for endpoint_id in edge["connects"]:
+            assert_cellspace_endpoint(self, endpoint_id)
+            self.assertIn(endpoint_id, vertical_nodes)
+            self.assertIn(endpoint_id, multilevel_nodes)
+        self.assertIn(tuple(edge["connects"]), [tuple(item["connects"]) for item in multilevel["edges"]])
+        self.assertTrue(all(endpoint in multilevel_nodes for item in multilevel["edges"] for endpoint in item.get("connects", [])))
+
+    def test_three_level_elevator_is_connected_in_multilevel_space_connectivity(self):
+        state = BuildingAuthoringState()
+        state.add_level()
+        state.add_level()
+        create_elevator_connector(state, [(1, 1), (2, 1), (2, 2), (1, 2)], ["LEVEL_00", "LEVEL_01", "LEVEL_02"])
+
+        views = derive_graph_views(build_indoor_model(state.to_snapshot("elevator_three_levels", {"width": 4, "height": 4})))
+        vertical = views["vertical_connectivity"]
+        multilevel = views["multilevel_space_connectivity"]
+        elevator_edges = [edge for edge in vertical["edges"] if edge.get("connectorType") == "Elevator"]
+        elevator_nodes = [node for node in vertical["nodes"] if node.get("connectorType") == "Elevator"]
+        by_level = {node["level"]: node["id"] for node in elevator_nodes}
+
+        self.assertEqual({"LEVEL_00", "LEVEL_01", "LEVEL_02"}, set(by_level))
+        pairs = {tuple(edge["connects"]) for edge in elevator_edges}
+        self.assertIn((by_level["LEVEL_00"], by_level["LEVEL_01"]), pairs)
+        self.assertIn((by_level["LEVEL_01"], by_level["LEVEL_02"]), pairs)
+        reached = reachable_component(by_level["LEVEL_00"], multilevel["edges"])
+        self.assertTrue(set(by_level.values()) <= reached)
+
+    def test_inter_layer_connection_falls_back_to_connected_nodes(self):
+        state = BuildingAuthoringState()
+        state.add_level()
+        state.set_active_level("LEVEL_00")
+        create_tile_chain_connector(
+            state,
+            "Stair",
+            [(1, 1), (2, 1)],
+            "west",
+            "east",
+            scope="inter_level",
+            target_level_id="LEVEL_01",
+        )
+        model = build_indoor_model(state.to_snapshot("fallback_nodes", {"width": 5, "height": 4}))
+        for connection in model["layerConnections"]:
+            connection.pop("connectedCells", None)
+
+        vertical = derive_graph_views(model)["vertical_connectivity"]
+        self.assertFalse(vertical.get("diagnostics"))
+        self.assertEqual(1, len(vertical["edges"]))
+        edge = vertical["edges"][0]
+        self.assertTrue(edge["sourceConnectedNodeRefs"])
+        self.assertNotIn("sourceConnectedCellRefs", edge)
+        for endpoint_id in edge["connects"]:
+            assert_cellspace_endpoint(self, endpoint_id)
+
+    def test_invalid_inter_layer_endpoint_reports_diagnostic_without_dangling_edge(self):
+        state = BuildingAuthoringState()
+        state.add_level()
+        state.set_active_level("LEVEL_00")
+        create_tile_chain_connector(
+            state,
+            "Stair",
+            [(1, 1), (2, 1)],
+            "west",
+            "east",
+            scope="inter_level",
+            target_level_id="LEVEL_01",
+        )
+        model = build_indoor_model(state.to_snapshot("invalid_layer_connection", {"width": 5, "height": 4}))
+        model["layerConnections"].append(
+            {
+                "id": "ILC_INVALID",
+                "featureType": "InterLayerConnection",
+                "connectedLayers": ["TL_NAV_L00", "TL_NAV_L01"],
+                "connectedCells": ["TL_NAV_L00:PS_NAV_L00:CS_L00_MISSING", "TL_NAV_L01:PS_NAV_L01:CS_L01_MISSING"],
+                "typeOfTopoExpression": "OTHERS",
+                "attributes": {"relationshipType": "vertical_connectivity", "connectorId": "VC_INVALID"},
+            }
+        )
+
+        vertical = derive_graph_views(model)["vertical_connectivity"]
+        self.assertEqual(1, len(vertical["edges"]))
+        self.assertFalse(any(edge.get("id") == "ILC_INVALID" for edge in vertical["edges"]))
+        self.assertIn("UNRESOLVED_VERTICAL_ENDPOINT", {item.get("code") for item in vertical.get("diagnostics", [])})
+
+    def test_duplicate_vertical_sources_are_merged(self):
+        state = BuildingAuthoringState()
+        state.add_level()
+        state.set_active_level("LEVEL_00")
+        create_tile_chain_connector(
+            state,
+            "Stair",
+            [(1, 1), (2, 1)],
+            "west",
+            "east",
+            scope="inter_level",
+            target_level_id="LEVEL_01",
+        )
+        model = build_indoor_model(state.to_snapshot("dedupe_layer_connection", {"width": 5, "height": 4}))
+        duplicate = dict(model["layerConnections"][0])
+        duplicate["id"] = "ILC_DUPLICATE"
+        duplicate["connectedCells"] = list(model["layerConnections"][0]["connectedCells"])
+        duplicate["connectedNodes"] = list(model["layerConnections"][0]["connectedNodes"])
+        duplicate["attributes"] = dict(model["layerConnections"][0]["attributes"])
+        model["layerConnections"].append(duplicate)
+
+        vertical = derive_graph_views(model)["vertical_connectivity"]
+        self.assertEqual(1, len(vertical["edges"]))
+        edge = vertical["edges"][0]
+        self.assertEqual(["ILC_VC_001_001", "ILC_DUPLICATE"], edge["sourceRefs"])
+        self.assertEqual(2, len(edge["connects"]))
+
+    def test_real_three_floor_example_has_no_vertical_phantom_nodes(self):
+        example = Path(__file__).resolve().parents[1] / "examples" / "indoor_data_model" / "tres_plantas_indoor_model.json"
+        if not example.exists():
+            self.skipTest("tres_plantas_indoor_model.json not available")
+        import json
+
+        with example.open("r", encoding="utf-8") as file:
+            model = json.load(file)
+        views = derive_graph_views(model)
+
+        for view_name in ("vertical_connectivity", "multilevel_space_connectivity"):
+            view = views[view_name]
+            self.assertFalse(view.get("diagnostics"))
+            node_ids = {node["id"] for node in view["nodes"]}
+            for edge in view["edges"]:
+                if view_name == "multilevel_space_connectivity" and edge.get("relationshipType") != "vertical_connectivity":
+                    continue
+                self.assertEqual(2, len(edge.get("connects", [])), edge)
+                for endpoint_id in edge["connects"]:
+                    assert_cellspace_endpoint(self, endpoint_id)
+                    self.assertIn(endpoint_id, node_ids)
+
     def test_inter_level_connector_closes_non_local_mouths(self):
         state = BuildingAuthoringState()
         state.add_level()
+        state.set_active_level("LEVEL_00")
         connector = create_tile_chain_connector(
             state,
             "Stair",

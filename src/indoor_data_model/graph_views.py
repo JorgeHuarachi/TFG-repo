@@ -16,6 +16,8 @@ def derive_graph_views(model: dict[str, Any]) -> dict[str, Any]:
     space_connectivity = _space_connectivity(index)
     room_adjacency = _room_adjacency(index)
     room_to_room = _room_to_room_accessibility(room_adjacency)
+    vertical_connectivity = _vertical_connectivity(model, index)
+    multilevel_space_connectivity = _multilevel_space_connectivity(space_connectivity, vertical_connectivity)
     transfer_to_transfer = _transfer_to_transfer(
         index,
         include_virtual=True,
@@ -44,7 +46,8 @@ def derive_graph_views(model: dict[str, Any]) -> dict[str, Any]:
         "room_to_room": room_to_room,
         "transfer_to_transfer": transfer_to_transfer,
         "door_to_door": door_to_door,
-        "vertical_connectivity": _vertical_connectivity(model, index),
+        "vertical_connectivity": vertical_connectivity,
+        "multilevel_space_connectivity": multilevel_space_connectivity,
     }
 
 
@@ -54,7 +57,13 @@ def _index_model(model: dict[str, Any]) -> dict[str, Any]:
     edges = {}
     boundaries = {}
     node_by_cell = {}
+    node_ref_by_cell = {}
     cell_by_node = {}
+    cell_ref_by_node = {}
+    cell_refs = {}
+    node_refs = {}
+    cell_local_refs = defaultdict(list)
+    node_local_refs = defaultdict(list)
     boundaries_by_cell = defaultdict(list)
     edges_by_cell = defaultdict(list)
     layer_by_id = {}
@@ -64,21 +73,44 @@ def _index_model(model: dict[str, Any]) -> dict[str, Any]:
         layer_by_id[layer_id] = layer
         primal = layer.get("primalSpace") or {}
         dual = layer.get("dualSpace") or {}
+        primal_id = primal.get("id")
+        dual_id = dual.get("id")
         for cell in primal.get("cellSpaceMember", []):
-            cells[cell["id"]] = {"feature": cell, "layer": layer, "geometry": _polygon(cell)}
+            cell_id = cell["id"]
+            cells[cell_id] = {"feature": cell, "layer": layer, "geometry": _polygon(cell)}
+            cell_local_refs[cell_id].append(cell_id)
+            for cell_ref in _candidate_refs(layer_id, primal_id, cell_id):
+                cell_refs[cell_ref] = cell_id
         for boundary in primal.get("cellBoundaryMember", []):
             boundaries[boundary["id"]] = {"feature": boundary, "layer": layer, "geometry": _line(boundary)}
             for cell_id in boundary.get("cellRefs", []):
                 boundaries_by_cell[cell_id].append(boundary["id"])
         for node in dual.get("nodeMember", []):
-            nodes[node["id"]] = {"feature": node, "layer": layer, "geometry": _point(node)}
-            cell_id = _ref_tail(node.get("duality"))
-            node_by_cell[cell_id] = node["id"]
-            cell_by_node[node["id"]] = cell_id
+            node_id = node["id"]
+            nodes[node_id] = {"feature": node, "layer": layer, "geometry": _point(node)}
+            node_local_refs[node_id].append(node_id)
+            for node_ref in _candidate_refs(layer_id, dual_id, node_id):
+                node_refs[node_ref] = node_id
+            cell_id = _canonical_cell_ref({"cells": cells, "cellRefs": cell_refs, "cellLocalRefs": cell_local_refs}, node.get("duality"))
+            if cell_id:
+                node_by_cell[cell_id] = node_id
+                cell_by_node[node_id] = cell_id
+                cell_ref_by_node[node_id] = node.get("duality")
+                qualified_node_ref = _qualified_ref(layer_id, dual_id, node_id)
+                if qualified_node_ref:
+                    node_ref_by_cell[cell_id] = qualified_node_ref
         for edge in dual.get("edgeMember", []):
             edges[edge["id"]] = {"feature": edge, "layer": layer, "geometry": _line_feature(edge)}
             for node_ref in edge.get("connects", []):
-                cell_id = cell_by_node.get(_ref_tail(node_ref))
+                cell_id = _cell_for_node(
+                    {
+                        "nodes": nodes,
+                        "nodeRefs": node_refs,
+                        "nodeLocalRefs": node_local_refs,
+                        "cellByNode": cell_by_node,
+                    },
+                    node_ref,
+                )
                 if cell_id:
                     edges_by_cell[cell_id].append(edge["id"])
 
@@ -88,7 +120,13 @@ def _index_model(model: dict[str, Any]) -> dict[str, Any]:
         "edges": edges,
         "boundaries": boundaries,
         "nodeByCell": node_by_cell,
+        "nodeRefByCell": node_ref_by_cell,
         "cellByNode": cell_by_node,
+        "cellRefByNode": cell_ref_by_node,
+        "cellRefs": cell_refs,
+        "nodeRefs": node_refs,
+        "cellLocalRefs": cell_local_refs,
+        "nodeLocalRefs": node_local_refs,
         "boundariesByCell": boundaries_by_cell,
         "edgesByCell": edges_by_cell,
         "layerById": layer_by_id,
@@ -596,28 +634,144 @@ def _transfer_memberships(
 
 
 def _vertical_connectivity(model: dict[str, Any], index: dict[str, Any]) -> dict[str, Any]:
-    nodes = []
-    edges = []
+    nodes: dict[str, dict[str, Any]] = {}
+    grouped_edges: dict[tuple[Any, ...], dict[str, Any]] = {}
+    diagnostics: list[dict[str, Any]] = []
+
     for cell_id, record in index["cells"].items():
         attrs = record["feature"].get("attributes", {})
         if attrs.get("connectorId") and record["feature"].get("function") == "VerticalConnectorEndpoint":
-            nodes.append({"id": cell_id, "nodeType": "ConnectorEndpoint", "connectorId": attrs.get("connectorId")})
+            node = _vertical_node(index, cell_id)
+            if node:
+                nodes[cell_id] = node
+
     for edge_id, record in index["edges"].items():
         edge = record["feature"]
         if edge.get("relationshipType") == "vertical_connectivity":
-            edges.append({"id": edge_id, "connects": edge.get("connects", []), "attributes": edge.get("attributes", {})})
+            endpoints = [_cell_for_node(index, node_ref) for node_ref in edge.get("connects", [])]
+            endpoints = [endpoint for endpoint in endpoints if endpoint]
+            if len(endpoints) != 2 or endpoints[0] == endpoints[1]:
+                diagnostics.append(
+                    {
+                        "code": "UNRESOLVED_VERTICAL_ENDPOINT",
+                        "sourceRef": edge_id,
+                        "references": list(edge.get("connects") or []),
+                    }
+                )
+                continue
+            if not all(_ensure_vertical_node(index, nodes, endpoint) for endpoint in endpoints):
+                diagnostics.append(
+                    {
+                        "code": "UNRESOLVED_VERTICAL_ENDPOINT",
+                        "sourceRef": edge_id,
+                        "references": list(edge.get("connects") or []),
+                    }
+                )
+                continue
+            attrs = dict(edge.get("attributes") or {})
+            normalized = {
+                "id": edge_id,
+                "connects": endpoints,
+                "relationshipType": edge.get("relationshipType"),
+                "traversable": edge.get("traversable"),
+                "attributes": attrs,
+                "sourceRefs": [edge_id],
+                "sourceConnectedNodeRefs": list(edge.get("connects") or []),
+            }
+            _copy_if_present(normalized, edge, "locomotionTypes")
+            _copy_if_present(normalized, edge, "weight")
+            _copy_if_present(normalized, edge, "geometry")
+            _copy_if_present(normalized, edge, "boundaryRef")
+            _copy_if_present(normalized, edge, "sourceFeatureRefs")
+            _copy_if_present(normalized, attrs, "connectorId")
+            _copy_if_present(normalized, attrs, "connectorType")
+            _copy_if_present(normalized, attrs, "scope")
+            _merge_vertical_edge(grouped_edges, normalized)
+
     for connection in model.get("layerConnections", []):
         attrs = connection.get("attributes", {})
         if attrs.get("relationshipType") == "vertical_connectivity":
-            edges.append(
-                {
-                    "id": connection.get("id"),
-                    "connects": connection.get("connectedNodes", []),
-                    "connectedCells": connection.get("connectedCells", []),
-                    "attributes": attrs,
-                }
-            )
-    return {"nodes": nodes, "edges": edges}
+            endpoints = [_canonical_cell_ref(index, cell_ref) for cell_ref in connection.get("connectedCells", [])]
+            endpoints = [endpoint for endpoint in endpoints if endpoint]
+            if len(endpoints) != 2 or endpoints[0] == endpoints[1]:
+                endpoints = [_cell_for_node(index, node_ref) for node_ref in connection.get("connectedNodes", [])]
+                endpoints = [endpoint for endpoint in endpoints if endpoint]
+            if len(endpoints) != 2 or endpoints[0] == endpoints[1]:
+                diagnostics.append(
+                    {
+                        "code": "UNRESOLVED_VERTICAL_ENDPOINT",
+                        "sourceRef": connection.get("id"),
+                        "references": list(connection.get("connectedCells") or connection.get("connectedNodes") or []),
+                    }
+                )
+                continue
+            if not all(_ensure_vertical_node(index, nodes, endpoint) for endpoint in endpoints):
+                diagnostics.append(
+                    {
+                        "code": "UNRESOLVED_VERTICAL_ENDPOINT",
+                        "sourceRef": connection.get("id"),
+                        "references": list(connection.get("connectedCells") or connection.get("connectedNodes") or []),
+                    }
+                )
+                continue
+            normalized = {
+                "id": connection.get("id"),
+                "connects": endpoints,
+                "relationshipType": attrs.get("relationshipType"),
+                "traversable": attrs.get("traversable", True),
+                "connectedLayers": list(connection.get("connectedLayers") or []),
+                "connectorId": attrs.get("connectorId"),
+                "connectorType": attrs.get("connectorType"),
+                "directionality": attrs.get("directionality"),
+                "locomotionTypes": list(attrs.get("locomotionTypes") or []),
+                "attributes": dict(attrs),
+                "sourceRefs": [connection.get("id")],
+                "sourceConnectedNodeRefs": list(connection.get("connectedNodes") or []),
+            }
+            if connection.get("connectedCells"):
+                normalized["sourceConnectedCellRefs"] = list(connection.get("connectedCells") or [])
+            _merge_vertical_edge(grouped_edges, normalized)
+
+    result = {"nodes": [nodes[node_id] for node_id in sorted(nodes)], "edges": list(grouped_edges.values())}
+    if diagnostics:
+        result["diagnostics"] = diagnostics
+    return result
+
+
+def _multilevel_space_connectivity(space_connectivity: dict[str, Any], vertical_connectivity: dict[str, Any]) -> dict[str, Any]:
+    nodes: dict[str, dict[str, Any]] = {}
+    for node in space_connectivity.get("nodes", []):
+        node_id = node.get("id")
+        if node_id:
+            nodes[node_id] = dict(node)
+
+    for node in vertical_connectivity.get("nodes", []):
+        node_id = node.get("id")
+        if not node_id:
+            continue
+        if node_id not in nodes:
+            nodes[node_id] = dict(node)
+            continue
+        target = nodes[node_id]
+        for key, value in node.items():
+            if key not in target or target.get(key) in (None, [], {}):
+                target[key] = value
+        target.setdefault("verticalNodeType", node.get("nodeType"))
+
+    edges = [dict(edge) for edge in space_connectivity.get("edges", [])]
+    for edge in vertical_connectivity.get("edges", []):
+        connects = list(edge.get("connects") or [])
+        if len(connects) != 2:
+            continue
+        for endpoint in connects:
+            if endpoint not in nodes:
+                nodes[endpoint] = {"id": endpoint, "nodeType": "ConnectorEndpoint", "cellSpaceRef": endpoint}
+        edges.append(dict(edge))
+
+    result = {"nodes": [nodes[node_id] for node_id in sorted(nodes)], "edges": edges}
+    if vertical_connectivity.get("diagnostics"):
+        result["diagnostics"] = list(vertical_connectivity["diagnostics"])
+    return result
 
 
 def _polygon(cell: dict[str, Any]) -> Polygon | None:
@@ -661,8 +815,136 @@ def _nav(record: dict[str, Any] | None) -> str | None:
     return (record or {}).get("feature", {}).get("navigationType")
 
 
-def _cell_for_node(index: dict[str, Any], node_ref: str) -> str | None:
-    return index["cellByNode"].get(_ref_tail(node_ref))
+def _copy_if_present(target: dict[str, Any], source: dict[str, Any], key: str) -> None:
+    if source.get(key) is not None:
+        target[key] = source[key]
+
+
+def _merge_vertical_edge(grouped: dict[tuple[Any, ...], dict[str, Any]], candidate: dict[str, Any]) -> None:
+    key = _vertical_edge_key(candidate)
+    if key not in grouped:
+        grouped[key] = candidate
+        return
+
+    existing = grouped[key]
+    for field in (
+        "sourceRefs",
+        "sourceConnectedCellRefs",
+        "sourceConnectedNodeRefs",
+        "connectedLayers",
+        "locomotionTypes",
+    ):
+        for value in candidate.get(field) or []:
+            _unique_append(existing.setdefault(field, []), value)
+    for field in ("geometry", "boundaryRef", "weight", "traversable", "connectorId", "connectorType", "directionality", "scope"):
+        if existing.get(field) is None and candidate.get(field) is not None:
+            existing[field] = candidate[field]
+    existing_attrs = existing.setdefault("attributes", {})
+    for key, value in (candidate.get("attributes") or {}).items():
+        if key not in existing_attrs or existing_attrs.get(key) is None:
+            existing_attrs[key] = value
+
+
+def _vertical_edge_key(edge: dict[str, Any]) -> tuple[Any, ...]:
+    attrs = edge.get("attributes") or {}
+    relationship_type = edge.get("relationshipType") or attrs.get("relationshipType") or "vertical_connectivity"
+    directionality = edge.get("directionality") or attrs.get("directionality") or "bidirectional"
+    connector_id = edge.get("connectorId") or attrs.get("connectorId") or ""
+    endpoints = tuple(edge.get("connects") or [])
+    if directionality == "bidirectional":
+        endpoints = tuple(sorted(endpoints))
+    return relationship_type, connector_id, endpoints
+
+
+def _ensure_vertical_node(index: dict[str, Any], nodes: dict[str, dict[str, Any]], cell_id: str) -> bool:
+    if cell_id in nodes:
+        return True
+    node = _vertical_node(index, cell_id)
+    if not node:
+        return False
+    nodes[cell_id] = node
+    return True
+
+
+def _vertical_node(index: dict[str, Any], cell_id: str) -> dict[str, Any] | None:
+    record = index["cells"].get(cell_id)
+    if not record:
+        return None
+    cell = record["feature"]
+    attrs = cell.get("attributes") or {}
+    if cell.get("function") != "VerticalConnectorEndpoint":
+        return None
+    node = {
+        "id": cell_id,
+        "nodeType": "ConnectorEndpoint",
+        "cellSpaceRef": cell_id,
+        "level": cell.get("level"),
+        "connectorId": attrs.get("connectorId"),
+        "connectorType": attrs.get("connectorType") or cell.get("category"),
+        "locomotionTypes": list(cell.get("locomotionTypes") or []),
+        "geometry": _representative_point_geojson(record.get("geometry")),
+        "sourceRefs": list(cell.get("sourceFeatureRefs") or []),
+    }
+    dual_node_ref = index.get("nodeRefByCell", {}).get(cell_id)
+    if dual_node_ref:
+        node["dualNodeRef"] = dual_node_ref
+    return node
+
+
+def _cell_for_node(index: dict[str, Any], node_ref: Any) -> str | None:
+    node_id = _canonical_node_ref(index, node_ref)
+    if not node_id:
+        return None
+    return index["cellByNode"].get(node_id)
+
+
+def _canonical_cell_ref(index: dict[str, Any], cell_ref: Any) -> str | None:
+    if cell_ref is None:
+        return None
+    value = str(cell_ref)
+    cell_refs = index.get("cellRefs", {})
+    if value in cell_refs:
+        return cell_refs[value]
+    local_refs = index.get("cellLocalRefs", {})
+    if value in index.get("cells", {}) and len(local_refs.get(value, [])) <= 1:
+        return value
+    tail = _ref_tail(value)
+    if tail != value and tail in index.get("cells", {}) and len(local_refs.get(tail, [])) <= 1:
+        return tail
+    return None
+
+
+def _canonical_node_ref(index: dict[str, Any], node_ref: Any) -> str | None:
+    if node_ref is None:
+        return None
+    value = str(node_ref)
+    node_refs = index.get("nodeRefs", {})
+    if value in node_refs:
+        return node_refs[value]
+    local_refs = index.get("nodeLocalRefs", {})
+    if value in index.get("nodes", {}) and len(local_refs.get(value, [])) <= 1:
+        return value
+    tail = _ref_tail(value)
+    if tail != value and tail in index.get("nodes", {}) and len(local_refs.get(tail, [])) <= 1:
+        return tail
+    return None
+
+
+def _candidate_refs(layer_id: str | None, container_id: str | None, object_id: str, *extra_refs: Any) -> list[str]:
+    refs = []
+    qualified = _qualified_ref(layer_id, container_id, object_id)
+    if qualified:
+        refs.append(qualified)
+    for ref_value in extra_refs:
+        if ref_value:
+            refs.append(str(ref_value))
+    return refs
+
+
+def _qualified_ref(layer_id: str | None, container_id: str | None, object_id: str | None) -> str | None:
+    if not layer_id or not container_id or not object_id:
+        return None
+    return f"{layer_id}:{container_id}:{object_id}"
 
 
 def _ref_tail(value: Any) -> str:
