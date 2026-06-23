@@ -1,0 +1,196 @@
+"""Command line interface for EvacEngine."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+from .application import ApplicationService
+from .loaders import load_project
+from .overlays import BeaconSimulator
+from .simulation import EvacuationModel
+from .topology import EvacTopology
+from .visualization import build_visualization_payload, save_result_gif, save_result_html
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m src.evac_engine", description="EvacEngine for Indoor Data Model scenarios")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    validate = sub.add_parser("validate", help="Validate indoor/scenario inputs and derived topology")
+    _add_project_args(validate)
+
+    route = sub.add_parser("route", help="Plan one route")
+    _add_project_args(route)
+    route.add_argument("--origin", required=True)
+    route.add_argument("--target", action="append", default=[])
+    route.add_argument("--profile")
+
+    run = sub.add_parser("run", help="Run the simulation and write outputs")
+    _add_project_args(run)
+    _add_runtime_override_args(run)
+    run.add_argument("--output-dir")
+    run.add_argument("--gif", help="Optional GIF path to render after the run")
+    run.add_argument("--html", help="Optional standalone HTML viewer path")
+    run.add_argument("--level", help="Level to render in the optional GIF")
+    run.add_argument("--fps", type=int, default=8)
+    run.add_argument("--skip-geometry-qa", action="store_true", help="Skip expensive Shapely trajectory geometry checks")
+
+    beacons = sub.add_parser("beacons", help="Evaluate beacon observations at one tick")
+    _add_project_args(beacons)
+    beacons.add_argument("--step", type=int, default=0)
+    beacons.add_argument("--time-s", type=float, default=0.0)
+
+    ui = sub.add_parser("ui", help="Open the desktop UI")
+    ui.add_argument("--indoor")
+    ui.add_argument("--scenario")
+
+    workbench = sub.add_parser("workbench", help="Start the browser-based local workbench")
+    workbench.add_argument("--host", default="127.0.0.1")
+    workbench.add_argument("--port", type=int, default=8765)
+    workbench.add_argument("--scenario", default="examples/indoor_data_model/scenario_single_floor.json")
+
+    render = sub.add_parser("render", help="Run the simulation and render a GIF")
+    _add_project_args(render)
+    _add_runtime_override_args(render)
+    render.add_argument("--gif", help="Output GIF path")
+    render.add_argument("--html", help="Output standalone HTML viewer path")
+    render.add_argument("--level", help="Level to render")
+    render.add_argument("--fps", type=int, default=8)
+    render.add_argument("--max-frames", type=int)
+    render.add_argument("--skip-geometry-qa", action="store_true", help="Skip expensive Shapely trajectory geometry checks")
+    return parser
+
+
+def _add_project_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--scenario", required=True, help="Path to scenario_model.json")
+    parser.add_argument("--indoor", help="Path to indoor_model.json; defaults to scenario.indoorModelRef.path")
+
+
+def _add_runtime_override_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--time-step", type=float, help="Override simulationConfig.timeStepS")
+    parser.add_argument("--max-steps", type=int, help="Override simulationConfig.maxSteps")
+    parser.add_argument("--seed", type=int, help="Override simulationConfig.randomSeed")
+    parser.add_argument("--first-group-count", type=int, help="Override the first population group count")
+    parser.add_argument("--algorithm", choices=["dijkstra", "astar"], help="Override routing.algorithm")
+    parser.add_argument("--cost-policy", choices=["shortest_distance", "minimum_travel_time"], help="Override routing.costPolicy")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "ui":
+        from .ui.desktop_app import run_desktop_app
+
+        run_desktop_app(args.indoor, args.scenario)
+        return 0
+    if args.command == "workbench":
+        from .web_app import run_workbench
+
+        run_workbench(args.host, args.port, args.scenario)
+        return 0
+    if args.command == "validate":
+        service = ApplicationService()
+        print_json(service.validate(args.indoor, args.scenario))
+        return 0
+    if args.command == "route":
+        service = ApplicationService()
+        service.load(args.indoor, args.scenario)
+        print_json(service.plan_route(args.origin, args.target or None, args.profile))
+        return 0
+    if args.command == "run":
+        service = ApplicationService()
+        service.load(args.indoor, args.scenario)
+        _apply_service_overrides(service, args)
+        result = service.run(args.output_dir)
+        gif_path = None
+        html_path = None
+        if args.gif:
+            assert service.model is not None
+            gif_path = save_result_gif(service.model.topology, result, args.gif, level=args.level, fps=args.fps)
+        if args.html:
+            assert service.model is not None
+            html_path = save_result_html(service.model.topology, result, args.html, include_geometry_qa=not args.skip_geometry_qa)
+        print_json(
+            {
+                "metrics": result.metrics,
+                "qa": build_visualization_payload(service.model.topology, result, include_geometry_qa=not args.skip_geometry_qa)["qa"] if service.model else {},
+                "outputDir": str(result.output_dir) if result.output_dir else None,
+                "gif": str(gif_path) if gif_path else None,
+                "html": str(html_path) if html_path else None,
+            }
+        )
+        return 0
+    if args.command == "render":
+        indoor, scenario = load_project(args.indoor, args.scenario)
+        _apply_scenario_overrides(scenario, args)
+        model = EvacuationModel(indoor, scenario)
+        result = model.run()
+        gif_path = save_result_gif(model.topology, result, args.gif, level=args.level, fps=args.fps, max_frames=args.max_frames) if args.gif else None
+        html_path = save_result_html(model.topology, result, args.html, include_geometry_qa=not args.skip_geometry_qa) if args.html else None
+        print_json(
+            {
+                "metrics": result.metrics,
+                "qa": build_visualization_payload(model.topology, result, include_geometry_qa=not args.skip_geometry_qa)["qa"],
+                "gif": str(gif_path) if gif_path else None,
+                "html": str(html_path) if html_path else None,
+            }
+        )
+        return 0
+    if args.command == "beacons":
+        indoor, scenario = load_project(args.indoor, args.scenario)
+        topology = EvacTopology.from_indoor_model(indoor)
+        simulator = BeaconSimulator(topology, scenario.beacons, (scenario.raw.get("beaconSystem") or {}).get("fusion"))
+        state = simulator.state_at(args.step, args.time_s)
+        print_json({"observations": state.observations, "cellRisk": state.cell_risk})
+        return 0
+    parser.error(f"Unhandled command {args.command}")
+    return 2
+
+
+def print_json(value: Any) -> None:
+    print(json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True))
+
+
+def _apply_service_overrides(service: ApplicationService, args: argparse.Namespace) -> None:
+    if not any(
+        value is not None
+        for value in (
+            args.time_step,
+            args.max_steps,
+            args.seed,
+            args.first_group_count,
+            args.algorithm,
+            args.cost_policy,
+        )
+    ):
+        return
+    service.apply_runtime_settings(
+        time_step_s=args.time_step,
+        max_steps=args.max_steps,
+        random_seed=args.seed,
+        routing_algorithm=args.algorithm,
+        cost_policy=args.cost_policy,
+        first_group_count=args.first_group_count,
+    )
+
+
+def _apply_scenario_overrides(scenario: Any, args: argparse.Namespace) -> None:
+    if args.time_step is not None:
+        scenario.simulation_config["timeStepS"] = float(args.time_step)
+    if args.max_steps is not None:
+        scenario.simulation_config["maxSteps"] = int(args.max_steps)
+    if args.seed is not None:
+        scenario.simulation_config["randomSeed"] = int(args.seed)
+    if args.first_group_count is not None and scenario.groups:
+        scenario.groups[0]["count"] = int(args.first_group_count)
+    if args.algorithm is not None:
+        scenario.routing["algorithm"] = args.algorithm
+    if args.cost_policy is not None:
+        scenario.routing["costPolicy"] = args.cost_policy
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

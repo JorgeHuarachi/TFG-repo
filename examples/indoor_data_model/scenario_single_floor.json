@@ -1,0 +1,177 @@
+{
+  "scenarioId": "SCENARIO_SINGLE_FLOOR_001",
+  "scenarioName": "single_floor_evacuation_demo",
+  "metadata": {
+    "name": "single_floor_evacuation_demo",
+    "description": "Single-floor scenario for the generated indoor data model example.",
+    "createdAt": "2026-06-22T00:00:00Z",
+    "generator": "codex_evacengine_refactor"
+  },
+  "indoorModelRef": {
+    "path": "una_sola_planta_indoor_model.json",
+    "schemaRef": "../../schemas/indoor/indoor_model.schema.json"
+  },
+  "catalogs": {},
+  "population": {
+    "mobilityProfiles": [
+      {
+        "profileId": "MP_WALKING",
+        "label": "Walking adults",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.25,
+        "bodyRadiusM": 0.25,
+        "personalRadiusM": 0.5,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ELDERLY",
+        "label": "Slower elderly pedestrians",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 0.75,
+        "bodyRadiusM": 0.27,
+        "personalRadiusM": 0.62,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_CHILD",
+        "label": "Smaller faster pedestrian",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.45,
+        "bodyRadiusM": 0.18,
+        "personalRadiusM": 0.42,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ROLLING_ACCESSIBLE",
+        "label": "Rolling accessible profile",
+        "locomotionTypes": [
+          "Rolling"
+        ],
+        "baseSpeedMps": 0.9,
+        "bodyRadiusM": 0.3,
+        "personalRadiusM": 0.58,
+        "canUseStairs": false,
+        "canUseRamps": true,
+        "canUseElevators": true
+      }
+    ],
+    "agentGroups": [
+      {
+        "groupId": "AG_SINGLE_L00",
+        "count": 8,
+        "mobilityProfileRef": "MP_WALKING",
+        "spawnRef": "SPAWN_SINGLE_L00_ROOM_001",
+        "distribution": "random_within_space"
+      }
+    ],
+    "agentSpawns": [
+      {
+        "spawnId": "SPAWN_SINGLE_L00_ROOM_001",
+        "levelRef": "LEVEL_00",
+        "cellSpaceRef": "CS_L00_ROOM_001",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            1.0,
+            1.0
+          ]
+        },
+        "capacity": 20,
+        "description": "Demo spawn in the first generated room."
+      }
+    ],
+    "agents": []
+  },
+  "beaconSystem": {
+    "enabled": false,
+    "fusion": {
+      "method": "conservative_min",
+      "defaultRadiusM": 6.0
+    },
+    "beacons": []
+  },
+  "hazards": {
+    "enabled": false,
+    "sources": []
+  },
+  "environmentOverrides": {},
+  "routing": {
+    "algorithm": "astar",
+    "costPolicy": "minimum_travel_time",
+    "destination": {
+      "mode": "explicit_cells",
+      "cellSpaceRefs": [
+        "CS_L00_EXIT_001"
+      ]
+    },
+    "deriveConnectivityFromEdges": true,
+    "useDynamicWeights": true,
+    "useBeaconRisk": false,
+    "useHazardRisk": true,
+    "useCongestion": true,
+    "replanPolicy": "on_blocked_or_interval",
+    "replanIntervalSteps": 8
+  },
+  "physics": {
+    "bodyRadiusM": 0.25,
+    "personalRadiusM": 0.5,
+    "wallRepulsion": 4.0,
+    "socialRepulsion": 2.0,
+    "maxAccelerationMps2": 6.0,
+    "velocityInertia": 0.16,
+    "maxTurnRateRadS": 4.2,
+    "lineOfSightBlend": 0.45,
+    "nearLineOfSightBlend": 0.6,
+    "doorCenterBias": 0.0,
+    "doorEntryInsetM": 0.035,
+    "doorExitInsetM": 0.32,
+    "virtualBoundaryExitInsetM": 0.28,
+    "linearTransferExitInsetM": 0.45,
+    "doorApproachLookaheadM": 0.55,
+    "linearTransferLookaheadM": 0.9,
+    "doorPreEntryDistanceM": 0.36,
+    "linearTransferPreEntryDistanceM": 0.65,
+    "doorApproachLateralToleranceM": 0.18,
+    "wallRepulsionDistanceM": 0.8,
+    "wallClearanceM": 0.24,
+    "transferWallClearanceM": 0.14
+  },
+  "scheduledEvents": [],
+  "simulationConfig": {
+    "timeStepS": 0.5,
+    "maxSteps": 160,
+    "randomSeed": 22,
+    "enabledOverlays": [
+      "population"
+    ]
+  },
+  "experiments": {
+    "replications": 1,
+    "parameterSweep": []
+  },
+  "outputs": {
+    "outputFolder": "outputs/single_floor_scenario",
+    "saveRoutes": true,
+    "saveMetrics": true,
+    "saveTimeSeries": false,
+    "saveEvents": true,
+    "saveTrajectories": true
+  },
+  "scenarioDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.2-draft",
+    "profile": "EvacEngine scenario overlay referencing indoor_model.json"
+  }
+}

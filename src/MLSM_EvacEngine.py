@@ -607,203 +607,209 @@ class AgentePro(mesa.Agent):
 
 # --- 5. EJECUCIÓN (ESCENARIOS) ---
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
-
-# Unimos esa ruta base con las carpetas de nuestro proyecto
-ruta_escenario = os.path.join(BASE_DIR, "escenarios", "v3_TEST5_FINAL.json")
-ruta_resultados = os.path.join(BASE_DIR, "resultados", "simulacion_prueba_1.csv")
-# Inicializar modelo 
-model = ModeloAvanzado(
-    ruta_mapa=ruta_escenario, # <--- Usamos la ruta dinámica
-    posiciones_agentes=None 
-)
-# --- 6. VISUALIZACIÓN ---
-# 1. Suelo Oscuro (Gris casi negro)
-fig, ax = plt.subplots(figsize=(10, 7), facecolor='#151515')
-ax.set_facecolor('#151515')
-
-# Cuadrícula de fondo más tenue
-lineas_x, lineas_y = [], []
-for x in range(model.ancho): lineas_x.extend([x, x, None]); lineas_y.extend([0, model.alto, None])
-for y in range(model.alto): lineas_x.extend([0, model.ancho, None]); lineas_y.extend([y, y, None])
-ax.plot(lineas_x, lineas_y, c='#333333', linewidth=0.5, alpha=0.5, zorder=0)
-
-# 2. Dibujar Muros Claros
-for muro_poly, tipo in model.poligonos_muros:
-    x, y = muro_poly.exterior.xy
+def run_legacy_demo():
     
-    # Muros Exteriores: Blanco/Gris muy claro. Muros Interiores: Gris medio
-    color_muro = '#E8E8E8' if tipo == 'muro_exterior' else '#888888'
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
     
-    muro_patch = MplPolygon(list(zip(x, y)), closed=True, facecolor=color_muro, edgecolor='#FFFFFF', alpha=1.0, zorder=2)
-    ax.add_patch(muro_patch)
-
-# Dibujar Salidas dinámicamente
-zonas_salida_dibujos = []
-for nombre, pos_salida in model.hitos.items():
-    if 'Salida' in nombre:
-        zs = Circle(pos_salida, RADIO_ZONA_SALIDA, color='lime', alpha=0.2, zorder=1)
-        ax.add_patch(zs)
-        ax.text(pos_salida[0], pos_salida[1], "EXIT", color='lime', ha='center', fontweight='bold', zorder=2)
-        zonas_salida_dibujos.append(zs)
-
-# Dibujar Zonas Prohibidas para Rolling (Para verificar el mapa)
-for nombre, datos_espacio in model.espacios_navegables.items():
-    locomotion = datos_espacio['atributos'].get('locomotion', [])
-    # Si la zona NO tiene Rolling, la pintamos de rojo rayado
-    if "Rolling" not in locomotion:
-        poly = Polygon(datos_espacio['poligono'])
-        x, y = poly.exterior.xy
+    # Unimos esa ruta base con las carpetas de nuestro proyecto
+    ruta_escenario = os.path.join(BASE_DIR, "escenarios", "v3_TEST5_FINAL.json")
+    ruta_resultados = os.path.join(BASE_DIR, "resultados", "simulacion_prueba_1.csv")
+    # Inicializar modelo 
+    model = ModeloAvanzado(
+        ruta_mapa=ruta_escenario, # <--- Usamos la ruta dinámica
+        posiciones_agentes=None 
+    )
+    # --- 6. VISUALIZACIÓN ---
+    # 1. Suelo Oscuro (Gris casi negro)
+    fig, ax = plt.subplots(figsize=(10, 7), facecolor='#151515')
+    ax.set_facecolor('#151515')
+    
+    # Cuadrícula de fondo más tenue
+    lineas_x, lineas_y = [], []
+    for x in range(model.ancho): lineas_x.extend([x, x, None]); lineas_y.extend([0, model.alto, None])
+    for y in range(model.alto): lineas_x.extend([0, model.ancho, None]); lineas_y.extend([y, y, None])
+    ax.plot(lineas_x, lineas_y, c='#333333', linewidth=0.5, alpha=0.5, zorder=0)
+    
+    # 2. Dibujar Muros Claros
+    for muro_poly, tipo in model.poligonos_muros:
+        x, y = muro_poly.exterior.xy
         
-        zona_patch = MplPolygon(list(zip(x, y)), closed=True, facecolor='red', edgecolor='darkred', alpha=0.3, hatch='//', zorder=1)
-        ax.add_patch(zona_patch)
+        # Muros Exteriores: Blanco/Gris muy claro. Muros Interiores: Gris medio
+        color_muro = '#E8E8E8' if tipo == 'muro_exterior' else '#888888'
         
-        cx, cy = datos_espacio['centroide']
-        ax.text(cx, cy, "NO ROLLING", color='darkred', ha='center', fontweight='bold', fontsize=8, zorder=2)
-
-# Dibujar Centros de las Habitaciones (Puntitos/Cruces Cyan)
-for nombre, pos_centro in model.hitos.items():
-    # Solo dibujamos la cruz si NO es una Salida, NO es una Puerta y NO es una Frontera
-    if not any(palabra in nombre for palabra in ['Salida', 'Puerta', 'Frontera']):
-        # Dibujamos una cruz en el centro
-        ax.plot(pos_centro[0], pos_centro[1], marker='+', color='cyan', markersize=8, zorder=3)
-        # Le ponemos el nombre en pequeñito para identificar la sala
-        ax.text(pos_centro[0], pos_centro[1] + 0.5, "Centro", color='cyan', fontsize=7, ha='center', zorder=3)
-
-# Dibujar Grafo
-lineas_grafo = []
-for u, v in model.grafo_logico.edges():
-    p1, p2 = model.hitos[u], model.hitos[v]
-    l, = ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c='#00FFFF', linewidth=1, alpha=0.4, zorder=3)
-    lineas_grafo.append(l)
-
-circulos_fisicos = []
-circulos_personales = []
-lineas_rastro = [] 
-lineas_intencion = [] 
-artistas_fuego = []
-
-circulos_fisicos = []
-circulos_personales = []
-lineas_rastro = [] 
-lineas_intencion = [] 
-artistas_fuego = []
-
-# --- NUEVO: ASIGNACIÓN DE COLORES SEGÚN EL PERFIL ---
-for agente in model.todos_los_agentes:
-    # Elegir colores según el perfil
-    if agente.perfil == "Rolling":
-        color_agente = '#FF00FF' # Magenta
-        color_rastro = 'magenta'
-    elif agente.perfil == "Elderly":
-        color_agente = '#00FF00' # Verde Lima
-        color_rastro = 'lime'
-    else: # Walking (Estándar)
-        color_agente = '#0088FF' # Azulito
-        color_rastro = 'yellow'  # Amarillo clásico
-
-    # 1. Crear la línea del rastro
-    lr, = ax.plot([], [], c=color_rastro, linewidth=1.0, alpha=0.6, zorder=9)
-    lineas_rastro.append(lr)
+        muro_patch = MplPolygon(list(zip(x, y)), closed=True, facecolor=color_muro, edgecolor='#FFFFFF', alpha=1.0, zorder=2)
+        ax.add_patch(muro_patch)
     
-    # 2. Crear la línea de intención (hacia dónde mira, la dejamos blanca)
-    li, = ax.plot([], [], c='white', linestyle=':', linewidth=1.0, alpha=0.7, zorder=9)
-    lineas_intencion.append(li)
+    # Dibujar Salidas dinámicamente
+    zonas_salida_dibujos = []
+    for nombre, pos_salida in model.hitos.items():
+        if 'Salida' in nombre:
+            zs = Circle(pos_salida, RADIO_ZONA_SALIDA, color='lime', alpha=0.2, zorder=1)
+            ax.add_patch(zs)
+            ax.text(pos_salida[0], pos_salida[1], "EXIT", color='lime', ha='center', fontweight='bold', zorder=2)
+            zonas_salida_dibujos.append(zs)
     
-    # 3. Crear el círculo personal (el aura)
-    cp = Circle((0,0), RADIO_PERSONAL, facecolor=color_agente, alpha=0.2, zorder=10, visible=False)
-    ax.add_patch(cp)
-    circulos_personales.append(cp)
-    
-    # 4. Crear el círculo físico (el cuerpo duro)
-    cf = Circle((0,0), RADIO_FISICO, facecolor=color_agente, edgecolor='black', zorder=11, visible=False)
-    ax.add_patch(cf)
-    circulos_fisicos.append(cf)
-
-texto_info = ax.text(2, model.alto-2, "", color="white", fontsize=12, zorder=20)
-ax.axis('off')
-
-cid = fig.canvas.mpl_connect('button_press_event', lambda e: model.crear_fuego(e.xdata, e.ydata) if e.xdata else None)
-
-def init():
-    return circulos_fisicos + circulos_personales + lineas_rastro + lineas_intencion + lineas_grafo + [texto_info] + zonas_salida_dibujos + artistas_fuego
-
-def update(frame):
-    model.step()
-    agentes_activos = 0
-    
-    for i, agente in enumerate(model.todos_los_agentes):
-        lineas_rastro[i].set_data(agente.traza_x, agente.traza_y)
-        lineas_rastro[i].set_visible(True)
-
-        if not agente.evacuado:
-            pos = agente.pos
-            circulos_fisicos[i].center = pos; circulos_fisicos[i].set_visible(True)
-            circulos_personales[i].center = pos; circulos_personales[i].set_visible(True)
+    # Dibujar Zonas Prohibidas para Rolling (Para verificar el mapa)
+    for nombre, datos_espacio in model.espacios_navegables.items():
+        locomotion = datos_espacio['atributos'].get('locomotion', [])
+        # Si la zona NO tiene Rolling, la pintamos de rojo rayado
+        if "Rolling" not in locomotion:
+            poly = Polygon(datos_espacio['poligono'])
+            x, y = poly.exterior.xy
             
-            if agente.destino_actual is not None:
-                lineas_intencion[i].set_data([pos[0], agente.destino_actual[0]], [pos[1], agente.destino_actual[1]])
-                lineas_intencion[i].set_visible(True)
+            zona_patch = MplPolygon(list(zip(x, y)), closed=True, facecolor='red', edgecolor='darkred', alpha=0.3, hatch='//', zorder=1)
+            ax.add_patch(zona_patch)
+            
+            cx, cy = datos_espacio['centroide']
+            ax.text(cx, cy, "NO ROLLING", color='darkred', ha='center', fontweight='bold', fontsize=8, zorder=2)
+    
+    # Dibujar Centros de las Habitaciones (Puntitos/Cruces Cyan)
+    for nombre, pos_centro in model.hitos.items():
+        # Solo dibujamos la cruz si NO es una Salida, NO es una Puerta y NO es una Frontera
+        if not any(palabra in nombre for palabra in ['Salida', 'Puerta', 'Frontera']):
+            # Dibujamos una cruz en el centro
+            ax.plot(pos_centro[0], pos_centro[1], marker='+', color='cyan', markersize=8, zorder=3)
+            # Le ponemos el nombre en pequeñito para identificar la sala
+            ax.text(pos_centro[0], pos_centro[1] + 0.5, "Centro", color='cyan', fontsize=7, ha='center', zorder=3)
+    
+    # Dibujar Grafo
+    lineas_grafo = []
+    for u, v in model.grafo_logico.edges():
+        p1, p2 = model.hitos[u], model.hitos[v]
+        l, = ax.plot([p1[0], p2[0]], [p1[1], p2[1]], c='#00FFFF', linewidth=1, alpha=0.4, zorder=3)
+        lineas_grafo.append(l)
+    
+    circulos_fisicos = []
+    circulos_personales = []
+    lineas_rastro = [] 
+    lineas_intencion = [] 
+    artistas_fuego = []
+    
+    circulos_fisicos = []
+    circulos_personales = []
+    lineas_rastro = [] 
+    lineas_intencion = [] 
+    artistas_fuego = []
+    
+    # --- NUEVO: ASIGNACIÓN DE COLORES SEGÚN EL PERFIL ---
+    for agente in model.todos_los_agentes:
+        # Elegir colores según el perfil
+        if agente.perfil == "Rolling":
+            color_agente = '#FF00FF' # Magenta
+            color_rastro = 'magenta'
+        elif agente.perfil == "Elderly":
+            color_agente = '#00FF00' # Verde Lima
+            color_rastro = 'lime'
+        else: # Walking (Estándar)
+            color_agente = '#0088FF' # Azulito
+            color_rastro = 'yellow'  # Amarillo clásico
+    
+        # 1. Crear la línea del rastro
+        lr, = ax.plot([], [], c=color_rastro, linewidth=1.0, alpha=0.6, zorder=9)
+        lineas_rastro.append(lr)
+        
+        # 2. Crear la línea de intención (hacia dónde mira, la dejamos blanca)
+        li, = ax.plot([], [], c='white', linestyle=':', linewidth=1.0, alpha=0.7, zorder=9)
+        lineas_intencion.append(li)
+        
+        # 3. Crear el círculo personal (el aura)
+        cp = Circle((0,0), RADIO_PERSONAL, facecolor=color_agente, alpha=0.2, zorder=10, visible=False)
+        ax.add_patch(cp)
+        circulos_personales.append(cp)
+        
+        # 4. Crear el círculo físico (el cuerpo duro)
+        cf = Circle((0,0), RADIO_FISICO, facecolor=color_agente, edgecolor='black', zorder=11, visible=False)
+        ax.add_patch(cf)
+        circulos_fisicos.append(cf)
+    
+    texto_info = ax.text(2, model.alto-2, "", color="white", fontsize=12, zorder=20)
+    ax.axis('off')
+    
+    cid = fig.canvas.mpl_connect('button_press_event', lambda e: model.crear_fuego(e.xdata, e.ydata) if e.xdata else None)
+    
+    def init():
+        return circulos_fisicos + circulos_personales + lineas_rastro + lineas_intencion + lineas_grafo + [texto_info] + zonas_salida_dibujos + artistas_fuego
+    
+    def update(frame):
+        model.step()
+        agentes_activos = 0
+        
+        for i, agente in enumerate(model.todos_los_agentes):
+            lineas_rastro[i].set_data(agente.traza_x, agente.traza_y)
+            lineas_rastro[i].set_visible(True)
+    
+            if not agente.evacuado:
+                pos = agente.pos
+                circulos_fisicos[i].center = pos; circulos_fisicos[i].set_visible(True)
+                circulos_personales[i].center = pos; circulos_personales[i].set_visible(True)
+                
+                if agente.destino_actual is not None:
+                    lineas_intencion[i].set_data([pos[0], agente.destino_actual[0]], [pos[1], agente.destino_actual[1]])
+                    lineas_intencion[i].set_visible(True)
+                else:
+                    lineas_intencion[i].set_visible(False)
+                agentes_activos += 1
             else:
+                circulos_fisicos[i].set_visible(False)
+                circulos_personales[i].set_visible(False)
                 lineas_intencion[i].set_visible(False)
-            agentes_activos += 1
-        else:
-            circulos_fisicos[i].set_visible(False)
-            circulos_personales[i].set_visible(False)
-            lineas_intencion[i].set_visible(False)
-            
-    if model.fuegos:
-        for i, (u, v) in enumerate(model.grafo_logico.edges()):
-            peso = model.grafo_logico[u][v]['weight']
-            if peso > 2000: color = 'red'; width = 2
-            elif peso > 20: color = 'yellow'; width = 1.5 
-            else: color = '#00FFFF'; width = 1
-            lineas_grafo[i].set_color(color)
-            lineas_grafo[i].set_linewidth(width)
-            
-    while len(artistas_fuego) < len(model.fuegos) * 2:
-        idx_fuego = len(artistas_fuego) // 2
-        f = model.fuegos[idx_fuego]
-        nucleo = Circle(tuple(f['pos']), f['radio'] * 0.5, color='red', alpha=0.9, zorder=5)
-        aura = Circle(tuple(f['pos']), f['radio'], color='orange', alpha=0.3, zorder=4)
-        ax.add_patch(nucleo); ax.add_patch(aura)
-        artistas_fuego.append(nucleo); artistas_fuego.append(aura)
+                
+        if model.fuegos:
+            for i, (u, v) in enumerate(model.grafo_logico.edges()):
+                peso = model.grafo_logico[u][v]['weight']
+                if peso > 2000: color = 'red'; width = 2
+                elif peso > 20: color = 'yellow'; width = 1.5 
+                else: color = '#00FFFF'; width = 1
+                lineas_grafo[i].set_color(color)
+                lineas_grafo[i].set_linewidth(width)
+                
+        while len(artistas_fuego) < len(model.fuegos) * 2:
+            idx_fuego = len(artistas_fuego) // 2
+            f = model.fuegos[idx_fuego]
+            nucleo = Circle(tuple(f['pos']), f['radio'] * 0.5, color='red', alpha=0.9, zorder=5)
+            aura = Circle(tuple(f['pos']), f['radio'], color='orange', alpha=0.3, zorder=4)
+            ax.add_patch(nucleo); ax.add_patch(aura)
+            artistas_fuego.append(nucleo); artistas_fuego.append(aura)
+        
+        texto_info.set_text(f"Evacuados: {model.evacuados} | Activos: {agentes_activos}")
+        return circulos_fisicos + circulos_personales + lineas_rastro + lineas_intencion + lineas_grafo + [texto_info] + artistas_fuego
     
-    texto_info.set_text(f"Evacuados: {model.evacuados} | Activos: {agentes_activos}")
-    return circulos_fisicos + circulos_personales + lineas_rastro + lineas_intencion + lineas_grafo + [texto_info] + artistas_fuego
+    # =====================================================================
+    # --- 7. EXPORTACIÓN Y RENDERIZADO ---
+    # =====================================================================
+    GUARDAR_GIF = False   # <--- PONLO A 'False' PARA DESACTIVAR LA GRABACIÓN LUEGO
+    ARCHIVO_GIF = os.path.join(BASE_DIR, "resultados", "evacuacion_demo.gif")
+    
+    # Generador inteligente: Solo crea frames mientras queden agentes dentro
+    def generador_frames():
+        frame = 0
+        # Mientras los evacuados sean menos que el total de agentes, sigue grabando
+        while model.evacuados < len(model.todos_los_agentes):
+            yield frame
+            frame += 1
+    
+    # Creamos la animación pasándole el generador en lugar de un número fijo
+    ani = animation.FuncAnimation(
+        fig, update, 
+        frames=generador_frames, 
+        init_func=init, 
+        interval=30, 
+        blit=True,
+        save_count=2000  # Un límite de seguridad (aprox 1 minuto de vídeo a 30fps)
+    )
+    
+    if GUARDAR_GIF:
+        print(f"🎥 Grabando simulación en segundo plano... (Ten paciencia)")
+        ani.save(ARCHIVO_GIF, writer='pillow', fps=30)
+        print(f"✅ ¡Video GIF guardado con éxito en '{ARCHIVO_GIF}'!")
+    else:
+        # Si GUARDAR_GIF es False, simplemente abre la ventana interactiva
+        plt.show()
+    
+    # AL TERMINAR (ya sea al cerrar la ventana o al acabar el GIF), EXPORTA LOS DATOS
+    model.datos.exportar_csv(nombre_salida=ruta_resultados)
+    
 
-# =====================================================================
-# --- 7. EXPORTACIÓN Y RENDERIZADO ---
-# =====================================================================
-GUARDAR_GIF = False   # <--- PONLO A 'False' PARA DESACTIVAR LA GRABACIÓN LUEGO
-ARCHIVO_GIF = os.path.join(BASE_DIR, "resultados", "evacuacion_demo.gif")
 
-# Generador inteligente: Solo crea frames mientras queden agentes dentro
-def generador_frames():
-    frame = 0
-    # Mientras los evacuados sean menos que el total de agentes, sigue grabando
-    while model.evacuados < len(model.todos_los_agentes):
-        yield frame
-        frame += 1
-
-# Creamos la animación pasándole el generador en lugar de un número fijo
-ani = animation.FuncAnimation(
-    fig, update, 
-    frames=generador_frames, 
-    init_func=init, 
-    interval=30, 
-    blit=True,
-    save_count=2000  # Un límite de seguridad (aprox 1 minuto de vídeo a 30fps)
-)
-
-if GUARDAR_GIF:
-    print(f"🎥 Grabando simulación en segundo plano... (Ten paciencia)")
-    ani.save(ARCHIVO_GIF, writer='pillow', fps=30)
-    print(f"✅ ¡Video GIF guardado con éxito en '{ARCHIVO_GIF}'!")
-else:
-    # Si GUARDAR_GIF es False, simplemente abre la ventana interactiva
-    plt.show()
-
-# AL TERMINAR (ya sea al cerrar la ventana o al acabar el GIF), EXPORTA LOS DATOS
-model.datos.exportar_csv(nombre_salida=ruta_resultados)
-
+if __name__ == "__main__":
+    run_legacy_demo()

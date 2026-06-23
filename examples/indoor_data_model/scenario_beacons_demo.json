@@ -1,0 +1,186 @@
+{
+  "scenarioId": "SCENARIO_BEACONS_DEMO_001",
+  "scenarioName": "minimal_beacons_and_hazards_demo",
+  "metadata": {
+    "name": "minimal_beacons_and_hazards_demo",
+    "description": "Beacon and scheduled hazard demo over the minimal indoor model.",
+    "createdAt": "2026-06-22T00:00:00Z",
+    "generator": "codex_evacengine_refactor"
+  },
+  "indoorModelRef": {
+    "path": "minimal_indoor_model.json",
+    "indoorModelId": "IF_MINIMAL_INDOOR_001",
+    "schemaRef": "../../schemas/indoor/indoor_model.schema.json"
+  },
+  "catalogs": {},
+  "population": {
+    "mobilityProfiles": [
+      {
+        "profileId": "MP_WALKING",
+        "label": "Walking adults",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.2,
+        "bodyRadiusM": 0.25,
+        "personalRadiusM": 0.5,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      }
+    ],
+    "agentGroups": [
+      {
+        "groupId": "AG_BEACON_ROOM_A",
+        "count": 3,
+        "mobilityProfileRef": "MP_WALKING",
+        "spawnRef": "SPAWN_ROOM_A",
+        "distribution": "fixed"
+      }
+    ],
+    "agentSpawns": [
+      {
+        "spawnId": "SPAWN_ROOM_A",
+        "levelRef": "LEVEL_00",
+        "cellSpaceRef": "CS_L00_ROOM_A",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            0.8,
+            1.0
+          ]
+        },
+        "capacity": 5,
+        "description": "Spawn near the beacon influence boundary."
+      }
+    ],
+    "agents": []
+  },
+  "beaconSystem": {
+    "enabled": true,
+    "fusion": {
+      "method": "weighted_mean",
+      "defaultRadiusM": 4.0
+    },
+    "beacons": [
+      {
+        "beaconId": "BC_ROOM_A_SMOKE",
+        "levelRef": "LEVEL_00",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            1.0,
+            1.0
+          ]
+        },
+        "sensorTypes": [
+          "smoke"
+        ],
+        "influence": {
+          "type": "radius",
+          "innerRadiusM": 0.2,
+          "radiusM": 2.5
+        },
+        "effects": {
+          "riskPenalty": 0.4
+        },
+        "attributes": {
+          "description": "Simulated local smoke sensor."
+        }
+      }
+    ]
+  },
+  "hazards": {
+    "enabled": true,
+    "sources": [
+      {
+        "hazardId": "HZ_DOOR_DELAYED_BLOCK",
+        "hazardType": "blocked_area",
+        "levelRef": "LEVEL_00",
+        "activation": {
+          "mode": "scheduled",
+          "startStep": 8
+        },
+        "affects": {
+          "cellSpaceRefs": [
+            "CS_L00_DOOR_1"
+          ]
+        },
+        "effects": {
+          "riskPenalty": 1.0,
+          "speedFactor": 0.2,
+          "blockRouting": true
+        },
+        "severity": 1.0
+      }
+    ]
+  },
+  "environmentOverrides": {},
+  "routing": {
+    "algorithm": "dijkstra",
+    "costPolicy": "shortest_distance",
+    "destination": {
+      "mode": "explicit_cells",
+      "cellSpaceRefs": [
+        "CS_L00_ROOM_B"
+      ]
+    },
+    "deriveConnectivityFromEdges": true,
+    "useDynamicWeights": true,
+    "useBeaconRisk": true,
+    "useHazardRisk": true,
+    "useCongestion": false,
+    "replanPolicy": "on_blocked_or_interval",
+    "replanIntervalSteps": 2
+  },
+  "physics": {
+    "bodyRadiusM": 0.25,
+    "personalRadiusM": 0.5,
+    "wallRepulsion": 4.0,
+    "socialRepulsion": 2.0,
+    "maxAccelerationMps2": 6.0
+  },
+  "scheduledEvents": [
+    {
+      "eventId": "EV_BC_ROOM_A_SMOKE_ESCALATES",
+      "step": 2,
+      "eventType": "beacon_update",
+      "beaconRef": "BC_ROOM_A_SMOKE",
+      "patch": {
+        "influence": {
+          "radiusM": 3.2
+        },
+        "effects": {
+          "riskPenalty": 0.7
+        }
+      }
+    }
+  ],
+  "simulationConfig": {
+    "timeStepS": 0.5,
+    "maxSteps": 30,
+    "randomSeed": 13,
+    "enabledOverlays": [
+      "population",
+      "beacons",
+      "hazards"
+    ]
+  },
+  "experiments": {
+    "replications": 1,
+    "parameterSweep": []
+  },
+  "outputs": {
+    "outputFolder": "outputs/beacons_demo",
+    "saveRoutes": true,
+    "saveMetrics": true,
+    "saveTimeSeries": true,
+    "saveEvents": true,
+    "saveTrajectories": true
+  },
+  "scenarioDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.2-draft",
+    "profile": "EvacEngine scenario overlay referencing indoor_model.json"
+  }
+}

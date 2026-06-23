@@ -1,12 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.org/schemas/indoor_data_model/scenario_model.schema.json",
-  "title": "Indoor Data Model — scenario_model.json",
-  "description": "Draft schema for scenario overlays and simulation configuration applied to an indoor_model.json. It references stable IDs from the indoor model and keeps dynamic/simulation data out of the spatial model.",
+  "title": "Indoor Data Model - scenario_model.json",
+  "description": "Scenario overlay for EvacEngine. Spatial truth remains in indoor_model.json; this file contains population, dynamic overlays, routing, physics and output configuration.",
   "type": "object",
+  "required": [
+    "scenarioId",
+    "metadata",
+    "indoorModelRef",
+    "population",
+    "routing",
+    "physics",
+    "simulationConfig"
+  ],
+  "additionalProperties": false,
   "properties": {
     "scenarioId": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "scenarioName": {
       "type": "string"
@@ -17,23 +28,38 @@
     "indoorModelRef": {
       "$ref": "#/$defs/IndoorModelRef"
     },
+    "catalogs": {
+      "$ref": "#/$defs/Catalogs"
+    },
     "population": {
       "$ref": "#/$defs/Population"
     },
-    "beacons": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/Beacon"
-      }
+    "beaconSystem": {
+      "$ref": "#/$defs/BeaconSystem"
     },
     "hazards": {
+      "$ref": "#/$defs/HazardSystem"
+    },
+    "environmentOverrides": {
+      "$ref": "#/$defs/EnvironmentOverrides"
+    },
+    "routing": {
+      "$ref": "#/$defs/Routing"
+    },
+    "physics": {
+      "$ref": "#/$defs/Physics"
+    },
+    "scheduledEvents": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/Hazard"
+        "$ref": "#/$defs/ScheduledEvent"
       }
     },
     "simulationConfig": {
       "$ref": "#/$defs/SimulationConfig"
+    },
+    "experiments": {
+      "$ref": "#/$defs/Experiments"
     },
     "outputs": {
       "$ref": "#/$defs/Outputs"
@@ -42,17 +68,13 @@
       "$ref": "#/$defs/ScenarioDataModelInfo"
     }
   },
-  "required": [
-    "scenarioId",
-    "metadata",
-    "indoorModelRef",
-    "population",
-    "simulationConfig"
-  ],
-  "additionalProperties": false,
   "$defs": {
     "Metadata": {
       "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string"
@@ -74,34 +96,14 @@
         "generator": {
           "type": "string"
         }
-      },
-      "required": [
-        "name"
-      ],
-      "additionalProperties": false
-    },
-    "ScenarioDataModelInfo": {
-      "type": "object",
-      "properties": {
-        "modelName": {
-          "const": "indoor_data_model"
-        },
-        "modelVersion": {
-          "type": "string"
-        },
-        "profile": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "modelName",
-        "modelVersion",
-        "profile"
-      ],
-      "additionalProperties": false
+      }
     },
     "IndoorModelRef": {
       "type": "object",
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
       "properties": {
         "path": {
           "type": "string"
@@ -118,17 +120,35 @@
         "description": {
           "type": "string"
         }
-      },
-      "required": [
-        "path"
-      ],
-      "additionalProperties": false
+      }
+    },
+    "Catalogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mobilityCatalogRef": {
+          "type": "string"
+        },
+        "hazardCatalogRef": {
+          "type": "string"
+        },
+        "behaviorCatalogRef": {
+          "type": "string"
+        }
+      }
     },
     "Population": {
       "type": "object",
+      "required": [
+        "mobilityProfiles",
+        "agentGroups",
+        "agentSpawns"
+      ],
+      "additionalProperties": false,
       "properties": {
         "mobilityProfiles": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "$ref": "#/$defs/MobilityProfile"
           }
@@ -151,16 +171,16 @@
             "$ref": "#/$defs/Agent"
           }
         }
-      },
-      "required": [
-        "mobilityProfiles",
-        "agentGroups",
-        "agentSpawns"
-      ],
-      "additionalProperties": false
+      }
     },
     "MobilityProfile": {
       "type": "object",
+      "required": [
+        "profileId",
+        "locomotionTypes",
+        "baseSpeedMps"
+      ],
+      "additionalProperties": false,
       "properties": {
         "profileId": {
           "type": "string"
@@ -170,6 +190,7 @@
         },
         "locomotionTypes": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "enum": [
               "Walking",
@@ -180,6 +201,14 @@
           }
         },
         "baseSpeedMps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "bodyRadiusM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "personalRadiusM": {
           "type": "number",
           "minimum": 0
         },
@@ -195,16 +224,17 @@
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "profileId",
-        "locomotionTypes",
-        "baseSpeedMps"
-      ],
-      "additionalProperties": false
+      }
     },
     "AgentGroup": {
       "type": "object",
+      "required": [
+        "groupId",
+        "count",
+        "mobilityProfileRef",
+        "spawnRef"
+      ],
+      "additionalProperties": false,
       "properties": {
         "groupId": {
           "type": "string"
@@ -229,17 +259,28 @@
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "groupId",
-        "count",
-        "mobilityProfileRef",
-        "spawnRef"
-      ],
-      "additionalProperties": false
+      }
     },
     "AgentSpawn": {
       "type": "object",
+      "required": [
+        "spawnId",
+        "levelRef",
+        "position"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "cellSpaceRef"
+          ]
+        },
+        {
+          "required": [
+            "nodeRef"
+          ]
+        }
+      ],
+      "additionalProperties": false,
       "properties": {
         "spawnId": {
           "type": "string"
@@ -263,28 +304,16 @@
         "description": {
           "type": "string"
         }
-      },
-      "required": [
-        "spawnId",
-        "levelRef",
-        "position"
-      ],
-      "anyOf": [
-        {
-          "required": [
-            "cellSpaceRef"
-          ]
-        },
-        {
-          "required": [
-            "nodeRef"
-          ]
-        }
-      ],
-      "additionalProperties": false
+      }
     },
     "Agent": {
       "type": "object",
+      "required": [
+        "agentId",
+        "mobilityProfileRef",
+        "initialPosition"
+      ],
+      "additionalProperties": false,
       "properties": {
         "agentId": {
           "type": "string"
@@ -304,16 +333,48 @@
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "agentId",
-        "mobilityProfileRef",
-        "initialPosition"
-      ],
-      "additionalProperties": false
+      }
+    },
+    "BeaconSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "fusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "enum": [
+                "conservative_min",
+                "weighted_mean"
+              ]
+            },
+            "defaultRadiusM": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "beacons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Beacon"
+          }
+        }
+      }
     },
     "Beacon": {
       "type": "object",
+      "required": [
+        "beaconId",
+        "levelRef",
+        "position",
+        "influence"
+      ],
+      "additionalProperties": false,
       "properties": {
         "beaconId": {
           "type": "string"
@@ -336,22 +397,55 @@
         "influence": {
           "$ref": "#/$defs/Influence"
         },
-        "affects": {
-          "$ref": "#/$defs/Affects"
+        "effects": {
+          "$ref": "#/$defs/Effects"
         },
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "beaconId",
-        "levelRef",
-        "position"
-      ],
-      "additionalProperties": false
+      }
+    },
+    "HazardSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Hazard"
+          }
+        }
+      }
     },
     "Hazard": {
       "type": "object",
+      "required": [
+        "hazardId",
+        "hazardType",
+        "levelRef",
+        "activation"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "initialPosition"
+          ]
+        },
+        {
+          "required": [
+            "initialArea"
+          ]
+        },
+        {
+          "required": [
+            "affects"
+          ]
+        }
+      ],
+      "additionalProperties": false,
       "properties": {
         "hazardId": {
           "type": "string"
@@ -383,6 +477,9 @@
         "affects": {
           "$ref": "#/$defs/Affects"
         },
+        "effects": {
+          "$ref": "#/$defs/Effects"
+        },
         "severity": {
           "type": "number",
           "minimum": 0,
@@ -391,77 +488,31 @@
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "hazardId",
-        "hazardType",
-        "levelRef",
-        "activation"
-      ],
-      "anyOf": [
-        {
-          "required": [
-            "initialPosition"
-          ]
-        },
-        {
-          "required": [
-            "initialArea"
-          ]
-        }
-      ],
-      "additionalProperties": false
+      }
     },
-    "SimulationConfig": {
+    "Routing": {
       "type": "object",
-      "properties": {
-        "timeStepS": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
-        "maxSteps": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "randomSeed": {
-          "type": "integer"
-        },
-        "routing": {
-          "$ref": "#/$defs/RoutingConfig"
-        },
-        "enabledOverlays": {
-          "type": "array",
-          "items": {
-            "enum": [
-              "population",
-              "beacons",
-              "hazards"
-            ]
-          }
-        }
-      },
       "required": [
-        "timeStepS",
-        "maxSteps",
-        "routing"
+        "algorithm",
+        "costPolicy",
+        "destination"
       ],
-      "additionalProperties": false
-    },
-    "RoutingConfig": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "sourceLayerRef": {
-          "type": "string"
-        },
-        "sourceDualSpaceRef": {
-          "type": "string"
-        },
-        "routeSelection": {
+        "algorithm": {
           "enum": [
-            "shortest_path",
-            "least_risk",
-            "dynamic_weighted"
+            "dijkstra",
+            "astar"
           ]
+        },
+        "costPolicy": {
+          "enum": [
+            "shortest_distance",
+            "minimum_travel_time"
+          ]
+        },
+        "destination": {
+          "$ref": "#/$defs/Destination"
         },
         "deriveConnectivityFromEdges": {
           "type": "boolean"
@@ -477,16 +528,232 @@
         },
         "useCongestion": {
           "type": "boolean"
+        },
+        "replanPolicy": {
+          "enum": [
+            "never",
+            "on_blocked_or_interval",
+            "every_step"
+          ]
+        },
+        "replanIntervalSteps": {
+          "type": "integer",
+          "minimum": 1
         }
-      },
+      }
+    },
+    "Destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "explicit_cells",
+            "nearest_reachable_anchor"
+          ]
+        },
+        "cellSpaceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "category": {
+          "type": "string"
+        },
+        "function": {
+          "type": "string"
+        }
+      }
+    },
+    "Physics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bodyRadiusM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "personalRadiusM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wallRepulsion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "socialRepulsion": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxAccelerationMps2": {
+          "type": "number",
+          "minimum": 0
+        },
+        "velocityInertia": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.85
+        },
+        "maxTurnRateRadS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "lineOfSightBlend": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.9
+        },
+        "nearLineOfSightBlend": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.9
+        },
+        "doorCenterBias": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "doorEntryInsetM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorExitInsetM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "virtualBoundaryExitInsetM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "linearTransferExitInsetM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorApproachLookaheadM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "linearTransferLookaheadM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorPreEntryDistanceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "linearTransferPreEntryDistanceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorApproachLateralToleranceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wallRepulsionDistanceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wallClearanceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "transferWallClearanceM": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "SimulationConfig": {
+      "type": "object",
       "required": [
-        "sourceDualSpaceRef",
-        "routeSelection"
+        "timeStepS",
+        "maxSteps"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "properties": {
+        "timeStepS": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "randomSeed": {
+          "type": "integer"
+        },
+        "enabledOverlays": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "population",
+              "beacons",
+              "hazards"
+            ]
+          }
+        }
+      }
+    },
+    "EnvironmentOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cellOverrides": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "edgeOverrides": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "ScheduledEvent": {
+      "type": "object",
+      "required": [
+        "eventId",
+        "step",
+        "eventType"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "eventId": {
+          "type": "string"
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eventType": {
+          "type": "string"
+        }
+      }
+    },
+    "Experiments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replications": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parameterSweep": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
     },
     "Outputs": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "outputFolder": {
           "type": "string"
@@ -499,12 +766,21 @@
         },
         "saveTimeSeries": {
           "type": "boolean"
+        },
+        "saveEvents": {
+          "type": "boolean"
+        },
+        "saveTrajectories": {
+          "type": "boolean"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "Activation": {
       "type": "object",
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false,
       "properties": {
         "mode": {
           "enum": [
@@ -521,14 +797,14 @@
           "type": "number",
           "minimum": 0
         }
-      },
-      "required": [
-        "mode"
-      ],
-      "additionalProperties": false
+      }
     },
     "GrowthModel": {
       "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
       "properties": {
         "type": {
           "enum": [
@@ -552,14 +828,14 @@
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "type"
-      ],
-      "additionalProperties": false
+      }
     },
     "Influence": {
       "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
       "properties": {
         "type": {
           "enum": [
@@ -573,20 +849,51 @@
           "type": "number",
           "minimum": 0
         },
+        "innerRadiusM": {
+          "type": "number",
+          "minimum": 0
+        },
         "area": {
           "$ref": "#/$defs/Polygon"
         },
         "attributes": {
           "type": "object"
         }
-      },
-      "required": [
-        "type"
-      ],
-      "additionalProperties": false
+      }
+    },
+    "Effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "riskPenalty": {
+          "type": "number",
+          "minimum": 0
+        },
+        "speedFactor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "visibilityFactor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "capacityFactor": {
+          "type": "number",
+          "minimum": 0
+        },
+        "blockRouting": {
+          "type": "boolean"
+        },
+        "guidanceBias": {
+          "type": "number"
+        }
+      }
     },
     "Affects": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "cellSpaceRefs": {
           "type": "array",
@@ -623,11 +930,15 @@
           },
           "uniqueItems": true
         }
-      },
-      "additionalProperties": false
+      }
     },
     "EntityRef": {
       "type": "object",
+      "required": [
+        "entityType",
+        "entityId"
+      ],
+      "additionalProperties": false,
       "properties": {
         "entityType": {
           "enum": [
@@ -642,15 +953,35 @@
         "entityId": {
           "type": "string"
         }
-      },
+      }
+    },
+    "ScenarioDataModelInfo": {
+      "type": "object",
       "required": [
-        "entityType",
-        "entityId"
+        "modelName",
+        "modelVersion",
+        "profile"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "properties": {
+        "modelName": {
+          "const": "indoor_data_model"
+        },
+        "modelVersion": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        }
+      }
     },
     "Point": {
       "type": "object",
+      "required": [
+        "type",
+        "coordinates"
+      ],
+      "additionalProperties": false,
       "properties": {
         "type": {
           "const": "Point"
@@ -663,15 +994,15 @@
             "type": "number"
           }
         }
-      },
+      }
+    },
+    "Polygon": {
+      "type": "object",
       "required": [
         "type",
         "coordinates"
       ],
-      "additionalProperties": false
-    },
-    "Polygon": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "type": {
           "const": "Polygon"
@@ -692,12 +1023,7 @@
             }
           }
         }
-      },
-      "required": [
-        "type",
-        "coordinates"
-      ],
-      "additionalProperties": false
+      }
     }
   }
 }

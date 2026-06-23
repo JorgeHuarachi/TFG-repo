@@ -3,25 +3,28 @@
   "scenarioName": "minimal_scenario_for_minimal_indoor_model",
   "metadata": {
     "name": "minimal_scenario",
-    "description": "Minimal scenario overlay referencing minimal_indoor_model.json.",
+    "description": "Minimal EvacEngine scenario overlay referencing minimal_indoor_model.json.",
     "createdAt": "2026-01-01T00:00:00Z",
     "generator": "handcrafted_minimal_example"
   },
   "indoorModelRef": {
     "path": "minimal_indoor_model.json",
     "indoorModelId": "IF_MINIMAL_INDOOR_001",
-    "schemaRef": "../schemas/indoor/indoor_model.schema.json"
+    "schemaRef": "../../schemas/indoor/indoor_model.schema.json"
   },
+  "catalogs": {},
   "population": {
     "mobilityProfiles": [
       {
         "profileId": "MP_WALKING_ROLLING",
-        "label": "Default walking/rolling profile",
+        "label": "Default walking and rolling profile",
         "locomotionTypes": [
           "Walking",
           "Rolling"
         ],
         "baseSpeedMps": 1.2,
+        "bodyRadiusM": 0.25,
+        "personalRadiusM": 0.5,
         "canUseStairs": false,
         "canUseRamps": true,
         "canUseElevators": true
@@ -55,35 +58,66 @@
     ],
     "agents": []
   },
-  "beacons": [],
-  "hazards": [],
+  "beaconSystem": {
+    "enabled": false,
+    "fusion": {
+      "method": "conservative_min",
+      "defaultRadiusM": 5.0
+    },
+    "beacons": []
+  },
+  "hazards": {
+    "enabled": false,
+    "sources": []
+  },
+  "environmentOverrides": {},
+  "routing": {
+    "algorithm": "dijkstra",
+    "costPolicy": "shortest_distance",
+    "destination": {
+      "mode": "explicit_cells",
+      "cellSpaceRefs": [
+        "CS_L00_ROOM_B"
+      ]
+    },
+    "deriveConnectivityFromEdges": true,
+    "useDynamicWeights": false,
+    "useBeaconRisk": false,
+    "useHazardRisk": false,
+    "useCongestion": false,
+    "replanPolicy": "never"
+  },
+  "physics": {
+    "bodyRadiusM": 0.25,
+    "personalRadiusM": 0.5,
+    "wallRepulsion": 4.0,
+    "socialRepulsion": 2.0,
+    "maxAccelerationMps2": 6.0
+  },
+  "scheduledEvents": [],
   "simulationConfig": {
     "timeStepS": 0.5,
-    "maxSteps": 300,
+    "maxSteps": 40,
     "randomSeed": 1,
-    "routing": {
-      "sourceLayerRef": "TL_NAV_L00",
-      "sourceDualSpaceRef": "DS_NAV_L00",
-      "routeSelection": "shortest_path",
-      "deriveConnectivityFromEdges": true,
-      "useDynamicWeights": false,
-      "useBeaconRisk": false,
-      "useHazardRisk": false,
-      "useCongestion": false
-    },
     "enabledOverlays": [
       "population"
     ]
+  },
+  "experiments": {
+    "replications": 1,
+    "parameterSweep": []
   },
   "outputs": {
     "outputFolder": "outputs/minimal_scenario",
     "saveRoutes": true,
     "saveMetrics": true,
-    "saveTimeSeries": false
+    "saveTimeSeries": false,
+    "saveEvents": true,
+    "saveTrajectories": true
   },
   "scenarioDataModel": {
     "modelName": "indoor_data_model",
-    "modelVersion": "0.1-draft",
-    "profile": "Scenario overlay referencing indoor_model.json"
+    "modelVersion": "0.2-draft",
+    "profile": "EvacEngine scenario overlay referencing indoor_model.json"
   }
 }

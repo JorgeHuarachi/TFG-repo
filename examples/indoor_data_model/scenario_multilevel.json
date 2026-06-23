@@ -1,0 +1,157 @@
+{
+  "scenarioId": "SCENARIO_MULTILEVEL_001",
+  "scenarioName": "three_floor_evacuation_demo",
+  "metadata": {
+    "name": "three_floor_evacuation_demo",
+    "description": "Multilevel scenario referencing vertical connector endpoints in the three-floor indoor model.",
+    "createdAt": "2026-06-22T00:00:00Z",
+    "generator": "codex_evacengine_refactor"
+  },
+  "indoorModelRef": {
+    "path": "tres_plantas_indoor_model.json",
+    "schemaRef": "../../schemas/indoor/indoor_model.schema.json"
+  },
+  "catalogs": {},
+  "population": {
+    "mobilityProfiles": [
+      {
+        "profileId": "MP_WALKING_VERTICAL",
+        "label": "Walking profile with vertical connector access",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.15,
+        "bodyRadiusM": 0.25,
+        "personalRadiusM": 0.5,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ROLLING_ACCESSIBLE",
+        "label": "Rolling profile avoiding stairs",
+        "locomotionTypes": [
+          "Rolling"
+        ],
+        "baseSpeedMps": 0.9,
+        "bodyRadiusM": 0.3,
+        "personalRadiusM": 0.55,
+        "canUseStairs": false,
+        "canUseRamps": true,
+        "canUseElevators": true
+      }
+    ],
+    "agentGroups": [
+      {
+        "groupId": "AG_L02_WALKING",
+        "count": 4,
+        "mobilityProfileRef": "MP_WALKING_VERTICAL",
+        "spawnRef": "SPAWN_L02_ROOM_001",
+        "distribution": "random_within_space"
+      },
+      {
+        "groupId": "AG_L01_ROLLING",
+        "count": 2,
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "spawnRef": "SPAWN_L01_ROOM_001",
+        "distribution": "random_within_space"
+      }
+    ],
+    "agentSpawns": [
+      {
+        "spawnId": "SPAWN_L02_ROOM_001",
+        "levelRef": "LEVEL_02",
+        "cellSpaceRef": "CS_L02_ROOM_001",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            1.0,
+            1.0
+          ]
+        },
+        "capacity": 12,
+        "description": "Demo spawn on the upper floor."
+      },
+      {
+        "spawnId": "SPAWN_L01_ROOM_001",
+        "levelRef": "LEVEL_01",
+        "cellSpaceRef": "CS_L01_ROOM_001",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            1.0,
+            1.0
+          ]
+        },
+        "capacity": 8,
+        "description": "Accessible demo spawn on the middle floor."
+      }
+    ],
+    "agents": []
+  },
+  "beaconSystem": {
+    "enabled": false,
+    "fusion": {
+      "method": "conservative_min",
+      "defaultRadiusM": 6.0
+    },
+    "beacons": []
+  },
+  "hazards": {
+    "enabled": false,
+    "sources": []
+  },
+  "environmentOverrides": {},
+  "routing": {
+    "algorithm": "astar",
+    "costPolicy": "minimum_travel_time",
+    "destination": {
+      "mode": "nearest_reachable_anchor",
+      "cellSpaceRefs": [
+        "CS_L00_EXIT_001",
+        "CS_L01_EXIT_001",
+        "CS_L02_EXIT_001"
+      ]
+    },
+    "deriveConnectivityFromEdges": true,
+    "useDynamicWeights": true,
+    "useBeaconRisk": false,
+    "useHazardRisk": true,
+    "useCongestion": true,
+    "replanPolicy": "on_blocked_or_interval",
+    "replanIntervalSteps": 6
+  },
+  "physics": {
+    "bodyRadiusM": 0.25,
+    "personalRadiusM": 0.5,
+    "wallRepulsion": 4.0,
+    "socialRepulsion": 2.0,
+    "maxAccelerationMps2": 6.0
+  },
+  "scheduledEvents": [],
+  "simulationConfig": {
+    "timeStepS": 0.5,
+    "maxSteps": 220,
+    "randomSeed": 37,
+    "enabledOverlays": [
+      "population"
+    ]
+  },
+  "experiments": {
+    "replications": 1,
+    "parameterSweep": []
+  },
+  "outputs": {
+    "outputFolder": "outputs/multilevel_scenario",
+    "saveRoutes": true,
+    "saveMetrics": true,
+    "saveTimeSeries": false,
+    "saveEvents": true,
+    "saveTrajectories": true
+  },
+  "scenarioDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.2-draft",
+    "profile": "EvacEngine scenario overlay referencing indoor_model.json"
+  }
+}
