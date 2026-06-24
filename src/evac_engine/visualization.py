@@ -154,7 +154,7 @@ class EvacuationRenderer:
                 continue
             is_virtual = str(data.get("viaBoundaryRef") or "").upper().find("VIRTUAL") >= 0 or source.startswith("VTN_") or target.startswith("VTN_")
             if is_virtual:
-                color, linestyle, alpha = "#dc2626", ":", 0.65
+                continue
             elif data.get("connectorType") in {"Stair", "Ramp", "Elevator"}:
                 color, linestyle, alpha = "#d97706", "-", 0.35
             else:
@@ -396,6 +396,7 @@ def _space_payload(topology: EvacTopology) -> list[dict[str, Any]]:
                 "navigationType": cell.navigation_type,
                 "category": cell.category,
                 "function": cell.function,
+                "isNavigable": cell.is_navigable,
                 "rings": rings,
             }
         )
@@ -551,15 +552,13 @@ HTML_TEMPLATE = """<!doctype html>
       }
       ctx.globalAlpha = 1;
       for (const edge of payload.edges) if (edge.sourceLevel === level || edge.targetLevel === level) {
+        if (isVirtualEdge(edge)) continue;
         const a = project(edge.points[0]), b = project(edge.points[1]);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
-        const virtual = isVirtualEdge(edge);
-        ctx.globalAlpha = virtual ? 0.75 : 0.35;
-        ctx.strokeStyle = virtual ? "#dc2626" : ["Stair", "Ramp", "Elevator"].includes(edge.connectorType) ? "#d97706" : "#64748b";
-        ctx.setLineDash(virtual ? [6 * devicePixelRatio, 4 * devicePixelRatio] : []);
+        ctx.globalAlpha = 0.35;
+        ctx.strokeStyle = ["Stair", "Ramp", "Elevator"].includes(edge.connectorType) ? "#d97706" : "#64748b";
         ctx.stroke();
       }
-      ctx.setLineDash([]);
       ctx.globalAlpha = 1;
       drawTraces(level, project);
       for (const row of rowsForStep(currentStep)) if (row.levelRef === level) {

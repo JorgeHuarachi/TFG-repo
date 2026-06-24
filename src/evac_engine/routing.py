@@ -9,6 +9,11 @@ import networkx as nx
 
 from .domain import Diagnostic, MobilityProfile, Route, WeightedSnapshot
 from .overlays import BeaconState, HazardState
+from .route_recommendation import (
+    RouteRecommendationConfig,
+    EvacuationRouteRecommendationService,
+    SUPPORTED_ROUTE_ALGORITHMS,
+)
 from .topology import EvacTopology
 
 
@@ -33,10 +38,20 @@ class WeightSnapshotCompiler:
         beacon_state = beacon_state or BeaconState()
         congestion = congestion or {}
         routing_config = routing_config or {}
+        blocked_cells = set(hazard_state.blocked_cells)
+        if bool(routing_config.get("useBeaconRisk", True)):
+            threshold = routing_config.get("beaconBlockThreshold")
+            if threshold is not None:
+                try:
+                    block_threshold = float(threshold)
+                except (TypeError, ValueError):
+                    block_threshold = 1.1
+                if 0.0 <= block_threshold <= 1.0:
+                    blocked_cells.update(cell_id for cell_id, risk in beacon_state.cell_risk.items() if float(risk) >= block_threshold)
         graph = nx.DiGraph()
         edge_weights: dict[str, dict[str, Any]] = {}
         for node_id, data in self.topology.graph.nodes(data=True):
-            if node_id not in hazard_state.blocked_cells:
+            if node_id not in blocked_cells:
                 graph.add_node(node_id, **data)
 
         for source, target, key, data in self.topology.graph.edges(keys=True, data=True):
@@ -57,7 +72,7 @@ class WeightSnapshotCompiler:
             time_s=time_s,
             graph=graph,
             edge_weights=edge_weights,
-            blocked_cells=set(hazard_state.blocked_cells),
+            blocked_cells=blocked_cells,
             active_hazards=list(hazard_state.active_hazards),
         )
 
@@ -99,6 +114,7 @@ class RoutingEngine:
     def __init__(self, topology: EvacTopology) -> None:
         self.topology = topology
         self.compiler = WeightSnapshotCompiler(topology)
+        self.recommendations = EvacuationRouteRecommendationService()
 
     def find_route(
         self,
@@ -120,6 +136,8 @@ class RoutingEngine:
             return self._unreachable(origin_id, "", algorithm, cost_policy, "UNKNOWN_ORIGIN")
         if not targets:
             return self._unreachable(origin_id, "", algorithm, cost_policy, "NO_TARGETS")
+        if algorithm not in SUPPORTED_ROUTE_ALGORITHMS:
+            return self._unreachable(origin_id, targets[0], algorithm, cost_policy, "UNSUPPORTED_ALGORITHM")
 
         snapshot = self.compiler.compile(
             step=step,
@@ -131,22 +149,18 @@ class RoutingEngine:
             congestion=congestion,
             routing_config=routing_config,
         )
-        best: Route | None = None
-        for target in targets:
-            if target not in snapshot.graph:
-                continue
-            try:
-                if algorithm == "astar":
-                    path = nx.astar_path(snapshot.graph, origin_id, target, heuristic=self._heuristic, weight="weight")
-                else:
-                    path = nx.shortest_path(snapshot.graph, origin_id, target, weight="weight")
-            except (nx.NetworkXNoPath, nx.NodeNotFound):
-                continue
-            route = self._route_from_path(path, snapshot, origin_id, target, algorithm, cost_policy)
-            if best is None or route.total_cost < best.total_cost:
-                best = route
-        if best:
-            return best
+        candidate = self.recommendations.recommend(
+            snapshot.graph,
+            origin_id,
+            targets,
+            heuristic=self._heuristic,
+            config=RouteRecommendationConfig.from_routing_config(algorithm, routing_config),
+        )
+        if candidate:
+            route = self._route_from_path(candidate.node_sequence, snapshot, origin_id, candidate.destination, algorithm, cost_policy)
+            if candidate.metrics:
+                route.weight_breakdown["routeMetrics"] = dict(candidate.metrics)
+            return route
         return self._unreachable(origin_id, targets[0], algorithm, cost_policy, "NO_ROUTE")
 
     def _targets(self, target_refs: list[str] | None) -> list[str]:
@@ -218,4 +232,3 @@ def _profile_allows(edge_data: dict[str, Any], profile: MobilityProfile | None) 
     if connector_type == "Elevator" and not profile.can_use_elevators:
         return False
     return True
-

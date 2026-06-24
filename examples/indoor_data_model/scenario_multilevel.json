@@ -116,17 +116,32 @@
     "deriveConnectivityFromEdges": true,
     "useDynamicWeights": true,
     "useBeaconRisk": false,
+    "beaconBlockThreshold": 0.85,
     "useHazardRisk": true,
     "useCongestion": true,
     "replanPolicy": "on_blocked_or_interval",
-    "replanIntervalSteps": 6
+    "replanIntervalSteps": 6,
+    "noRouteRetryIntervalSteps": 3
   },
   "physics": {
     "bodyRadiusM": 0.25,
     "personalRadiusM": 0.5,
     "wallRepulsion": 4.0,
-    "socialRepulsion": 2.0,
-    "maxAccelerationMps2": 6.0
+    "socialRepulsion": 2.4,
+    "spawnMinSpacingM": 0.6,
+    "bodySeparationSlackM": 0.04,
+    "doorQueueClearanceM": 0.08,
+    "doorQueueCorrectionMaxM": 0.32,
+    "stairSpeedFactor": 0.55,
+    "rampSpeedFactor": 0.7,
+    "elevatorSpeedFactor": 0.5,
+    "stairCapacity": 1,
+    "rampCapacity": 1,
+    "maxAccelerationMps2": 6.0,
+    "velocityInertia": 0.2,
+    "maxTurnRateRadS": 3.8,
+    "virtualBoundaryEntryInsetM": 0.08,
+    "virtualBoundaryArrivalRadiusM": 0.35
   },
   "scheduledEvents": [],
   "simulationConfig": {

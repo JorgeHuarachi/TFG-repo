@@ -107,7 +107,7 @@ class EvacEngineDesktopApp(tk.Tk):
         self._labeled_entry(config_tab, "Random seed", self.seed_var)
         self._labeled_entry(config_tab, "First group count", self.group_count_var)
         ttk.Label(config_tab, text="Routing algorithm").pack(anchor=tk.W, pady=(8, 0))
-        ttk.Combobox(config_tab, textvariable=self.algorithm_var, state="readonly", values=["dijkstra", "astar"]).pack(fill=tk.X)
+        ttk.Combobox(config_tab, textvariable=self.algorithm_var, state="readonly", values=["dijkstra", "astar", "yen_ksp", "robust_agility"]).pack(fill=tk.X)
         ttk.Label(config_tab, text="Cost policy").pack(anchor=tk.W, pady=(8, 0))
         ttk.Combobox(config_tab, textvariable=self.cost_var, state="readonly", values=["shortest_distance", "minimum_travel_time"]).pack(fill=tk.X)
         ttk.Label(config_tab, text="Output folder").pack(anchor=tk.W, pady=(8, 0))
@@ -307,4 +307,3 @@ class EvacEngineDesktopApp(tk.Tk):
 def run_desktop_app(indoor_path: str | None = None, scenario_path: str | None = None) -> None:
     app = EvacEngineDesktopApp(indoor_path, scenario_path)
     app.mainloop()
-

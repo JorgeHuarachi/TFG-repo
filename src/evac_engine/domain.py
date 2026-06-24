@@ -199,6 +199,8 @@ class AgentState:
     travel_time_s: float = 0.0
     evacuation_time_s: float | None = None
     no_route_reason: str | None = None
+    proximity_slowdown_until_s: float = 0.0
+    proximity_slowdown_scale: float = 1.0
 
     def to_dict(self) -> JsonDict:
         return {

@@ -10,22 +10,32 @@ Este es el punto funcional que conviene conservar antes de seguir iterando:
 
 - El escenario de una planta se simula y visualiza correctamente en el workbench.
 - El escenario multilevel ya mueve agentes entre plantas cuando hay ruta alcanzable.
-- El workbench permite colocar agentes con clic en el nivel activo.
+- El workbench carga rutas escritas o pegadas en `Scenario path` y `Indoor model path`.
+- El workbench separa agentes automaticos y agentes manuales en pestanas.
+- El workbench permite colocar agentes con clic en el nivel activo desde la pestana `Manual`.
 - `Destination mode` evita reducir por error un escenario multisalida a una unica salida.
 - `All scenario exits` usa todas las salidas declaradas por el escenario.
 - `Selected only` fuerza una salida concreta para pruebas controladas de ascensor, rampa o escalera.
 - Las columnas se pintan en negro.
-- Las virtual boundaries se distinguen como aristas rojas discontinuas.
+- Las aristas virtuales `VTN_*` no se pintan en el workbench ni en el HTML standalone para no ensuciar la visualizacion.
 - Rampas y escaleras se pintan con colores distintos y etiqueta `RAMP` / `STAIR`.
 - Las trazas de agentes quedan dibujadas.
 - Los agentes ya no desaparecen al cruzar `VTN_*` en los casos verificados.
 - La salida de rampa hacia virtual boundary ya no se queda bloqueada por repulsion de pared en la prueba de regresion.
+- La salida desde `VTN_*` apunta a una entrada cercana de la celda real, no al centro de la celda, para reducir acelerones visuales.
+- Las celdas puente `EP_VC` se tratan como conectores de capacidad limitada, no como salas de acumulacion.
+- El spawn aleatorio intenta respetar separacion minima entre cuerpos.
+- La repulsion social incluye frenado por espacio personal y empuje lateral simple en cruces cercanos.
+- Los agentes en `no_route` por una baliza o evento dinamico ya pueden recuperar ruta cuando el paso vuelve a estar disponible.
+- Rampas y escaleras tienen factor de velocidad y capacidad configurable desde `physics`.
+- El workbench permite ajustar la velocidad de reproduccion visual con `Playback ms/frame`; esto no cambia la velocidad fisica de la simulacion.
 
 Verificacion ejecutada en este estado:
 
 - `compileall`: OK.
-- `tests.test_evac_engine_refactor`: `14/14 OK`.
-- `scenario_multilevel.json`: `6/6` evacuados, `noRoute: 0`, `largeJumps: 0`.
+- `tests.test_evac_engine_refactor`: `20/20 OK`.
+- `scenario_single_floor.json` con `12` agentes y factores de rampa/escalera: `12/12` evacuados, `noRoute: 0`, `largeJumps: 0`, `bodyOverlapSamples: 118` en QA rapido, `timeS: 80.0`.
+- `scenario_multilevel.json` con factores de rampa/escalera: `6/6` evacuados, `noRoute: 0`, `largeJumps: 0`, `timeS: 41.5`.
 - Agente manual en `LEVEL_02` con `All scenario exits`: evacua en `CS_L02_EXIT_001`.
 - Agente manual en `CS_L01_ROOM_010` forzado a `CS_L00_EXIT_001`: usa cambio de planta por ascensor y evacua.
 - Agente manual en `CS_L01_ROOM_013` forzado a `CS_L00_EXIT_001`: usa rampa y evacua.
@@ -68,6 +78,22 @@ Tests:
 
 - `tests/test_evac_engine_refactor.py`: regresion del loader, routing, simulacion, workbench, beacons, multilevel y casos verticales.
 
+## Regla Sobre Indoor Models Exportados
+
+Los `indoor_model.json` exportados por SpatialEngine son la verdad espacial y no deben editarse para corregir comportamiento de simulacion. En esta iteracion no se modificaron:
+
+- `examples/indoor_data_model/una_sola_planta_indoor_model.json`
+- `examples/indoor_data_model/tres_plantas_indoor_model.json`
+
+Las correcciones de comportamiento viven en:
+
+- `src/evac_engine/simulation.py`: interpretacion runtime, fisica, capacidad, colas y movimiento.
+- `src/evac_engine/web_app.py`: interfaz de ejecucion y configuracion.
+- `examples/indoor_data_model/scenario_*.json`: parametros de simulacion, poblacion, perfiles y destino.
+- `schemas/indoor/scenario_model.schema.json`: contrato del `scenario_model`, no del `indoor_model`.
+
+Esto importa porque los siguientes modelos generados por SpatialEngine deben poder cargarse sin incorporar manualmente estas correcciones dentro del modelo espacial. Si una futura correccion requiere nueva semantica espacial, primero hay que decidir si pertenece al exportador SpatialEngine o al `scenario_model`; no debe parchearse a mano un `indoor_model` generado.
+
 ## Alcance Implementado
 
 - Carga de `indoor_model.json` y `scenario_model.json` mediante `src/evac_engine/loaders.py`.
@@ -94,14 +120,27 @@ Tests:
   - reduccion de velocidad en giros bruscos
   - limite angular de giro (`maxTurnRateRadS`, valor por defecto en codigo)
   - repulsion social basica
+  - frenado por entrada en radio personal
+  - empuje lateral simple en encuentros cercanos y frontales
   - repulsion de pared contra geometrias no navegables por nivel
   - bloqueo geometrico para no cruzar fuera de union de espacios navegables
+- Spawn aleatorio con separacion minima configurable (`spawnMinSpacingM`).
+- Separacion de cuerpos post-paso con margen configurable (`bodySeparationSlackM`).
 - Tratamiento especial de puertas/transferencias:
   - objetivo local hacia el umbral compartido entre celda actual y puerta
   - atraccion reforzada hacia transferencia para evitar oscilaciones laterales
   - entrada corta y limitada al interior de puertas cuando el agente ya toca el umbral
   - radio de llegada reducido para puertas
   - capacidad limitada en transferencias para formar cola
+  - capacidad configurable para escaleras (`stairCapacity`) y rampas (`rampCapacity`)
+  - reduccion de velocidad configurable para escaleras (`stairSpeedFactor`), rampas (`rampSpeedFactor`) y ascensores (`elevatorSpeedFactor`)
+  - celdas `EP_VC` tratadas como conectores de capacidad 1
+  - cola previa al conector con margen configurable (`doorQueueClearanceM`)
+  - limite de correccion por tick para evitar saltos (`doorQueueCorrectionMaxM`)
+- Recuperacion de rutas:
+  - `noRouteRetryIntervalSteps` controla cada cuantos pasos reintenta planificar un agente que quedo sin ruta.
+  - Si existe un evento dinamico pendiente de baliza, la simulacion no termina solo porque todos los agentes esten temporalmente en `no_route`.
+  - Cuando una baliza desbloquea una celda, se emite `agent_route_recovered`.
 - Tratamiento de `VTN_*`:
   - no se fuerza el salto al centro de celda
   - si el agente llega fisicamente a la celda siguiente, se actualiza el estado
@@ -153,6 +192,37 @@ El archivo legacy `src/MLSM_EvacEngine.py` aun existe como referencia. Lo que se
 - `MP_CHILD`: caminante mas pequeno y rapido.
 - `MP_ROLLING_ACCESSIBLE`: movilidad rolling, sin escaleras, con rampas/elevadores.
 
+## Beacons
+
+Estado actual:
+
+- El backend soporta `beaconSystem.beacons`.
+- `BeaconSimulator` calcula riesgo por celda y por edge a partir de posicion, radio/influencia y `riskPenalty`.
+- El estado de beacons se evalua en cada `step` de simulacion, usando el `timeStepS` activo.
+- Una baliza no cambia su `riskPenalty` continuamente por si sola: cambia cuando se aplican `scheduledEvents` de tipo `beacon_update`, `beacon_enable`, `beacon_disable` o `beacon_add`.
+- `riskPenalty` es el valor de peligro/riesgo emitido por la baliza; la seguridad visual es `1 - risk`.
+- `scheduledEvents` soporta `beacon_update`, `beacon_enable`, `beacon_disable` y `beacon_add`.
+- El routing puede usar `useBeaconRisk` para penalizar rutas segun el estado procesado de las balizas.
+- La ruta se recalcula cuando no existe ruta, cuando una celda restante queda bloqueada, o cada `replanIntervalSteps`; los agentes en `no_route` reintentan cada `noRouteRetryIntervalSteps`.
+- El workbench permite crear/editar beacons desde el panel lateral y colocarlos con clic sobre la planta activa.
+- El placement visual acepta geometria navegable y no navegable: puedes marcar `ceiling`, `wall`, `floor` o `free` como superficie de montaje y colocar la baliza sobre salas, paredes, columnas u otros espacios dibujados.
+- El workbench dibuja cada baliza sobre el plano, incluyendo su radio de influencia.
+- El panel de curva permite editar puntos `timeS, riskPenalty`, arrastrarlos sobre el grafico, previsualizarlos y generar automaticamente `scheduledEvents` de tipo `beacon_update`.
+- Los eventos generados desde la curva se etiquetan con `source: "workbench_beacon_curve"` para poder regenerarlos sin borrar otros eventos manuales.
+- `useBeaconRisk` activa la penalizacion de rutas por riesgo de balizas.
+- `beaconBlockThreshold` convierte una celda en bloqueada para routing si el riesgo fusionado de baliza alcanza ese umbral.
+- El workbench marca visualmente las celdas afectadas con numero de seguridad `S`; cuando el riesgo supera `beaconBlockThreshold`, la celda se pinta roja y muestra `BLOCKED`.
+- La linea de vision usada para lookahead se corta si atraviesa geometria no navegable de muro/columna.
+- La ralentizacion por proximidad entre agentes tiene una memoria corta (`proximitySlowdownMemoryS`) para que el agente recupere velocidad despues de separarse.
+- Si un agente esta dentro de una celda bloqueada por beacon, intenta escapar por un vecino navegable con menor riesgo antes de quedar esperando sin ruta.
+
+Pendiente:
+
+- La curva actual edita `riskPenalty`; no hay todavia una segunda vista semantica `safety -> riskPenalty` con transformacion explicita.
+- El workbench no persiste automaticamente los beacons al JSON de escenario en disco; los manda al simulador desde el estado de la UI y muestra el JSON resultante en `Beacons` y `Dynamic Events`.
+- Falta una UX avanzada para arrastrar beacons ya colocados, editar orientacion 3D real de techo/pared o dibujar zonas direccionales de influencia.
+- La huida local desde celdas bloqueadas por beacon es heuristica y vecinal; falta calibrarla con un modelo de exposicion/gradiente continuo y con decisiones de grupo.
+
 ## Workbench: Colocar Agentes Visualmente
 
 Comando:
@@ -170,17 +240,19 @@ http://127.0.0.1:8765/?scenario=examples/indoor_data_model/scenario_single_floor
 
 Uso:
 
-1. Espera a que cargue el plano.
-2. Selecciona `Level`.
-3. En `Click profile`, selecciona el perfil del agente.
-4. Deja `Click placement` en `On`.
-5. Haz clic dentro de una celda navegable.
+1. Escribe o pega el escenario en `Scenario path`.
+2. Deja `Indoor model path` vacio para usar el `indoorModelRef.path` del escenario, o pega ahi un `indoor_model.json` concreto si quieres forzarlo.
+3. Selecciona `Level`.
+4. Para poblacion automatica, usa la pestana `Automatic`: `Agents`, `Spawn cell`, `Spawn X/Y` y `Group distribution`.
+5. Para colocar agentes a mano, usa la pestana `Manual`: elige `Click profile`, deja `Click placement` en `On` y haz clic dentro de una celda navegable.
 6. El agente aparece en `Manual Agents` con coordenadas exactas.
 7. Repite para crear agentes dispersos por distintas salas/zonas.
 8. Deja `Geometry QA` desactivado para iterar rapido.
 9. Pulsa `Run simulation`.
 
 Si haces clic en pared o fuera de una celda navegable, el workbench ignora el clic.
+
+Si tus `indoor_model.json` estan en otra carpeta, pega la ruta completa del archivo en `Indoor model path` y pulsa `Reload scenario`.
 
 ## Formato De Agentes Manuales
 
@@ -200,7 +272,7 @@ Ejemplo:
 ]
 ```
 
-Cuando `Manual Agents` contiene elementos, el workbench usa esos agentes exactos y desactiva el grupo automatico para esa ejecucion.
+Cuando esta activa la pestana `Manual`, el workbench usa los agentes exactos de `Manual Agents`. Cuando esta activa `Automatic`, ignora `Manual Agents` y usa el grupo automatico configurado.
 
 ## Workbench Multilevel
 
@@ -215,7 +287,7 @@ Uso recomendado:
 
 1. Deja `Destination mode` en `All scenario exits` para comprobar que cada agente usa cualquier salida alcanzable del escenario.
 2. Selecciona `LEVEL_01` o `LEVEL_02` en el selector de nivel.
-3. Activa `Click placement`.
+3. Entra en la pestana `Manual` y activa `Click placement`.
 4. Coloca agentes con clic dentro de celdas navegables.
 5. Pulsa `Run simulation`.
 6. Cambia de nivel para seguir el movimiento entre plantas.
@@ -239,13 +311,26 @@ Generar HTML para una planta:
 
 ```powershell
 cd C:\Users\alumno\TFG-repo
-.\.venv\Scripts\python.exe -B -m src.evac_engine render --scenario examples\indoor_data_model\scenario_single_floor.json --html .tmp\qa_single_floor_transfer_focus.html --level LEVEL_00 --first-group-count 12 --time-step 0.25 --max-steps 1200 --algorithm astar --cost-policy minimum_travel_time --skip-geometry-qa
+.\.venv\Scripts\python.exe -B -m src.evac_engine run --scenario examples\indoor_data_model\scenario_single_floor.json --max-steps 1200 --time-step 0.25 --first-group-count 12 --skip-geometry-qa --output-dir .tmp\view_single --html .tmp\view_single\simulation.html
 ```
 
 Abrir:
 
 ```text
-C:\Users\alumno\TFG-repo\.tmp\qa_single_floor_transfer_focus.html
+C:\Users\alumno\TFG-repo\.tmp\view_single\simulation.html
+```
+
+Generar HTML multilevel:
+
+```powershell
+cd C:\Users\alumno\TFG-repo
+.\.venv\Scripts\python.exe -B -m src.evac_engine run --scenario examples\indoor_data_model\scenario_multilevel.json --max-steps 500 --time-step 0.25 --skip-geometry-qa --output-dir .tmp\view_multilevel --html .tmp\view_multilevel\simulation.html
+```
+
+Abrir:
+
+```text
+C:\Users\alumno\TFG-repo\.tmp\view_multilevel\simulation.html
 ```
 
 Verificacion completa de geometria:
@@ -265,9 +350,11 @@ Campos QA clave:
 Resultado verificado el 2026-06-23:
 
 - `evacuated`: `12/12`
-- `stepsExecuted`: `143`
-- `timeS`: `35.75`
+- `stepsExecuted`: `320`
+- `timeS`: `80.0`
 - `largeJumps`: `0`
+- `maxStepDistanceM`: `0.967095`
+- `bodyOverlapSamples`: `118`
 - `outsideNavigableSamples`: `0`
 - `segmentOutsideNavigable`: `0`
 
@@ -291,6 +378,8 @@ Pero no se debe considerar todavia equivalente al EvacEngine legacy. Lo que falt
 - steering continuo tipo `frames_transicion` 100% equivalente al legacy;
 - repulsion de muro con curva de fuerza calibrada contra el legacy;
 - alineacion de puerta validada en escenarios mas densos y multisalida;
-- fuerza social con ralentizacion longitudinal, no solo empuje lateral;
-- gestion de atascos con ruido controlado y desbloqueo local;
-- controles persistentes de autoría para guardar escenarios editados desde el workbench.
+- fuerza social calibrada contra el legacy; ya existe ralentizacion longitudinal y empuje lateral basicos, pero no estan calibrados al 100%;
+- gestion de atascos con ruido controlado, prioridad de paso y desbloqueo local;
+- modelo densidad-flujo especifico para escaleras/rampas en grupos numerosos;
+- calibracion empirica de `baseSpeedMps`, `stairSpeedFactor`, `rampSpeedFactor`, capacidades y radios por perfil;
+- controles persistentes de autoria para guardar escenarios editados desde el workbench.

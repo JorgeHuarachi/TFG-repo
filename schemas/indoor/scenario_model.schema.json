@@ -502,7 +502,9 @@
         "algorithm": {
           "enum": [
             "dijkstra",
-            "astar"
+            "astar",
+            "yen_ksp",
+            "robust_agility"
           ]
         },
         "costPolicy": {
@@ -523,6 +525,11 @@
         "useBeaconRisk": {
           "type": "boolean"
         },
+        "beaconBlockThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "useHazardRisk": {
           "type": "boolean"
         },
@@ -539,6 +546,70 @@
         "replanIntervalSteps": {
           "type": "integer",
           "minimum": 1
+        },
+        "noRouteRetryIntervalSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "routeRecommendation": {
+          "$ref": "#/$defs/RouteRecommendation"
+        }
+      }
+    },
+    "RouteRecommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "routeSelection": {
+          "enum": [
+            "lowest_cost",
+            "highest_robustness",
+            "highest_agility",
+            "robust_agility"
+          ]
+        },
+        "kShortestPaths": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "candidateCostTolerance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "robustnessTolerance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "centralityTolerance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "centralityMaxPaths": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "centralityMaxOverlap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "costWeight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "robustnessWeight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "agilityWeight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "agilityAggregation": {
+          "enum": [
+            "mean",
+            "geometric"
+          ]
         }
       }
     },
@@ -587,6 +658,49 @@
           "type": "number",
           "minimum": 0
         },
+        "proximitySlowdownMemoryS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "spawnMinSpacingM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bodySeparationSlackM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorQueueClearanceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorQueueCorrectionMaxM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stairSpeedFactor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rampSpeedFactor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "elevatorSpeedFactor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "stairCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rampCapacity": {
+          "type": "integer",
+          "minimum": 1
+        },
         "maxAccelerationMps2": {
           "type": "number",
           "minimum": 0
@@ -624,6 +738,14 @@
           "minimum": 0
         },
         "virtualBoundaryExitInsetM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "virtualBoundaryEntryInsetM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "virtualBoundaryArrivalRadiusM": {
           "type": "number",
           "minimum": 0
         },

@@ -74,7 +74,7 @@ def _add_runtime_override_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-steps", type=int, help="Override simulationConfig.maxSteps")
     parser.add_argument("--seed", type=int, help="Override simulationConfig.randomSeed")
     parser.add_argument("--first-group-count", type=int, help="Override the first population group count")
-    parser.add_argument("--algorithm", choices=["dijkstra", "astar"], help="Override routing.algorithm")
+    parser.add_argument("--algorithm", choices=["dijkstra", "astar", "yen_ksp", "robust_agility"], help="Override routing.algorithm")
     parser.add_argument("--cost-policy", choices=["shortest_distance", "minimum_travel_time"], help="Override routing.costPolicy")
 
 

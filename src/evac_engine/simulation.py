@@ -66,6 +66,7 @@ class EvacuationModel:
         congestion = self._congestion()
         route_targets = list(((self.scenario.routing.get("destination") or {}).get("cellSpaceRefs") or []))
         routing_config = dict(self.scenario.routing)
+        blocked_route_cells = self._routing_blocked_cells(hazard_state.blocked_cells, beacon_state, routing_config)
         cost_policy = str(routing_config.get("costPolicy", "shortest_distance"))
         algorithm = str(routing_config.get("algorithm", "dijkstra"))
         replan = str(routing_config.get("replanPolicy", "on_blocked_or_interval"))
@@ -73,6 +74,31 @@ class EvacuationModel:
 
         decisions: list[tuple[AgentState, str, tuple[float, float], tuple[float, float]]] = []
         for agent in self.agents:
+            if agent.status == "no_route" and self._should_retry_no_route(replan, replan_interval):
+                profile = self.scenario.mobility_profiles[agent.profile_id]
+                agent.route = self.routing_engine.find_route(
+                    origin=agent.current_cell,
+                    target_refs=route_targets,
+                    mobility_profile=profile,
+                    algorithm=algorithm,
+                    cost_policy=cost_policy,
+                    hazard_state=hazard_state,
+                    beacon_state=beacon_state,
+                    congestion=congestion,
+                    routing_config=routing_config,
+                    step=self.step_count,
+                    time_s=self.time_s,
+                )
+                agent.route_index = 0
+                if agent.route.reachable:
+                    agent.status = "active"
+                    agent.no_route_reason = None
+                    self._event("agent_route_recovered", agent, {"route": agent.route.to_dict()})
+                else:
+                    agent.velocity = (0.0, 0.0)
+                    agent.no_route_reason = (agent.route.diagnostics[0].code if agent.route.diagnostics else "NO_ROUTE")
+                    self._record_trajectory(agent)
+                    continue
             if agent.status != "active":
                 agent.velocity = (0.0, 0.0)
                 self._record_trajectory(agent)
@@ -85,7 +111,26 @@ class EvacuationModel:
                 self._record_trajectory(agent)
                 continue
             profile = self.scenario.mobility_profiles[agent.profile_id]
-            if self._needs_route(agent, replan, replan_interval, hazard_state.blocked_cells):
+            if agent.current_cell in blocked_route_cells:
+                escape_cell = self._beacon_escape_cell(agent, beacon_state, blocked_route_cells, hazard_state.blocked_cells, profile)
+                if escape_cell:
+                    agent.route = None
+                    agent.route_index = 0
+                    speed = profile.base_speed_mps * hazard_state.speed_factors.get(agent.current_cell, 1.0) * self._movement_speed_factor(agent.current_cell, escape_cell)
+                    next_pos, arrived, next_velocity = self._advance(agent, escape_cell, speed)
+                    decisions.append((agent, escape_cell if arrived else agent.current_cell, next_pos, next_velocity))
+                    self._event(
+                        "agent_beacon_escape",
+                        agent,
+                        {
+                            "fromCellSpaceRef": agent.current_cell,
+                            "targetCellSpaceRef": escape_cell,
+                            "fromRisk": round(float(beacon_state.cell_risk.get(agent.current_cell, 0.0)), 6),
+                            "targetRisk": round(float(beacon_state.cell_risk.get(escape_cell, 0.0)), 6),
+                        },
+                    )
+                    continue
+            if self._needs_route(agent, replan, replan_interval, blocked_route_cells):
                 agent.route = self.routing_engine.find_route(
                     origin=agent.current_cell,
                     target_refs=route_targets,
@@ -130,7 +175,7 @@ class EvacuationModel:
                 self._event("agent_evacuated", agent, {"cellSpaceRef": agent.current_cell})
                 self._record_trajectory(agent)
                 continue
-            speed = profile.base_speed_mps * hazard_state.speed_factors.get(agent.current_cell, 1.0)
+            speed = profile.base_speed_mps * hazard_state.speed_factors.get(agent.current_cell, 1.0) * self._movement_speed_factor(agent.current_cell, target_cell)
             next_pos, arrived, next_velocity = self._advance(agent, target_cell, speed)
             decisions.append((agent, target_cell if arrived else agent.current_cell, next_pos, next_velocity))
 
@@ -153,7 +198,7 @@ class EvacuationModel:
         self.time_s = round(self.time_s + self.scenario.time_step_s, 9)
 
     def run(self, output_dir: str | Path | None = None) -> SimulationResult:
-        while self.step_count < self.scenario.max_steps and any(agent.status == "active" for agent in self.agents):
+        while self.step_count < self.scenario.max_steps and self._simulation_has_work():
             self.step()
         result = SimulationResult(
             scenario_id=self.scenario.scenario_id,
@@ -219,21 +264,22 @@ class EvacuationModel:
     def _materialize_agents(self) -> list[AgentState]:
         spawns = {spawn["spawnId"]: spawn for spawn in self.scenario.spawns}
         agents: list[AgentState] = []
+        occupied: dict[str, list[tuple[tuple[float, float], float]]] = {}
         for raw in self.scenario.agents:
             spawn_cell = self.indoor.resolve_cell_ref(raw.get("initialCellSpaceRef"))
             if not spawn_cell:
                 continue
             position = _coords(raw.get("initialPosition")) or self.topology.node_position(spawn_cell) or (0.0, 0.0)
-            agents.append(
-                AgentState(
-                    agent_id=raw["agentId"],
-                    group_id=raw.get("groupRef"),
-                    profile_id=raw["mobilityProfileRef"],
-                    current_cell=spawn_cell,
-                    level=self.topology.node_level(spawn_cell),
-                    position=position,
-                )
+            agent = AgentState(
+                agent_id=raw["agentId"],
+                group_id=raw.get("groupRef"),
+                profile_id=raw["mobilityProfileRef"],
+                current_cell=spawn_cell,
+                level=self.topology.node_level(spawn_cell),
+                position=position,
             )
+            agents.append(agent)
+            occupied.setdefault(spawn_cell, []).append((position, self._profile_body_radius(agent.profile_id)))
         for group in self.scenario.groups:
             spawn = spawns[group["spawnRef"]]
             profile_id = group["mobilityProfileRef"]
@@ -242,7 +288,15 @@ class EvacuationModel:
                 continue
             count = int(group.get("count", 0))
             for index in range(count):
-                position = self._spawn_position(spawn, cell_id, str(group.get("distribution", "fixed")))
+                radius = self._profile_body_radius(profile_id)
+                position = self._spawn_position(
+                    spawn,
+                    cell_id,
+                    str(group.get("distribution", "fixed")),
+                    occupied.get(cell_id, []),
+                    radius,
+                )
+                occupied.setdefault(cell_id, []).append((position, radius))
                 agents.append(
                     AgentState(
                         agent_id=f"{group['groupId']}_{index + 1:04d}",
@@ -255,19 +309,40 @@ class EvacuationModel:
                 )
         return agents
 
-    def _spawn_position(self, spawn: dict[str, Any], cell_id: str, distribution: str) -> tuple[float, float]:
+    def _spawn_position(
+        self,
+        spawn: dict[str, Any],
+        cell_id: str,
+        distribution: str,
+        occupied: list[tuple[tuple[float, float], float]] | None = None,
+        radius: float | None = None,
+    ) -> tuple[float, float]:
         fixed = _coords(spawn.get("position")) or self.topology.node_position(cell_id) or (0.0, 0.0)
         if distribution != "random_within_space":
             return fixed
         geom = self.topology.cell_geometry(cell_id)
         if geom is None or geom.is_empty:
             return fixed
+        occupied = occupied or []
+        radius = radius if radius is not None else float(self.scenario.physics.get("bodyRadiusM", 0.25))
+        min_spacing = float(self.scenario.physics.get("spawnMinSpacingM", radius * 2.4))
         minx, miny, maxx, maxy = geom.bounds
-        for _ in range(100):
+        best_position = fixed
+        best_clearance = -1.0
+        for _ in range(220):
             point = Point(self.random.uniform(minx, maxx), self.random.uniform(miny, maxy))
-            if geom.covers(point):
-                return (float(point.x), float(point.y))
-        return fixed
+            if not geom.covers(point):
+                continue
+            position = (float(point.x), float(point.y))
+            if not occupied:
+                return position
+            clearance = min(_distance(position, other_position) - (radius + other_radius) for other_position, other_radius in occupied)
+            if clearance > best_clearance:
+                best_position = position
+                best_clearance = clearance
+            if clearance >= min_spacing:
+                return position
+        return best_position
 
     def _resolve_overlaps(self, agents: list[AgentState]) -> None:
         by_level: dict[str, list[AgentState]] = {}
@@ -277,15 +352,15 @@ class EvacuationModel:
             cell = self.indoor.cells_by_id.get(agent.current_cell)
             if not cell or cell.navigation_type != "GeneralSpace":
                 continue
-            if self._is_transfer_like(self._next_route_cell(agent) or ""):
+            if self._is_transfer_like(agent.current_cell):
                 continue
             by_level.setdefault(agent.level, []).append(agent)
         for level_agents in by_level.values():
-            for _ in range(12):
+            for _ in range(16):
                 moved = False
                 for index, left in enumerate(level_agents):
                     for right in level_agents[index + 1 :]:
-                        min_distance = self._body_radius(left) + self._body_radius(right)
+                        min_distance = self._body_radius(left) + self._body_radius(right) + float(self.scenario.physics.get("bodySeparationSlackM", 0.04))
                         dx = right.position[0] - left.position[0]
                         dy = right.position[1] - left.position[1]
                         distance = (dx * dx + dy * dy) ** 0.5
@@ -300,6 +375,10 @@ class EvacuationModel:
                         right_candidate = (right.position[0] + ux * overlap, right.position[1] + uy * overlap)
                         left.position = self._limited_soft_project(left.current_cell, left.position, left_candidate)
                         right.position = self._limited_soft_project(right.current_cell, right.position, right_candidate)
+                        left.velocity = (left.velocity[0] * 0.65, left.velocity[1] * 0.65)
+                        right.velocity = (right.velocity[0] * 0.65, right.velocity[1] * 0.65)
+                        self._mark_proximity_slowdown(left, 0.45)
+                        self._mark_proximity_slowdown(right, 0.45)
                         moved = True
                 if not moved:
                     break
@@ -318,7 +397,7 @@ class EvacuationModel:
                 filtered.append((agent, new_cell, new_pos, new_velocity))
                 continue
             if occupied.get(new_cell, 0) + reserved.get(new_cell, 0) >= self._transfer_capacity(new_cell):
-                filtered.append((agent, agent.current_cell, agent.position, (0.0, 0.0)))
+                filtered.append((agent, agent.current_cell, self._queue_before_transfer(agent, new_cell), (0.0, 0.0)))
                 if not any(
                     event.get("eventType") == "agent_waited_capacity"
                     and event.get("agentId") == agent.agent_id
@@ -331,20 +410,66 @@ class EvacuationModel:
             filtered.append((agent, new_cell, new_pos, new_velocity))
         return filtered
 
+    def _queue_before_transfer(self, agent: AgentState, transfer_cell: str) -> tuple[float, float]:
+        current_geom = self.topology.cell_geometry(agent.current_cell)
+        transfer_geom = self.topology.cell_geometry(transfer_cell)
+        if current_geom is None or current_geom.is_empty or transfer_geom is None or transfer_geom.is_empty:
+            return agent.position
+        entry = self._shared_entry_point(current_geom, transfer_geom)
+        if entry is None:
+            return agent.position
+        transfer_center = transfer_geom.representative_point()
+        axis = _unit((float(transfer_center.x) - entry[0], float(transfer_center.y) - entry[1]))
+        if axis == (0.0, 0.0):
+            return agent.position
+        queue_distance = (
+            self._body_radius(agent) * 2.0
+            + float(self.scenario.physics.get("bodySeparationSlackM", 0.04))
+            + float(self.scenario.physics.get("doorQueueClearanceM", 0.08))
+        )
+        progress = (agent.position[0] - entry[0]) * axis[0] + (agent.position[1] - entry[1]) * axis[1]
+        if progress <= -queue_distance:
+            return agent.position
+        candidate = (entry[0] - axis[0] * queue_distance, entry[1] - axis[1] * queue_distance)
+        correction_distance = _distance(agent.position, candidate)
+        max_correction = float(self.scenario.physics.get("doorQueueCorrectionMaxM", 0.32))
+        if correction_distance > max_correction > 0:
+            correction_direction = _unit((candidate[0] - agent.position[0], candidate[1] - agent.position[1]))
+            candidate = (
+                agent.position[0] + correction_direction[0] * max_correction,
+                agent.position[1] + correction_direction[1] * max_correction,
+            )
+        if current_geom.buffer(1e-6).covers(Point(candidate)):
+            return candidate
+        try:
+            _, nearest = nearest_points(Point(candidate), current_geom)
+            return (float(nearest.x), float(nearest.y))
+        except Exception:
+            return agent.position
+
     def _is_transfer_like(self, cell_id: str) -> bool:
         if cell_id.startswith("VTN_"):
+            return True
+        if self._is_virtual_endpoint(cell_id):
             return True
         cell = self.indoor.cells_by_id.get(cell_id)
         return bool(cell and cell.navigation_type == "TransferSpace")
 
+    def _is_virtual_endpoint(self, cell_id: str) -> bool:
+        return "_EP_VC_" in cell_id
+
     def _transfer_capacity(self, cell_id: str) -> int:
         if cell_id.startswith("VTN_"):
             return 2
+        if self._is_virtual_endpoint(cell_id):
+            return 1
         cell = self.indoor.cells_by_id.get(cell_id)
         if not cell:
             return 1
-        if cell.category in {"Stair", "Ramp"}:
-            return 3
+        if cell.category == "Stair":
+            return max(1, int(self.scenario.physics.get("stairCapacity", 1)))
+        if cell.category == "Ramp":
+            return max(1, int(self.scenario.physics.get("rampCapacity", 1)))
         if cell.category == "Elevator":
             return 4
         if cell.category == "Exit":
@@ -391,7 +516,10 @@ class EvacuationModel:
         return projected
 
     def _body_radius(self, agent: AgentState) -> float:
-        profile = self.scenario.mobility_profiles.get(agent.profile_id)
+        return self._profile_body_radius(agent.profile_id)
+
+    def _profile_body_radius(self, profile_id: str) -> float:
+        profile = self.scenario.mobility_profiles.get(profile_id)
         if not profile:
             return float(self.scenario.physics.get("bodyRadiusM", 0.25))
         return float(profile.attributes.get("bodyRadiusM", self.scenario.physics.get("bodyRadiusM", 0.25)))
@@ -410,6 +538,106 @@ class EvacuationModel:
             return True
         return interval > 0 and self.step_count > 0 and self.step_count % interval == 0
 
+    def _beacon_escape_cell(
+        self,
+        agent: AgentState,
+        beacon_state: Any,
+        blocked_route_cells: set[str],
+        hazard_blocked_cells: set[str],
+        profile: MobilityProfile,
+    ) -> str | None:
+        current_risk = float(beacon_state.cell_risk.get(agent.current_cell, 0.0))
+        if current_risk <= 0.0:
+            return None
+        candidates: list[tuple[int, float, float, str]] = []
+        for neighbor in self.topology.graph.successors(agent.current_cell):
+            if neighbor in hazard_blocked_cells:
+                continue
+            if not self._profile_allows_transition(agent.current_cell, neighbor, profile):
+                continue
+            neighbor_risk = float(beacon_state.cell_risk.get(neighbor, 0.0))
+            safer = neighbor_risk < current_risk - 1e-9
+            unblocked = neighbor not in blocked_route_cells
+            if not safer and not unblocked:
+                continue
+            position = self.topology.node_position(neighbor) or self._cell_representative(neighbor)
+            distance = _distance(agent.position, position) if position else 0.0
+            candidates.append((0 if unblocked else 1, neighbor_risk, distance, neighbor))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        return candidates[0][3]
+
+    def _profile_allows_transition(self, source: str, target: str, profile: MobilityProfile) -> bool:
+        edges = self.topology.graph.get_edge_data(source, target) or {}
+        for data in edges.values():
+            edge_locomotion = set(data.get("locomotionTypes") or ["Walking", "Rolling"])
+            if edge_locomotion and not edge_locomotion.intersection(profile.locomotion_types):
+                continue
+            connector_type = str(data.get("connectorType") or "")
+            if connector_type == "Stair" and not profile.can_use_stairs:
+                continue
+            if connector_type == "Ramp" and not profile.can_use_ramps:
+                continue
+            if connector_type == "Elevator" and not profile.can_use_elevators:
+                continue
+            return True
+        return False
+
+    def _cell_representative(self, cell_id: str) -> tuple[float, float] | None:
+        cell = self.indoor.cells_by_id.get(cell_id)
+        if cell and cell.representative_point:
+            return cell.representative_point
+        geom = self.topology.cell_geometry(cell_id)
+        if geom is not None and not geom.is_empty:
+            point = geom.representative_point()
+            return (float(point.x), float(point.y))
+        return None
+
+    def _should_retry_no_route(self, replan: str, interval: int) -> bool:
+        if replan == "never":
+            return False
+        retry_interval = int(self.scenario.routing.get("noRouteRetryIntervalSteps", interval or 1))
+        retry_interval = max(1, retry_interval)
+        return replan == "every_step" or self.step_count % retry_interval == 0
+
+    def _simulation_has_work(self) -> bool:
+        if any(agent.status == "active" for agent in self.agents):
+            return True
+        if not any(agent.status == "no_route" for agent in self.agents):
+            return False
+        if str(self.scenario.routing.get("replanPolicy", "on_blocked_or_interval")) == "never":
+            return False
+        return self._has_pending_route_change_event()
+
+    def _has_pending_route_change_event(self) -> bool:
+        route_events = {"beacon_update", "beacon_enable", "beacon_disable", "beacon_add", "beacon_remove"}
+        for event in self.scheduled_events:
+            event_id = str(event.get("eventId") or f"event_{id(event)}")
+            if event_id in self._applied_scheduled_events:
+                continue
+            if str(event.get("eventType") or "") not in route_events:
+                continue
+            if int(event.get("step", -1)) >= self.step_count:
+                return True
+        return False
+
+    def _routing_blocked_cells(self, hazard_blocked_cells: set[str], beacon_state: Any, routing_config: dict[str, Any]) -> set[str]:
+        blocked = set(hazard_blocked_cells)
+        if not bool(routing_config.get("useBeaconRisk", True)):
+            return blocked
+        threshold = routing_config.get("beaconBlockThreshold")
+        if threshold is None:
+            return blocked
+        try:
+            block_threshold = float(threshold)
+        except (TypeError, ValueError):
+            return blocked
+        if not 0.0 <= block_threshold <= 1.0:
+            return blocked
+        blocked.update(cell_id for cell_id, risk in beacon_state.cell_risk.items() if float(risk) >= block_threshold)
+        return blocked
+
     def _next_route_cell(self, agent: AgentState) -> str | None:
         if not agent.route or not agent.route.reachable:
             return None
@@ -427,10 +655,22 @@ class EvacuationModel:
         waypoint = self._local_waypoint(agent, candidate)
         if _distance(agent.position, waypoint) > float(self.scenario.physics.get("lineOfSightDistanceM", 12.0)):
             return False
+        if self._line_crosses_wall(agent.level, agent.position, waypoint):
+            return False
         corridor = self._route_corridor(list(agent.route.node_sequence[agent.route_index : candidate_index + 1]))
         if corridor is None or corridor.is_empty:
             return False
         return bool(corridor.buffer(1e-6).covers(LineString([agent.position, waypoint])))
+
+    def _line_crosses_wall(self, level: str | None, start: tuple[float, float], end: tuple[float, float]) -> bool:
+        wall_geom = self._wall_geometries_by_level.get(level or "")
+        if wall_geom is None or wall_geom.is_empty:
+            return False
+        line = LineString([start, end])
+        try:
+            return bool(wall_geom.buffer(1e-6).intersects(line))
+        except Exception:
+            return False
 
     def _advance(self, agent: AgentState, target_cell: str, speed_mps: float) -> tuple[tuple[float, float], bool, tuple[float, float]]:
         current = agent.position
@@ -479,7 +719,8 @@ class EvacuationModel:
         if direction == (0.0, 0.0):
             direction = desired
         direction = self._steered_direction(agent.velocity, direction)
-        target_velocity = (direction[0] * speed_mps, direction[1] * speed_mps)
+        social_speed_scale = self._social_speed_scale(agent, direction)
+        target_velocity = (direction[0] * speed_mps * social_speed_scale, direction[1] * speed_mps * social_speed_scale)
         next_velocity = self._accelerated_velocity(agent.velocity, target_velocity)
         travel = min(_distance((0.0, 0.0), next_velocity) * self.scenario.time_step_s, max_distance)
         if arrived:
@@ -620,7 +861,7 @@ class EvacuationModel:
         if delta_len > max_delta > 0:
             unit = _unit(delta)
             target = (current[0] + unit[0] * max_delta, current[1] + unit[1] * max_delta)
-        inertia = float(self.scenario.physics.get("velocityInertia", 0.16))
+        inertia = float(self.scenario.physics.get("velocityInertia", 0.2))
         inertia = min(max(inertia, 0.0), 0.85)
         return (current[0] * inertia + target[0] * (1.0 - inertia), current[1] * inertia + target[1] * (1.0 - inertia))
 
@@ -648,7 +889,7 @@ class EvacuationModel:
         current_angle = math.atan2(current[1], current[0])
         desired_angle = math.atan2(desired[1], desired[0])
         delta = (desired_angle - current_angle + math.pi) % (2 * math.pi) - math.pi
-        max_turn = float(self.scenario.physics.get("maxTurnRateRadS", 4.2)) * max(self.scenario.time_step_s, 1e-9)
+        max_turn = float(self.scenario.physics.get("maxTurnRateRadS", 3.8)) * max(self.scenario.time_step_s, 1e-9)
         max_turn = max(max_turn, 0.14)
         if abs(delta) <= max_turn:
             return desired
@@ -721,6 +962,8 @@ class EvacuationModel:
         target_geom = self.topology.cell_geometry(target_cell)
         if target_cell.startswith("VTN_"):
             return waypoint
+        if agent.current_cell.startswith("VTN_") and target_geom is not None and not target_geom.is_empty:
+            return self._virtual_boundary_exit_waypoint(agent, target_geom)
         if self._is_transfer_like(target_cell) and target_geom is not None and not target_geom.is_empty:
             return self._transfer_center_waypoint(current_geom, target_geom)
         if self._is_transfer_like(agent.current_cell) and target_geom is not None and not target_geom.is_empty:
@@ -736,6 +979,23 @@ class EvacuationModel:
         except Exception:
             pass
         return waypoint
+
+    def _virtual_boundary_exit_waypoint(self, agent: AgentState, target_geom: Any) -> tuple[float, float]:
+        point = Point(agent.position)
+        if target_geom.buffer(1e-6).covers(point):
+            return agent.position
+        try:
+            _, nearest = nearest_points(point, target_geom)
+        except Exception:
+            representative = target_geom.representative_point()
+            return (float(representative.x), float(representative.y))
+        entry = (float(nearest.x), float(nearest.y))
+        center = target_geom.representative_point()
+        inward = _unit((float(center.x) - entry[0], float(center.y) - entry[1]))
+        if inward == (0.0, 0.0):
+            return entry
+        inset = float(self.scenario.physics.get("virtualBoundaryEntryInsetM", 0.08))
+        return (entry[0] + inward[0] * inset, entry[1] + inward[1] * inset)
 
     def _motion_target(
         self,
@@ -885,6 +1145,19 @@ class EvacuationModel:
         cell = self.indoor.cells_by_id.get(cell_id)
         return bool(cell and cell.category in {"Stair", "Ramp"})
 
+    def _movement_speed_factor(self, current_cell: str, target_cell: str) -> float:
+        current = self.indoor.cells_by_id.get(current_cell)
+        target = self.indoor.cells_by_id.get(target_cell)
+        categories = {cell.category for cell in (current, target) if cell is not None}
+        factor = 1.0
+        if "Stair" in categories:
+            factor = min(factor, float(self.scenario.physics.get("stairSpeedFactor", 0.55)))
+        if "Ramp" in categories:
+            factor = min(factor, float(self.scenario.physics.get("rampSpeedFactor", 0.7)))
+        if "Elevator" in categories:
+            factor = min(factor, float(self.scenario.physics.get("elevatorSpeedFactor", 0.5)))
+        return max(0.05, min(1.0, factor))
+
     def _shared_entry_point(self, current_geom: Any | None, target_geom: Any | None) -> tuple[float, float] | None:
         if current_geom is None or current_geom.is_empty or target_geom is None or target_geom.is_empty:
             return None
@@ -939,7 +1212,7 @@ class EvacuationModel:
 
     def _arrival_radius(self, target_cell: str) -> float:
         if target_cell.startswith("VTN_"):
-            return 0.65
+            return float(self.scenario.physics.get("virtualBoundaryArrivalRadiusM", 0.35))
         cell = self.indoor.cells_by_id.get(target_cell)
         if not cell:
             return 0.25
@@ -971,9 +1244,73 @@ class EvacuationModel:
             if distance >= influence:
                 continue
             strength = (influence - distance) / influence
-            fx += (dx / distance) * strength
-            fy += (dy / distance) * strength
+            away = (dx / distance, dy / distance)
+            fx += away[0] * strength
+            fy += away[1] * strength
+            current_speed = _distance((0.0, 0.0), agent.velocity)
+            other_speed = _distance((0.0, 0.0), other.velocity)
+            if current_speed > 1e-6:
+                forward = _unit(agent.velocity)
+                other_ahead = -(away[0] * forward[0] + away[1] * forward[1])
+                if other_ahead > 0.15:
+                    side = (-forward[1], forward[0])
+                    side_sign = 1.0 if away[0] * side[0] + away[1] * side[1] >= 0 else -1.0
+                    head_on = 0.0
+                    if other_speed > 1e-6:
+                        other_dir = _unit(other.velocity)
+                        head_on = max(0.0, -(forward[0] * other_dir[0] + forward[1] * other_dir[1]))
+                    lateral = strength * (0.25 + 0.35 * head_on)
+                    fx += side[0] * side_sign * lateral
+                    fy += side[1] * side_sign * lateral
         return (fx, fy)
+
+    def _social_speed_scale(self, agent: AgentState, direction: tuple[float, float]) -> float:
+        if direction == (0.0, 0.0):
+            return 1.0
+        profile = self.scenario.mobility_profiles.get(agent.profile_id)
+        personal_radius = float((profile.attributes if profile else {}).get("personalRadiusM", self.scenario.physics.get("personalRadiusM", 0.5)))
+        scale = 1.0
+        for other in self.agents:
+            if other is agent or other.status != "active" or other.level != agent.level:
+                continue
+            dx = other.position[0] - agent.position[0]
+            dy = other.position[1] - agent.position[1]
+            distance = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+            other_profile = self.scenario.mobility_profiles.get(other.profile_id)
+            other_personal = float((other_profile.attributes if other_profile else {}).get("personalRadiusM", self.scenario.physics.get("personalRadiusM", 0.5)))
+            comfort = max(personal_radius + self._body_radius(other), self._body_radius(agent) + other_personal)
+            influence = max(comfort * 1.2, comfort + 0.05)
+            if distance >= influence:
+                continue
+            rel = (dx / distance, dy / distance)
+            ahead = max(0.0, direction[0] * rel[0] + direction[1] * rel[1])
+            crowding = (influence - distance) / influence
+            other_speed = _distance((0.0, 0.0), other.velocity)
+            head_on = 0.0
+            if other_speed > 1e-6:
+                other_dir = _unit(other.velocity)
+                head_on = max(0.0, -(direction[0] * other_dir[0] + direction[1] * other_dir[1]))
+            slowdown = 0.45 * crowding + 0.4 * ahead * crowding + 0.35 * head_on * crowding
+            if distance < self._body_radius(agent) + self._body_radius(other) + 0.08:
+                slowdown = max(slowdown, 0.82)
+            scale = min(scale, max(0.12, 1.0 - slowdown))
+        if scale < 0.995:
+            self._mark_proximity_slowdown(agent, scale)
+            return scale
+        if agent.proximity_slowdown_until_s > self.time_s:
+            duration = max(float(self.scenario.physics.get("proximitySlowdownMemoryS", 0.55)), 1e-6)
+            remaining = min(duration, agent.proximity_slowdown_until_s - self.time_s)
+            remembered = clamp01(1.0 - (1.0 - agent.proximity_slowdown_scale) * (remaining / duration))
+            return min(1.0, remembered)
+        agent.proximity_slowdown_scale = 1.0
+        return 1.0
+
+    def _mark_proximity_slowdown(self, agent: AgentState, scale: float) -> None:
+        duration = max(float(self.scenario.physics.get("proximitySlowdownMemoryS", 0.55)), 0.0)
+        if duration <= 0:
+            return
+        agent.proximity_slowdown_until_s = max(agent.proximity_slowdown_until_s, self.time_s + duration)
+        agent.proximity_slowdown_scale = min(agent.proximity_slowdown_scale, max(0.08, min(1.0, scale)))
 
     def _wall_repulsion(self, agent: AgentState, target_cell: str | None = None) -> tuple[float, float]:
         if (target_cell or "").startswith("VTN_"):
@@ -1243,6 +1580,10 @@ def math_sin(value: float) -> float:
 
 def _distance(left: tuple[float, float], right: tuple[float, float]) -> float:
     return ((right[0] - left[0]) ** 2 + (right[1] - left[1]) ** 2) ** 0.5
+
+
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
 def _unit(vector: tuple[float, float]) -> tuple[float, float]:
