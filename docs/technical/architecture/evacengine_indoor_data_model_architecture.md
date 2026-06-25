@@ -934,7 +934,6 @@ Las constantes globales actuales se trasladarán aquí o a defaults versionados 
 La composición avanzada no bloquea la reforma. La primera ejecución operativa utilizará:
 
 ```text
-shortest_distance
 minimum_travel_time
 ```
 
@@ -1003,7 +1002,7 @@ La arquitectura debe admitir, sin mezclarlos:
 - políticas de recálculo: periódica o disparada por eventos;
 - análisis de robustez: alternativas, disjoint paths, centralidad y agilidad.
 
-La primera versión puede activar solo Dijkstra/A* y distancia/tiempo. La comparación científica posterior no debe exigir rehacer el grafo, los resultados ni la UI. `AlgorithmRegistry` y `CostPolicyRegistry` ofrecerán una interfaz estable para incorporar algoritmos propios, medidas de centralidad o robustez sin añadir condicionales al motor principal. Las vistas por perfil deben filtrar o evaluar el grafo compartido sin copiarlo íntegramente en cada recálculo.
+La primera versión puede activar Dijkstra/A* sobre tiempo mínimo. La comparación científica posterior no debe exigir rehacer el grafo, los resultados ni la UI. `AlgorithmRegistry` y `CostPolicyRegistry` ofrecerán una interfaz estable para incorporar algoritmos propios, medidas de centralidad o robustez sin añadir condicionales al motor principal. Las vistas por perfil deben filtrar o evaluar el grafo compartido sin copiarlo íntegramente en cada recálculo.
 
 El riesgo de hazard y las preferencias personales no necesitan una fórmula definitiva para arrancar: podrán permanecer desactivados, aplicar bloqueos explícitos o utilizar una política versionada sencilla. Lo obligatorio es que nunca queden ocultos dentro de un peso opaco y que puedan auditarse por componente.
 
@@ -1245,7 +1244,7 @@ Estas fases son una estrategia de control de calidad, no una reducción del alca
 |---|---:|---:|
 | Carga `indoor_model + scenario_model` | Sí | Sí |
 | Una y varias plantas | Sí | Sí |
-| Dijkstra/A* por distancia o tiempo | Sí | Sí |
+| Dijkstra/A* por tiempo mínimo | Sí | Sí |
 | Rutas + waypoints | Sí | Sí |
 | Física legacy desacoplada | Sí | Sí |
 | Actualización síncrona | Sí | Sí |

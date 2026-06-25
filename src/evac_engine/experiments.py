@@ -43,6 +43,20 @@ BUILTIN_ROUTING_PRESETS: dict[str, dict[str, Any]] = {
             "routeRecommendation": {"routeSelection": "lowest_cost"},
         },
     },
+    "floyd_warshall_time": {
+        "presetId": "floyd_warshall_time",
+        "label": "Floyd-Warshall / tiempo puro",
+        "description": "Baseline all-pairs: calcula caminos minimos entre todos los pares del snapshot ponderado.",
+        "routing": {
+            "algorithm": "floyd_warshall",
+            "costPolicy": "minimum_travel_time",
+            "useHazardRisk": False,
+            "useBeaconRisk": False,
+            "useCongestion": False,
+            "riskCostModel": "legacy_additive",
+            "routeRecommendation": {"routeSelection": "lowest_cost"},
+        },
+    },
     "astar_risk_multiplicative": {
         "presetId": "astar_risk_multiplicative",
         "label": "A* / tiempo x riesgo",

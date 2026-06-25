@@ -60,8 +60,8 @@ class ApplicationService:
             target_refs=target_refs or ((self.scenario.routing.get("destination") or {}).get("cellSpaceRefs") or []),
             mobility_profile=profile,
             algorithm=str(self.scenario.routing.get("algorithm", "dijkstra")),
-            cost_policy=str(self.scenario.routing.get("costPolicy", "shortest_distance")),
-            routing_config=self.scenario.routing,
+            cost_policy=str(self.scenario.routing.get("costPolicy", "minimum_travel_time")),
+            routing_config={**self.scenario.physics, **self.scenario.routing},
         )
         return route.to_dict()
 

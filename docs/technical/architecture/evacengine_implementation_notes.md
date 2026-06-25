@@ -54,17 +54,19 @@ Supported algorithms:
 
 - `dijkstra`
 - `astar`
+- `floyd_warshall`
 - `yen_ksp`
 - `robust_agility`
 
-Supported cost policies:
+Supported cost policy:
 
-- `shortest_distance`
 - `minimum_travel_time`
 
-Mobility filters prevent profiles from using stairs, ramps or elevators when profile flags disallow them.
+The routing base weight is always traversal time in seconds. `WeightSnapshotCompiler` estimates each edge as `lengthM / (profile base speed * connector speed factor)`, so stairs, ramps and elevators cost more than flat movement even when their 2D length looks similar. Mobility filters prevent profiles from using stairs, ramps or elevators when profile flags disallow them.
 
 Dynamic routing weights support the legacy additive model and experimental cost models for route recommendation studies. The full experiment contract, symbols, presets and commands are documented in `docs/technical/research/evacengine_routing_experiment_framework.md`.
+
+Route planning currently starts from `agent.current_cell`, the topological cell occupied by the agent. The continuous XY position is used by movement/steering after the next cell has been selected, but the first graph edge is not yet scored from the exact point of the agent to a specific transfer entrance. Run metrics expose `routePlans`, `routeRecoveries` and `noRouteEvents` so routing churn can be measured directly.
 
 ## Simulation
 
@@ -141,6 +143,8 @@ riskPenalty = safety_loss
 
 - the normal level exposes preset selection, `Apply preset`, `Run visually`, `Compare checked` and the preset checklist;
 - the advanced level is collapsed under `Advanced safety/cost parameters` and contains alpha/beta weights, candidate-route parameters, robustness/agility controls and the combined-policy weights.
+
+The comparison table includes `plans`, which is the count of route recalculation events for active agents under that preset.
 
 ## Outputs
 

@@ -73,7 +73,7 @@
   "environmentOverrides": {},
   "routing": {
     "algorithm": "dijkstra",
-    "costPolicy": "shortest_distance",
+    "costPolicy": "minimum_travel_time",
     "destination": {
       "mode": "explicit_cells",
       "cellSpaceRefs": [

@@ -150,6 +150,7 @@ def load_model_summary(indoor_path: str | None, scenario_path: str) -> dict[str,
                 {
                     "id": cell.id,
                     "level": cell.level,
+                    "navigationType": cell.navigation_type,
                     "category": cell.category,
                     "function": cell.function,
                     "x": round(cell.representative_point[0], 3),
@@ -172,7 +173,7 @@ def load_model_summary(indoor_path: str | None, scenario_path: str) -> dict[str,
             "maxSteps": scenario.max_steps,
             "randomSeed": scenario.random_seed,
             "algorithm": scenario.routing.get("algorithm", "dijkstra"),
-            "costPolicy": scenario.routing.get("costPolicy", "shortest_distance"),
+            "costPolicy": scenario.routing.get("costPolicy", "minimum_travel_time"),
             "useHazardRisk": bool(scenario.routing.get("useHazardRisk", True)),
             "useBeaconRisk": bool(scenario.routing.get("useBeaconRisk", True)),
             "useCongestion": bool(scenario.routing.get("useCongestion", False)),
@@ -441,6 +442,7 @@ WORKBENCH_HTML = """<!doctype html>
     .toolbar input, .toolbar select { width: auto; flex: 1; }
     pre { margin: 0; overflow: auto; background: #f1f5f9; padding: 10px; font-size: 12px; }
     .muted { color: #64748b; font-size: 12px; }
+    .compact-note { margin: 4px 0 8px; color: #64748b; font-size: 11px; line-height: 1.35; }
   </style>
 </head>
 <body>
@@ -448,29 +450,35 @@ WORKBENCH_HTML = """<!doctype html>
   <aside>
     <h1>EvacEngine Workbench</h1>
     <div class="muted" id="summary">Loading model...</div>
-    <pre id="help">1. Carga o revisa el scenario.
-2. Ajusta agentes, spawn, destino, timestep o balizas.
-3. Pulsa Run simulation.
-4. Usa Play o el slider para revisar el movimiento.</pre>
+    <pre id="help">1. Scenario = config editable de simulacion.
+2. Indoor model = geometria; se toma del scenario si esta vacio.
+3. Ajusta agentes, destino, balizas y routing.
+4. Run simulation; Play revisa el resultado.</pre>
     <label>Scenario path</label>
     <input id="scenarioPath">
+    <div class="compact-note">Run usa una copia en memoria; no escribe el scenario en disco.</div>
     <label>Indoor model path</label>
     <input id="indoorPath" placeholder="Leave empty to use scenario.indoorModelRef.path">
+    <div class="compact-note">Vacio = usar indoorModelRef.path declarado dentro del scenario.</div>
     <button id="reload">Reload scenario</button>
     <h2>Simulation</h2>
     <div class="row">
       <div><label>Time step</label><input id="timeStep" type="number" step="0.05"></div>
       <div><label>Max steps</label><input id="maxSteps" type="number"></div>
     </div>
+    <div class="compact-note" id="durationHint"></div>
     <label>Seed</label><input id="seed" type="number">
+    <div class="compact-note">Seed fija la aleatoriedad reproducible: mismo seed, mismos spawns aleatorios.</div>
     <div class="row">
       <div><label>Destination mode</label><select id="destinationMode"><option value="scenario">All scenario exits</option><option value="selected">Selected only</option></select></div>
       <div><label>Destination exit/cell</label><select id="destinationCell"></select></div>
     </div>
+    <div class="compact-note">All scenario exits usa las salidas del scenario; Selected only fuerza una celda concreta.</div>
     <div class="row">
-      <div><label>Algorithm</label><select id="algorithm"><option>dijkstra</option><option>astar</option><option>yen_ksp</option><option>robust_agility</option></select></div>
-      <div><label>Cost</label><select id="costPolicy"><option>shortest_distance</option><option>minimum_travel_time</option></select></div>
+      <div><label>Algorithm</label><select id="algorithm"><option>dijkstra</option><option>astar</option><option>floyd_warshall</option><option>yen_ksp</option><option>robust_agility</option></select></div>
+      <div><label>Cost</label><select id="costPolicy"><option>minimum_travel_time</option></select></div>
     </div>
+    <div class="compact-note">Algorithm se usa en la proxima simulacion salvo que apliques un preset. Cost base = tiempo de viaje.</div>
     <label><input id="useBeaconRisk" type="checkbox" style="width:auto"> Beacon safety affects routing</label>
     <label><input id="includeGeometryQa" type="checkbox" style="width:auto"> Geometry QA</label>
     <h2>Agents</h2>
@@ -480,6 +488,7 @@ WORKBENCH_HTML = """<!doctype html>
     </div>
     <section id="autoPanel" class="tab-panel">
       <label>Agents</label><input id="agentCount" type="number">
+      <label>Profile</label><select id="autoProfile"></select>
       <label>Spawn cell</label>
       <select id="spawnCell"></select>
       <div class="row">
@@ -488,6 +497,12 @@ WORKBENCH_HTML = """<!doctype html>
       </div>
       <label>Group distribution</label>
       <select id="distribution"><option>random_within_space</option><option>fixed</option></select>
+      <div class="compact-note">Spawn X/Y solo fija el punto si eliges fixed; random_within_space reparte dentro de la celda.</div>
+      <div class="row">
+        <button id="setAutoBatch" type="button" title="Add this batch as visible manual agents. Repeat in several cells without deleting previous agents.">SET batch</button>
+        <button id="deleteAutoBatch" type="button" title="Delete manual agents currently assigned to the selected spawn cell.">DELETE cell</button>
+      </div>
+      <div class="compact-note" id="agentHint">Click a room to select automatic spawn. Run uses the visible batch; SET batch stores it as manual agents.</div>
     </section>
     <section id="manualPanel" class="tab-panel" hidden>
       <div class="row">
@@ -551,8 +566,9 @@ WORKBENCH_HTML = """<!doctype html>
     <div id="routingPresetChecks" class="check-list"></div>
     <details>
       <summary>Advanced safety/cost parameters</summary>
+      <div class="compact-note" id="routingParameterStatus"></div>
       <div class="row">
-        <div><label title="Formula used to convert travel time/distance and safety loss into an edge weight.">Safety-cost model</label><select id="riskCostModel"><option>legacy_additive</option><option>multiplicative_beta</option><option>linear_time_risk</option></select></div>
+        <div><label title="Formula used to convert travel time and safety loss into an edge weight.">Safety-cost model</label><select id="riskCostModel"><option>legacy_additive</option><option>multiplicative_beta</option><option>linear_time_risk</option></select></div>
         <div><label title="How space safety is mapped onto directed edges when there is no connection-specific value.">Safety source</label><select id="riskEndpointPolicy"><option>target</option><option>source</option><option>mean</option><option>min</option><option>max</option></select></div>
       </div>
       <div class="row">
@@ -594,7 +610,7 @@ WORKBENCH_HTML = """<!doctype html>
       <pre class="status-box">Safety = 1 means usable. Safety = 0 means unsafe.
 Safety loss = 1 - safety; internally this is stored as riskPenalty.
 C(e) = alpha*time(e) + beta*safety_loss(e)
-Dijkstra/A*: one best path under the current scalar cost
+Dijkstra/A*/Floyd-Warshall: one best path under the current scalar cost
 Yen: k candidate paths, then a policy chooses one
 Robustness: path keeps alternatives if one connection fails
 Agility: path crosses spaces with more evacuation alternatives</pre>
@@ -643,15 +659,19 @@ async function loadModel() {
   model = await res.json();
   if (model.error) throw new Error(model.error);
   $("summary").textContent = `${model.scenarioId} | ${model.levels.join(", ")}`;
-  fillSelect($("spawnCell"), model.cells.filter(c => c.category !== "Exit"), c => `${c.level} ${c.id} [${c.x}, ${c.y}]`, c => c.id);
+  const spawnable = model.cells.filter(isSpawnableCell);
+  fillSelect($("spawnCell"), spawnable, c => `${c.level} ${c.id} [${c.x}, ${c.y}]`, c => c.id);
   fillSelect($("destinationCell"), model.exits.length ? model.exits : model.cells, c => `${c.level} ${c.id}`, c => c.id);
   fillSelect($("level"), model.levels.map(level => ({id: level, label: levelLabel(level, null)})), c => c.label, c => c.id);
   fillSelect($("placementProfile"), model.profiles.map(profile => ({id: profile})), c => c.id, c => c.id);
+  fillSelect($("autoProfile"), model.profiles.map(profile => ({id: profile})), c => c.id, c => c.id);
   $("timeStep").value = model.config.timeStepS;
   $("maxSteps").value = model.config.maxSteps;
   $("seed").value = model.config.randomSeed;
   $("agentCount").value = model.config.firstGroupCount;
-  $("spawnCell").value = model.config.firstSpawnCell;
+  $("spawnCell").value = spawnable.some(c => c.id === model.config.firstSpawnCell)
+    ? model.config.firstSpawnCell
+    : ((spawnable[0] && spawnable[0].id) || "");
   const spawn = model.config.firstSpawnPosition || selectedCellPoint($("spawnCell").value);
   $("spawnX").value = spawn ? spawn[0] : "";
   $("spawnY").value = spawn ? spawn[1] : "";
@@ -672,6 +692,7 @@ async function loadModel() {
   loadSelectedBeacon();
   payload = null;
   $("metrics").textContent = "Scenario loaded. Configure values on the left, then press Run simulation.";
+  updateDurationHint();
   drawModelPreview();
   drawBeaconCurve();
 }
@@ -737,7 +758,7 @@ function buildSimulationRequest() {
       beaconBlockThreshold: Number($("beaconBlockThreshold").value),
       includeGeometryQa: $("includeGeometryQa").checked
     },
-    manualAgents: activeAgentMode() === "manual" ? JSON.parse($("manualAgents").value || "[]") : [],
+    manualAgents: activeAgentMode() === "manual" ? readManualAgents() : automaticAgentsFromControls(),
     beacons: JSON.parse($("beacons").value || "[]"),
     scheduledEvents: JSON.parse($("events").value || "[]")
   };
@@ -799,6 +820,7 @@ function applyRoutingConfigToControls(config) {
   setNumberIfPresent("robustnessWeight", routeRecommendation.robustnessWeight);
   setNumberIfPresent("agilityWeight", routeRecommendation.agilityWeight);
   setIfPresent("agilityAggregation", routeRecommendation.agilityAggregation);
+  updateRoutingParameterStatus();
   updateBeaconImpactPreview();
 }
 function setIfPresent(id, value) {
@@ -812,7 +834,7 @@ function setNumberIfPresent(id, value) {
 function populateRoutingPresets() {
   const rows = Object.values(routingPresets).sort((a, b) => String(a.presetId).localeCompare(String(b.presetId)));
   fillSelect($("routingPreset"), rows, preset => `${preset.presetId} - ${preset.label || preset.presetId}`, preset => preset.presetId, "No presets");
-  const selectedDefaults = new Set(["dijkstra_time", "astar_risk_multiplicative", "yen_highest_robustness", "robust_agility"]);
+  const selectedDefaults = new Set(["dijkstra_time", "floyd_warshall_time", "astar_risk_multiplicative", "yen_highest_robustness", "robust_agility"]);
   $("routingPresetChecks").innerHTML = rows.map(preset => {
     const id = String(preset.presetId);
     const checked = selectedDefaults.has(id) ? "checked" : "";
@@ -852,7 +874,7 @@ async function compareSelectedRoutingPresets() {
   $("routingResults").textContent = formatRoutingComparison(comparison);
 }
 function formatRoutingComparison(comparison) {
-  const lines = ["preset | alg | evacuated | active | noRoute | routeCost | planMs | robust | agility"];
+  const lines = ["preset | alg | evacuated | active | noRoute | plans | routeCost | planMs | robust | agility"];
   for (const row of comparison.runs || []) {
     lines.push([
       row.presetId,
@@ -860,6 +882,7 @@ function formatRoutingComparison(comparison) {
       row.evacuated,
       row.active,
       row.noRoute,
+      row.routePlans,
       formatMetric(row.meanRouteCost),
       formatMetric(row.meanPlanningMs),
       formatMetric(row.meanRobustness),
@@ -884,8 +907,11 @@ function updateRoutingPresetInfo() {
     `Selection: ${recommendation.routeSelection || "lowest_cost"}\\n` +
     `Beacon safety: ${routing.useBeaconRisk === false ? "off" : "on"} | Hazard safety: ${routing.useHazardRisk === false ? "off" : "on"} | Congestion: ${routing.useCongestion ? "on" : "off"}\\n\\n` +
     presetUseHint(preset) +
+    `\\n\\nactive/ignored parameters\\n` +
+    routingParameterWarnings(routing).join("\\n") +
     `\\n\\ntechnical patch\\n` +
     JSON.stringify(routing, null, 2);
+  updateRoutingParameterStatus(routing);
 }
 function presetUseHint(preset) {
   const id = String(preset.presetId || "");
@@ -897,6 +923,28 @@ function presetUseHint(preset) {
   if (id.includes("agility")) return "Use it when you prefer routes through spaces with more evacuation alternatives.";
   if (id.includes("congestion")) return "Use it when current crowding should penalize route choices.";
   return "Use this preset as a complete routing strategy. Apply it, then run or compare.";
+}
+function routingParameterWarnings(config = null) {
+  const routing = config || routingConfigFromControls();
+  const recommendation = routing.routeRecommendation || {};
+  const algorithm = routing.algorithm || "dijkstra";
+  const selection = recommendation.routeSelection || "lowest_cost";
+  const notes = [`base cost: minimum_travel_time is always active`];
+  notes.push(routing.useBeaconRisk === false ? "beacon beta inactive: beacon safety is off" : "beacon beta active when beacons affect spaces");
+  notes.push(routing.useHazardRisk === false ? "hazard beta inactive: hazard safety is off" : "hazard beta active when hazards affect spaces");
+  notes.push(routing.useCongestion ? "congestion penalty active" : "congestion penalty inactive");
+  notes.push(routing.riskCostModel === "linear_time_risk" ? "safety unit cost active" : "safety unit cost ignored unless linear_time_risk is selected");
+  const usesCandidates = algorithm === "yen_ksp" || algorithm === "robust_agility" || selection !== "lowest_cost";
+  notes.push(usesCandidates ? "k/tolerance parameters active: candidate routes are evaluated" : "k/tolerance parameters ignored: single best route only");
+  const usesRobustness = selection === "highest_robustness" || selection === "robust_agility" || algorithm === "robust_agility";
+  notes.push(usesRobustness ? "robustness active: alternatives after edge failure are scored" : "robustness ignored for this selection");
+  const usesAgility = selection === "highest_agility" || selection === "robust_agility" || algorithm === "robust_agility";
+  notes.push(usesAgility ? "CE/agility active: intermediate spaces with more alternatives are scored" : "CE/agility ignored for this selection");
+  return notes;
+}
+function updateRoutingParameterStatus(config = null) {
+  if (!$("routingParameterStatus")) return;
+  $("routingParameterStatus").textContent = routingParameterWarnings(config).join("\\n");
 }
 function formatMetric(value) {
   return value == null ? "-" : Number(value).toFixed(3);
@@ -926,6 +974,158 @@ function setAgentMode(mode) {
   $("autoPanel").hidden = manual;
   payload = null;
   drawModelPreview();
+}
+function updateDurationHint() {
+  if (!$("durationHint")) return;
+  const seconds = Math.max(0, numberFromInput("timeStep", 0) * numberFromInput("maxSteps", 0));
+  const minutes = seconds / 60;
+  $("durationHint").textContent = `Simulation window: ${seconds.toFixed(1)} s (${minutes.toFixed(2)} min)`;
+}
+function writeManualAgents(agents) {
+  $("manualAgents").value = JSON.stringify(agents, null, 2);
+  payload = null;
+  drawModelPreview();
+}
+function nextManualAgentId(agents) {
+  const used = new Set(agents.map(agent => agent.agentId));
+  for (let index = 1; index < 10000; index++) {
+    const id = `MANUAL_${String(index).padStart(3, "0")}`;
+    if (!used.has(id)) return id;
+  }
+  return `MANUAL_${Date.now()}`;
+}
+function addAutomaticBatchToManualAgents() {
+  const generated = automaticAgentsFromControls();
+  if (!generated.length) {
+    $("metrics").textContent = "SET ignored: agents must be greater than 0.";
+    return;
+  }
+  const agents = readManualAgents();
+  for (const agent of generated) {
+    agents.push({ ...agent, agentId: nextManualAgentId(agents) });
+  }
+  writeManualAgents(agents);
+  setAgentMode("manual");
+  $("metrics").textContent = `Added ${generated.length} visible agents around ${$("spawnCell").value}. Manual mode will be used for the next run.`;
+}
+function deleteManualAgentsInSelectedCell() {
+  const cellId = $("spawnCell").value;
+  const regionIds = new Set(spawnRegionSpaces(cellId).map(space => space.id));
+  if (!regionIds.size) regionIds.add(cellId);
+  const before = readManualAgents();
+  const after = before.filter(agent => !regionIds.has(agent.initialCellSpaceRef));
+  writeManualAgents(after);
+  $("metrics").textContent = `Deleted ${before.length - after.length} manual agents around ${cellId}.`;
+}
+function automaticAgentsFromControls() {
+  if (!model) return [];
+  const cellId = $("spawnCell").value;
+  const selectedSpace = model.spaces.find(space => space.id === cellId);
+  if (!selectedSpace || !spaceIsSpawnable(selectedSpace)) return [];
+  const count = Math.max(0, Math.round(numberFromInput("agentCount", 0)));
+  const distribution = $("distribution").value;
+  const fixed = [numberFromInput("spawnX", NaN), numberFromInput("spawnY", NaN)];
+  const regionSpaces = distribution === "fixed" ? [selectedSpace] : spawnRegionSpaces(cellId);
+  const spaces = regionSpaces.length ? regionSpaces : [selectedSpace];
+  const agents = [];
+  for (let index = 0; index < count; index++) {
+    const point = distribution === "fixed" && Number.isFinite(fixed[0]) && Number.isFinite(fixed[1])
+      ? fixed
+      : spreadPointInRegion(spaces, index, count);
+    const pointSpace = spaceAt(selectedSpace.level, point, "spawn") || selectedSpace;
+    agents.push({
+      agentId: `AUTO_${String(index + 1).padStart(3, "0")}`,
+      mobilityProfileRef: $("autoProfile").value || model.profiles[0],
+      initialCellSpaceRef: pointSpace.id,
+      initialPosition: { type: "Point", coordinates: [Number(point[0].toFixed(3)), Number(point[1].toFixed(3))] }
+    });
+  }
+  return agents;
+}
+function spreadPointInSpace(space, index, count) {
+  return spreadPointInRegion([space], index, count);
+}
+function spreadPointInRegion(spaces, index, count) {
+  const rings = spaces.map(space => ({ space, ring: (space.rings && space.rings[0]) || [] })).filter(item => item.ring.length);
+  if (!rings.length) return spaceRepresentative(spaces[0]) || [0, 0];
+  const xs = rings.flatMap(item => item.ring.map(point => point[0]));
+  const ys = rings.flatMap(item => item.ring.map(point => point[1]));
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = Math.max(maxX - minX, 0.01);
+  const height = Math.max(maxY - minY, 0.01);
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count * (width / height))));
+  const rows = Math.max(1, Math.ceil(count / columns));
+  const totalSlots = Math.max(count, columns * rows);
+  for (let attempt = 0; attempt < totalSlots * 3; attempt++) {
+    const slot = (index + attempt) % totalSlots;
+    const col = slot % columns;
+    const row = Math.floor(slot / columns) % rows;
+    const x = minX + (col + 0.5) * (width / columns);
+    const y = minY + (row + 0.5) * (height / rows);
+    if (rings.some(item => pointInRing([x, y], item.ring))) return [x, y];
+  }
+  const fallback = rings[index % rings.length].space;
+  return spaceRepresentative(fallback) || rings[index % rings.length].ring[0] || [0, 0];
+}
+function spawnRegionSpaces(cellId) {
+  if (!model) return [];
+  const selected = model.spaces.find(space => space.id === cellId);
+  if (!selected || !spaceIsSpawnable(selected)) return [];
+  const sameLevel = model.spaces.filter(space => space.level === selected.level && spaceIsSpawnable(space));
+  const byId = new Map(sameLevel.map(space => [space.id, space]));
+  const visited = new Set([selected.id]);
+  const queue = [selected.id];
+  while (queue.length) {
+    const current = byId.get(queue.shift());
+    if (!current) continue;
+    for (const candidate of sameLevel) {
+      if (visited.has(candidate.id)) continue;
+      if (!spacesTouch(current, candidate)) continue;
+      visited.add(candidate.id);
+      queue.push(candidate.id);
+    }
+  }
+  return sameLevel.filter(space => visited.has(space.id));
+}
+function spacesTouch(left, right) {
+  const leftRing = (left.rings && left.rings[0]) || [];
+  const rightRing = (right.rings && right.rings[0]) || [];
+  if (!leftRing.length || !rightRing.length) return false;
+  const tolerance = 0.015;
+  for (let i = 0; i < leftRing.length - 1; i++) {
+    for (let j = 0; j < rightRing.length - 1; j++) {
+      if (segmentsOverlap(leftRing[i], leftRing[i + 1], rightRing[j], rightRing[j + 1], tolerance)) return true;
+    }
+  }
+  return false;
+}
+function segmentsOverlap(a, b, c, d, tolerance) {
+  const ux = b[0] - a[0], uy = b[1] - a[1];
+  const vx = d[0] - c[0], vy = d[1] - c[1];
+  const lenU = Math.hypot(ux, uy), lenV = Math.hypot(vx, vy);
+  if (lenU < 1e-9 || lenV < 1e-9) return false;
+  const cross = Math.abs((ux / lenU) * (vy / lenV) - (uy / lenU) * (vx / lenV));
+  if (cross > 0.08) return false;
+  const distance = Math.min(pointSegmentDistance(a, c, d), pointSegmentDistance(b, c, d), pointSegmentDistance(c, a, b), pointSegmentDistance(d, a, b));
+  if (distance > tolerance) return false;
+  const axis = Math.abs(ux) >= Math.abs(uy) ? 0 : 1;
+  const a0 = Math.min(a[axis], b[axis]), a1 = Math.max(a[axis], b[axis]);
+  const b0 = Math.min(c[axis], d[axis]), b1 = Math.max(c[axis], d[axis]);
+  return Math.min(a1, b1) - Math.max(a0, b0) > tolerance;
+}
+function pointSegmentDistance(point, a, b) {
+  const vx = b[0] - a[0], vy = b[1] - a[1];
+  const wx = point[0] - a[0], wy = point[1] - a[1];
+  const denom = vx * vx + vy * vy;
+  const t = denom <= 1e-12 ? 0 : Math.max(0, Math.min(1, (wx * vx + wy * vy) / denom));
+  const px = a[0] + t * vx, py = a[1] + t * vy;
+  return Math.hypot(point[0] - px, point[1] - py);
+}
+function isSpawnableCell(cell) {
+  return cell && cell.navigationType === "GeneralSpace" && !["Door", "Window", "Exit", "Stair", "Ramp", "Elevator", "ConnectorSideCoverage"].includes(cell.category);
+}
+function spaceIsSpawnable(space) {
+  return space && space.navigationType === "GeneralSpace" && space.isNavigable && !["Door", "Window", "Exit", "Stair", "Ramp", "Elevator", "ConnectorSideCoverage"].includes(space.category);
 }
 function readJsonArray(id) {
   try {
@@ -1569,7 +1769,8 @@ function drawModelPreview() {
   drawSpaces(level, project);
   drawBeaconRiskOverlay(level, project);
   drawBeacons(level, project);
-  drawManualAgents(level, project);
+  if (activeAgentMode() === "automatic") drawAutomaticAgents(level, project);
+  else drawManualAgents(level, project);
   updateBeaconImpactPreview();
 }
 function drawSpaces(level, project) {
@@ -1717,6 +1918,28 @@ function drawManualAgents(level, project) {
     ctx.stroke();
   }
 }
+function drawAutomaticAgents(level, project) {
+  if (!model) return;
+  const agents = automaticAgentsFromControls();
+  const color = profileColors[$("autoProfile").value] || "#006dff";
+  ctx.save();
+  ctx.globalAlpha = 0.74;
+  for (const agent of agents) {
+    const cell = model.cells.find(c => c.id === agent.initialCellSpaceRef);
+    if (cell && cell.level !== level) continue;
+    const coords = agent.initialPosition && agent.initialPosition.coordinates;
+    if (!coords || coords.length < 2) continue;
+    const p = project(coords);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 6 * devicePixelRatio, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.4 * devicePixelRatio;
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 function drawBeacons(level, project) {
   const beacons = playbackBeacons();
   const selectedId = $("beaconSelect").value || $("beaconId").value.trim();
@@ -1816,7 +2039,15 @@ $("manualTab").onclick = () => setAgentMode("manual");
 $("spawnCell").onchange = () => {
   const point = selectedCellPoint($("spawnCell").value);
   if (point) { $("spawnX").value = point[0]; $("spawnY").value = point[1]; }
+  drawModelPreview();
 };
+$("agentCount").oninput = drawModelPreview;
+$("autoProfile").onchange = drawModelPreview;
+$("spawnX").oninput = drawModelPreview;
+$("spawnY").oninput = drawModelPreview;
+$("distribution").onchange = drawModelPreview;
+$("setAutoBatch").onclick = addAutomaticBatchToManualAgents;
+$("deleteAutoBatch").onclick = deleteManualAgentsInSelectedCell;
 $("placementMode").onclick = () => {
   $("placementMode").textContent = $("placementMode").textContent === "On" ? "Off" : "On";
 };
@@ -1846,9 +2077,9 @@ $("beaconCurve").onmousedown = startCurveDrag;
 $("beaconCurve").onmousemove = dragCurvePoint;
 $("beaconCurve").onmouseup = stopCurveDrag;
 $("beaconCurve").onmouseleave = stopCurveDrag;
-$("timeStep").oninput = () => { drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
-$("maxSteps").oninput = () => { drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
-$("useBeaconRisk").onchange = () => { updateBeaconImpactPreview(); draw(); };
+$("timeStep").oninput = () => { updateDurationHint(); drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
+$("maxSteps").oninput = () => { updateDurationHint(); drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
+$("useBeaconRisk").onchange = () => { updateRoutingParameterStatus(); updateBeaconImpactPreview(); draw(); };
 $("beaconBlockThreshold").oninput = () => { updateBeaconImpactPreview(); draw(); };
 $("routingPreset").onchange = updateRoutingPresetInfo;
 $("applyRoutingPreset").onclick = applySelectedRoutingPreset;
@@ -1872,43 +2103,71 @@ $("play").onclick = () => {
 $("reset").onclick = () => { currentFrame=0; draw(); };
 $("frame").oninput = e => { currentFrame = Number(e.target.value); draw(); };
 $("level").onchange = draw;
+[
+  "algorithm", "costPolicy", "riskCostModel", "riskEndpointPolicy", "useHazardRisk",
+  "useCongestion", "riskEdgePrecedence", "riskAggregation", "riskAlpha", "hazardBeta",
+  "beaconBeta", "riskUnitCost", "routeSelection", "kShortestPaths",
+  "candidateCostTolerance", "robustnessTolerance", "centralityTolerance",
+  "centralityMaxPaths", "centralityMaxOverlap", "costWeight", "robustnessWeight",
+  "agilityWeight", "agilityAggregation"
+].forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener("input", () => updateRoutingParameterStatus());
+  if (el) el.addEventListener("change", () => updateRoutingParameterStatus());
+});
 canvas.onclick = event => {
   if (!model) return;
   if ($("beaconPlacementMode").textContent === "On") {
     placeBeaconFromClick(event);
     return;
   }
-  if (activeAgentMode() !== "manual" || $("placementMode").textContent !== "On") return;
   const rect = canvas.getBoundingClientRect();
   const point = [event.clientX - rect.left, event.clientY - rect.top].map(v => v * devicePixelRatio);
   const level = $("level").value || model.levels[0];
   const world = unprojectFor(level)(point);
+  if (activeAgentMode() === "automatic") {
+    const cell = cellAt(level, world);
+    if (!cell) {
+      $("metrics").textContent = "Spawn selection ignored: click inside a GeneralSpace room.";
+      return;
+    }
+    $("spawnCell").value = cell.id;
+    $("spawnX").value = Number(world[0].toFixed(3));
+    $("spawnY").value = Number(world[1].toFixed(3));
+    payload = null;
+    $("metrics").textContent = `Automatic spawn selected: ${cell.id}. Press Run simulation or SET batch.`;
+    drawModelPreview();
+    return;
+  }
+  if ($("placementMode").textContent !== "On") return;
   const cell = cellAt(level, world);
   if (!cell) {
     $("metrics").textContent = "Click ignored: position is not inside a navigable cell.";
     return;
   }
   const agents = readManualAgents();
-  const next = agents.length + 1;
   agents.push({
-    agentId: `MANUAL_${String(next).padStart(3, "0")}`,
+    agentId: nextManualAgentId(agents),
     mobilityProfileRef: $("placementProfile").value || model.profiles[0],
     initialCellSpaceRef: cell.id,
     initialPosition: { type: "Point", coordinates: [Number(world[0].toFixed(3)), Number(world[1].toFixed(3))] }
   });
-  $("manualAgents").value = JSON.stringify(agents, null, 2);
-  payload = null;
+  writeManualAgents(agents);
   $("metrics").textContent = `Added ${agents[agents.length - 1].agentId} in ${cell.id}. Press Run simulation.`;
-  drawModelPreview();
 };
 function readManualAgents() {
   try { return JSON.parse($("manualAgents").value || "[]"); } catch { return []; }
 }
 function cellAt(level, point) {
-  return spaceAt(level, point, true);
+  return spaceAt(level, point, "spawn");
 }
-function spaceAt(level, point, navigableOnly) {
-  const candidates = model.spaces.filter(s => s.level === level && (!navigableOnly || s.isNavigable));
+function spaceAt(level, point, mode = "any") {
+  const candidates = model.spaces.filter(s => {
+    if (s.level !== level) return false;
+    if (mode === "spawn") return spaceIsSpawnable(s);
+    if (mode === "navigable") return s.isNavigable;
+    return true;
+  });
   for (let i = candidates.length - 1; i >= 0; i--) {
     const space = candidates[i];
     if (space.rings.some(ring => pointInRing(point, ring))) return space;

@@ -113,7 +113,7 @@ class EvacTopology:
                     sourceRef=resource.source_ref,
                     direction=direction,
                     lengthM=length,
-                    baseTraversalTimeS=max(length / 1.2, 0.01),
+                    baseTraversalTimeS=_default_traversal_time(length, resource_type),
                     locomotionTypes=locomotion,
                     connectorType=resource_type,
                     viaBoundaryRef=resource.metadata.get("viaBoundaryRef"),
@@ -210,6 +210,15 @@ def _edge_length(indoor: IndoorModelBundle, graph: nx.MultiDiGraph, left: str, r
     if left_pos and right_pos:
         return max(math.dist(left_pos, right_pos), 0.01)
     return max(float(edge.get("weight") or 1.0), 0.01)
+
+
+def _default_traversal_time(length_m: float, connector_type: str) -> float:
+    factor = {
+        "Stair": 0.55,
+        "Ramp": 0.7,
+        "Elevator": 0.5,
+    }.get(connector_type, 1.0)
+    return max(length_m / max(1.2 * factor, 0.01), 0.01)
 
 
 def _resource_locomotion(indoor: IndoorModelBundle, edge: dict[str, Any]) -> list[str]:

@@ -33,7 +33,7 @@ class EvacEngineDesktopApp(tk.Tk):
         self.output_var = tk.StringVar(value="outputs/evacengine_ui_run")
         self.group_count_var = tk.StringVar(value="0")
         self.algorithm_var = tk.StringVar(value="dijkstra")
-        self.cost_var = tk.StringVar(value="shortest_distance")
+        self.cost_var = tk.StringVar(value="minimum_travel_time")
         self.status_var = tk.StringVar(value="No project loaded")
         self._build()
         if scenario_path:
@@ -107,9 +107,9 @@ class EvacEngineDesktopApp(tk.Tk):
         self._labeled_entry(config_tab, "Random seed", self.seed_var)
         self._labeled_entry(config_tab, "First group count", self.group_count_var)
         ttk.Label(config_tab, text="Routing algorithm").pack(anchor=tk.W, pady=(8, 0))
-        ttk.Combobox(config_tab, textvariable=self.algorithm_var, state="readonly", values=["dijkstra", "astar", "yen_ksp", "robust_agility"]).pack(fill=tk.X)
+        ttk.Combobox(config_tab, textvariable=self.algorithm_var, state="readonly", values=["dijkstra", "astar", "floyd_warshall", "yen_ksp", "robust_agility"]).pack(fill=tk.X)
         ttk.Label(config_tab, text="Cost policy").pack(anchor=tk.W, pady=(8, 0))
-        ttk.Combobox(config_tab, textvariable=self.cost_var, state="readonly", values=["shortest_distance", "minimum_travel_time"]).pack(fill=tk.X)
+        ttk.Combobox(config_tab, textvariable=self.cost_var, state="readonly", values=["minimum_travel_time"]).pack(fill=tk.X)
         ttk.Label(config_tab, text="Output folder").pack(anchor=tk.W, pady=(8, 0))
         output_row = ttk.Frame(config_tab)
         output_row.pack(fill=tk.X)
@@ -274,7 +274,7 @@ class EvacEngineDesktopApp(tk.Tk):
         self.seed_var.set(str(scenario.simulation_config.get("randomSeed", 1)))
         self.output_var.set(str(scenario.outputs.get("outputFolder", "outputs/evacengine_ui_run")))
         self.algorithm_var.set(str(scenario.routing.get("algorithm", "dijkstra")))
-        self.cost_var.set(str(scenario.routing.get("costPolicy", "shortest_distance")))
+        self.cost_var.set(str(scenario.routing.get("costPolicy", "minimum_travel_time")))
         first_count = scenario.groups[0].get("count") if scenario.groups else 0
         self.group_count_var.set(str(first_count))
 

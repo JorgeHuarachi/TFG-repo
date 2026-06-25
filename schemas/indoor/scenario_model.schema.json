@@ -503,13 +503,13 @@
           "enum": [
             "dijkstra",
             "astar",
+            "floyd_warshall",
             "yen_ksp",
             "robust_agility"
           ]
         },
         "costPolicy": {
           "enum": [
-            "shortest_distance",
             "minimum_travel_time"
           ]
         },
@@ -720,6 +720,15 @@
           "type": "number",
           "minimum": 0
         },
+        "transferQueueActivationM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "queueCorrectionSpeedScale": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
         "stairSpeedFactor": {
           "type": "number",
           "minimum": 0,
@@ -760,6 +769,14 @@
           "type": "number",
           "minimum": 0,
           "maximum": 0.9
+        },
+        "lineOfSightDistanceM": {
+          "type": "number",
+          "minimum": 0
+        },
+        "lineOfSightMaxNodes": {
+          "type": "integer",
+          "minimum": 2
         },
         "nearLineOfSightBlend": {
           "type": "number",
@@ -951,13 +968,13 @@
           "enum": [
             "dijkstra",
             "astar",
+            "floyd_warshall",
             "yen_ksp",
             "robust_agility"
           ]
         },
         "costPolicy": {
           "enum": [
-            "shortest_distance",
             "minimum_travel_time"
           ]
         },

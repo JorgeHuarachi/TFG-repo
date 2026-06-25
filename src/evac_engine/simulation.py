@@ -65,9 +65,10 @@ class EvacuationModel:
         beacon_state = self.beacon_simulator.state_at(self.step_count, self.time_s)
         congestion = self._congestion()
         route_targets = list(((self.scenario.routing.get("destination") or {}).get("cellSpaceRefs") or []))
-        routing_config = dict(self.scenario.routing)
+        routing_config = dict(self.scenario.physics)
+        routing_config.update(self.scenario.routing)
         blocked_route_cells = self._routing_blocked_cells(hazard_state.blocked_cells, beacon_state, routing_config)
-        cost_policy = str(routing_config.get("costPolicy", "shortest_distance"))
+        cost_policy = str(routing_config.get("costPolicy", "minimum_travel_time"))
         algorithm = str(routing_config.get("algorithm", "dijkstra"))
         replan = str(routing_config.get("replanPolicy", "on_blocked_or_interval"))
         replan_interval = int(routing_config.get("replanIntervalSteps", 10))
@@ -230,10 +231,16 @@ class EvacuationModel:
             "evacuated": status_counts.get("evacuated", 0),
             "noRoute": status_counts.get("no_route", 0),
             "trapped": status_counts.get("trapped", 0),
+            "routePlans": self._event_count("route_planned"),
+            "routeRecoveries": self._event_count("agent_route_recovered"),
+            "noRouteEvents": self._event_count("agent_no_route"),
             "meanEvacuationTimeS": round(sum(evacuation_times) / len(evacuation_times), 6) if evacuation_times else None,
             "maxEvacuationTimeS": max(evacuation_times) if evacuation_times else None,
             "topology": self.topology.to_summary(),
         }
+
+    def _event_count(self, event_type: str) -> int:
+        return sum(1 for event in self.events if event.get("eventType") == event_type)
 
     def _build_continuous_spaces(self) -> dict[str, Any]:
         if ContinuousSpace is None:
@@ -349,6 +356,8 @@ class EvacuationModel:
         for agent in agents:
             if agent.status != "active" or not agent.level:
                 continue
+            if agent.wait_reason == "transfer_capacity":
+                continue
             cell = self.indoor.cells_by_id.get(agent.current_cell)
             if not cell or cell.navigation_type != "GeneralSpace":
                 continue
@@ -375,10 +384,13 @@ class EvacuationModel:
                         right_candidate = (right.position[0] + ux * overlap, right.position[1] + uy * overlap)
                         left.position = self._limited_soft_project(left.current_cell, left.position, left_candidate)
                         right.position = self._limited_soft_project(right.current_cell, right.position, right_candidate)
-                        left.velocity = (left.velocity[0] * 0.65, left.velocity[1] * 0.65)
-                        right.velocity = (right.velocity[0] * 0.65, right.velocity[1] * 0.65)
-                        self._mark_proximity_slowdown(left, 0.45)
-                        self._mark_proximity_slowdown(right, 0.45)
+                        left_scale, right_scale = self._proximity_priority_scales(left, right)
+                        left_velocity_scale = 0.55 + left_scale * 0.4
+                        right_velocity_scale = 0.55 + right_scale * 0.4
+                        left.velocity = (left.velocity[0] * left_velocity_scale, left.velocity[1] * left_velocity_scale)
+                        right.velocity = (right.velocity[0] * right_velocity_scale, right.velocity[1] * right_velocity_scale)
+                        self._mark_proximity_slowdown(left, left_scale)
+                        self._mark_proximity_slowdown(right, right_scale)
                         moved = True
                 if not moved:
                     break
@@ -391,26 +403,85 @@ class EvacuationModel:
             if agent.status == "active" and self._is_transfer_like(agent.current_cell):
                 occupied[agent.current_cell] = occupied.get(agent.current_cell, 0) + 1
         reserved: dict[str, int] = {}
-        filtered = []
-        for agent, new_cell, new_pos, new_velocity in decisions:
-            if new_cell == agent.current_cell or not self._is_transfer_like(new_cell):
-                filtered.append((agent, new_cell, new_pos, new_velocity))
-                continue
+        entering_indices = [
+            index
+            for index, (agent, new_cell, _, _) in enumerate(decisions)
+            if new_cell != agent.current_cell and self._is_transfer_like(new_cell)
+        ]
+        accepted_entries: set[int] = set()
+        waiting_entries: dict[int, int] = {}
+        waiting_counts: dict[str, int] = {}
+        for index in sorted(entering_indices, key=lambda item: (decisions[item][1], self._transfer_entry_priority(decisions[item][0], decisions[item][1]), item)):
+            agent, new_cell, _, _ = decisions[index]
             if occupied.get(new_cell, 0) + reserved.get(new_cell, 0) >= self._transfer_capacity(new_cell):
-                filtered.append((agent, agent.current_cell, self._queue_before_transfer(agent, new_cell), (0.0, 0.0)))
+                waiting_entries[index] = waiting_counts.get(new_cell, 0)
+                waiting_counts[new_cell] = waiting_counts.get(new_cell, 0) + 1
+                continue
+            reserved[new_cell] = reserved.get(new_cell, 0) + 1
+            accepted_entries.add(index)
+        queue_activation = float(self.scenario.physics.get("transferQueueActivationM", 1.25))
+        approaching_indices = [
+            index
+            for index, (agent, new_cell, _, _) in enumerate(decisions)
+            if index not in waiting_entries
+            and index not in accepted_entries
+            and new_cell == agent.current_cell
+            and (target := self._next_route_cell(agent)) is not None
+            and self._is_transfer_like(target)
+            and self._transfer_entry_priority(agent, target) <= queue_activation
+        ]
+        for index in sorted(approaching_indices, key=lambda item: (self._next_route_cell(decisions[item][0]) or "", self._transfer_entry_priority(decisions[item][0], self._next_route_cell(decisions[item][0]) or ""), item)):
+            agent = decisions[index][0]
+            target = self._next_route_cell(agent)
+            if not target:
+                continue
+            if occupied.get(target, 0) + reserved.get(target, 0) >= self._transfer_capacity(target):
+                waiting_entries[index] = waiting_counts.get(target, 0)
+                waiting_counts[target] = waiting_counts.get(target, 0) + 1
+        filtered = []
+        for index, (agent, new_cell, new_pos, new_velocity) in enumerate(decisions):
+            wait_cell = new_cell if self._is_transfer_like(new_cell) else self._next_route_cell(agent)
+            if index in waiting_entries and wait_cell:
+                agent.wait_reason = "transfer_capacity"
+                agent.waiting_for_cell = wait_cell
+                filtered.append((agent, agent.current_cell, self._queue_before_transfer(agent, wait_cell, waiting_entries[index]), (0.0, 0.0)))
                 if not any(
                     event.get("eventType") == "agent_waited_capacity"
                     and event.get("agentId") == agent.agent_id
                     and event.get("step") == self.step_count
                     for event in self.events
                 ):
-                    self._event("agent_waited_capacity", agent, {"cellSpaceRef": new_cell})
+                    self._event("agent_waited_capacity", agent, {"cellSpaceRef": wait_cell, "queueIndex": waiting_entries[index]})
                 continue
-            reserved[new_cell] = reserved.get(new_cell, 0) + 1
+            if new_cell == agent.current_cell or not self._is_transfer_like(new_cell):
+                agent.wait_reason = None
+                agent.waiting_for_cell = None
+                filtered.append((agent, new_cell, new_pos, new_velocity))
+                continue
+            if index not in accepted_entries:
+                agent.wait_reason = "transfer_capacity"
+                agent.waiting_for_cell = new_cell
+                rank = waiting_counts.get(new_cell, 0)
+                waiting_counts[new_cell] = rank + 1
+                filtered.append((agent, agent.current_cell, self._queue_before_transfer(agent, new_cell, rank), (0.0, 0.0)))
+                continue
+            agent.wait_reason = None
+            agent.waiting_for_cell = None
             filtered.append((agent, new_cell, new_pos, new_velocity))
         return filtered
 
-    def _queue_before_transfer(self, agent: AgentState, transfer_cell: str) -> tuple[float, float]:
+    def _transfer_entry_priority(self, agent: AgentState, transfer_cell: str) -> float:
+        current_geom = self.topology.cell_geometry(agent.current_cell)
+        transfer_geom = self.topology.cell_geometry(transfer_cell)
+        if transfer_geom is None or transfer_geom.is_empty:
+            return math.inf
+        entry = self._shared_entry_point(current_geom, transfer_geom)
+        if entry is None:
+            point = transfer_geom.representative_point()
+            entry = (float(point.x), float(point.y))
+        return _distance(agent.position, entry)
+
+    def _queue_before_transfer(self, agent: AgentState, transfer_cell: str, queue_rank: int = 0) -> tuple[float, float]:
         current_geom = self.topology.cell_geometry(agent.current_cell)
         transfer_geom = self.topology.cell_geometry(transfer_cell)
         if current_geom is None or current_geom.is_empty or transfer_geom is None or transfer_geom.is_empty:
@@ -422,17 +493,24 @@ class EvacuationModel:
         axis = _unit((float(transfer_center.x) - entry[0], float(transfer_center.y) - entry[1]))
         if axis == (0.0, 0.0):
             return agent.position
-        queue_distance = (
+        queue_spacing = (
             self._body_radius(agent) * 2.0
             + float(self.scenario.physics.get("bodySeparationSlackM", 0.04))
             + float(self.scenario.physics.get("doorQueueClearanceM", 0.08))
         )
+        queue_distance = queue_spacing * (max(0, queue_rank) + 1)
         progress = (agent.position[0] - entry[0]) * axis[0] + (agent.position[1] - entry[1]) * axis[1]
-        if progress <= -queue_distance:
+        if progress <= -queue_distance and abs(progress + queue_distance) <= queue_spacing * 0.6:
             return agent.position
         candidate = (entry[0] - axis[0] * queue_distance, entry[1] - axis[1] * queue_distance)
         correction_distance = _distance(agent.position, candidate)
         max_correction = float(self.scenario.physics.get("doorQueueCorrectionMaxM", 0.32))
+        max_correction = min(
+            max_correction,
+            self._profile_speed(agent)
+            * self.scenario.time_step_s
+            * float(self.scenario.physics.get("queueCorrectionSpeedScale", 0.55)),
+        )
         if correction_distance > max_correction > 0:
             correction_direction = _unit((candidate[0] - agent.position[0], candidate[1] - agent.position[1]))
             candidate = (
@@ -470,6 +548,8 @@ class EvacuationModel:
             return max(1, int(self.scenario.physics.get("stairCapacity", 1)))
         if cell.category == "Ramp":
             return max(1, int(self.scenario.physics.get("rampCapacity", 1)))
+        if cell.category == "Door":
+            return 1
         if cell.category == "Elevator":
             return 4
         if cell.category == "Exit":
@@ -653,7 +733,7 @@ class EvacuationModel:
             return False
         candidate = agent.route.node_sequence[candidate_index]
         waypoint = self._local_waypoint(agent, candidate)
-        if _distance(agent.position, waypoint) > float(self.scenario.physics.get("lineOfSightDistanceM", 12.0)):
+        if _distance(agent.position, waypoint) > float(self.scenario.physics.get("lineOfSightDistanceM", 18.0)):
             return False
         if self._line_crosses_wall(agent.level, agent.position, waypoint):
             return False
@@ -1193,7 +1273,8 @@ class EvacuationModel:
         if first_lookahead_index >= len(agent.route.node_sequence):
             return waypoint
         lookahead = None
-        max_index = min(agent.route_index + 4, len(agent.route.node_sequence) - 1)
+        max_nodes = max(2, int(self.scenario.physics.get("lineOfSightMaxNodes", 6)))
+        max_index = min(agent.route_index + max_nodes, len(agent.route.node_sequence) - 1)
         for candidate_index in range(first_lookahead_index, max_index + 1):
             lookahead_cell = agent.route.node_sequence[candidate_index]
             if self.topology.node_level(lookahead_cell) != agent.level:
@@ -1208,7 +1289,10 @@ class EvacuationModel:
         near_blend = float(self.scenario.physics.get("nearLineOfSightBlend", 0.55))
         blend = far_blend if distance > 0.6 else near_blend
         blend = min(max(blend, 0.0), 0.9)
-        return (waypoint[0] * (1.0 - blend) + lookahead[0] * blend, waypoint[1] * (1.0 - blend) + lookahead[1] * blend)
+        target = (waypoint[0] * (1.0 - blend) + lookahead[0] * blend, waypoint[1] * (1.0 - blend) + lookahead[1] * blend)
+        if self._line_crosses_wall(agent.level, agent.position, target):
+            return waypoint
+        return target
 
     def _arrival_radius(self, target_cell: str) -> float:
         if target_cell.startswith("VTN_"):
@@ -1291,14 +1375,19 @@ class EvacuationModel:
                 other_dir = _unit(other.velocity)
                 head_on = max(0.0, -(direction[0] * other_dir[0] + direction[1] * other_dir[1]))
             slowdown = 0.45 * crowding + 0.4 * ahead * crowding + 0.35 * head_on * crowding
+            priority_factor = self._proximity_priority_factor(agent, other)
+            slowdown *= priority_factor
             if distance < self._body_radius(agent) + self._body_radius(other) + 0.08:
-                slowdown = max(slowdown, 0.82)
+                overlap_floor = 0.82 * min(priority_factor, 1.0)
+                if priority_factor > 1.0:
+                    overlap_floor = min(0.92, 0.82 * priority_factor)
+                slowdown = max(slowdown, overlap_floor)
             scale = min(scale, max(0.12, 1.0 - slowdown))
         if scale < 0.995:
             self._mark_proximity_slowdown(agent, scale)
             return scale
         if agent.proximity_slowdown_until_s > self.time_s:
-            duration = max(float(self.scenario.physics.get("proximitySlowdownMemoryS", 0.55)), 1e-6)
+            duration = max(float(self.scenario.physics.get("proximitySlowdownMemoryS", 0.22)), 1e-6)
             remaining = min(duration, agent.proximity_slowdown_until_s - self.time_s)
             remembered = clamp01(1.0 - (1.0 - agent.proximity_slowdown_scale) * (remaining / duration))
             return min(1.0, remembered)
@@ -1306,11 +1395,44 @@ class EvacuationModel:
         return 1.0
 
     def _mark_proximity_slowdown(self, agent: AgentState, scale: float) -> None:
-        duration = max(float(self.scenario.physics.get("proximitySlowdownMemoryS", 0.55)), 0.0)
+        duration = max(float(self.scenario.physics.get("proximitySlowdownMemoryS", 0.22)), 0.0)
         if duration <= 0:
             return
-        agent.proximity_slowdown_until_s = max(agent.proximity_slowdown_until_s, self.time_s + duration)
-        agent.proximity_slowdown_scale = min(agent.proximity_slowdown_scale, max(0.08, min(1.0, scale)))
+        agent.proximity_slowdown_until_s = self.time_s + duration
+        agent.proximity_slowdown_scale = max(0.08, min(1.0, scale))
+
+    def _proximity_priority_scales(self, left: AgentState, right: AgentState) -> tuple[float, float]:
+        left_distance = self._immediate_goal_distance(left)
+        right_distance = self._immediate_goal_distance(right)
+        margin = 0.12
+        if math.isfinite(left_distance) and math.isfinite(right_distance):
+            if left_distance + margin < right_distance:
+                return (0.82, 0.38)
+            if right_distance + margin < left_distance:
+                return (0.38, 0.82)
+        return (0.55, 0.55)
+
+    def _proximity_priority_factor(self, agent: AgentState, other: AgentState) -> float:
+        agent_distance = self._immediate_goal_distance(agent)
+        other_distance = self._immediate_goal_distance(other)
+        margin = 0.12
+        if not (math.isfinite(agent_distance) and math.isfinite(other_distance)):
+            return 1.0
+        if agent_distance + margin < other_distance:
+            return 0.45
+        if other_distance + margin < agent_distance:
+            return 1.35
+        return 1.0
+
+    def _immediate_goal_distance(self, agent: AgentState) -> float:
+        target_cell = self._next_route_cell(agent)
+        if not target_cell:
+            return math.inf
+        try:
+            waypoint = self._local_waypoint(agent, target_cell)
+        except Exception:
+            return math.inf
+        return _distance(agent.position, waypoint)
 
     def _wall_repulsion(self, agent: AgentState, target_cell: str | None = None) -> tuple[float, float]:
         if (target_cell or "").startswith("VTN_"):
@@ -1409,12 +1531,14 @@ class EvacuationModel:
         profile = self.scenario.mobility_profiles.get(agent.profile_id)
         next_cell = self._next_route_cell(agent)
         intent = None
-        if agent.status == "active" and next_cell:
+        if agent.status == "active" and next_cell and not agent.wait_reason:
             waypoint = self._local_waypoint(agent, next_cell)
             hold_center = self._transfer_center_hold(agent, next_cell, self._profile_speed(agent) * self.scenario.time_step_s)
             if hold_center is not None:
                 waypoint = hold_center
             intent = self._motion_target(agent, next_cell, waypoint, arrived=False, holding_transfer_center=hold_center is not None)
+            if intent and self._line_crosses_wall(agent.level, agent.position, intent):
+                intent = None
         self.trajectories.append(
             {
                 "step": self.step_count,
@@ -1429,6 +1553,8 @@ class EvacuationModel:
                 "status": agent.status,
                 "routeIndex": agent.route_index,
                 "routeNextCell": next_cell,
+                "waitReason": agent.wait_reason,
+                "waitingForCell": agent.waiting_for_cell,
                 "intentX": round(intent[0], 6) if intent else None,
                 "intentY": round(intent[1], 6) if intent else None,
                 "bodyRadiusM": float((profile.attributes or {}).get("bodyRadiusM", self.scenario.physics.get("bodyRadiusM", 0.25))) if profile else 0.25,

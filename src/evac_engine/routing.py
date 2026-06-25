@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any
+from typing import Any, Callable
 
 import networkx as nx
 
@@ -29,7 +29,7 @@ class WeightSnapshotCompiler:
         step: int = 0,
         time_s: float = 0.0,
         mobility_profile: MobilityProfile | None = None,
-        cost_policy: str = "shortest_distance",
+        cost_policy: str = "minimum_travel_time",
         hazard_state: HazardState | None = None,
         beacon_state: BeaconState | None = None,
         congestion: dict[str, int] | None = None,
@@ -63,7 +63,7 @@ class WeightSnapshotCompiler:
                 continue
             if not _profile_allows(data, mobility_profile):
                 continue
-            breakdown = self._weight_breakdown(data, source, target, cost_policy, hazard_state, beacon_state, congestion, routing_config)
+            breakdown = self._weight_breakdown(data, source, target, cost_policy, mobility_profile, hazard_state, beacon_state, congestion, routing_config)
             existing = graph.get_edge_data(source, target)
             if existing is None or breakdown["total"] < existing["weight"]:
                 graph.add_edge(source, target, weight=breakdown["total"], arcId=key, resourceRef=resource_ref, breakdown=breakdown, raw=data)
@@ -83,15 +83,14 @@ class WeightSnapshotCompiler:
         source: str,
         target: str,
         cost_policy: str,
+        mobility_profile: MobilityProfile | None,
         hazard_state: HazardState,
         beacon_state: BeaconState,
         congestion: dict[str, int],
         routing_config: dict[str, Any],
     ) -> dict[str, Any]:
-        if cost_policy == "minimum_travel_time":
-            base = float(edge_data.get("baseTraversalTimeS") or edge_data.get("lengthM") or 1.0)
-        else:
-            base = float(edge_data.get("lengthM") or 1.0)
+        length_m = _non_negative_float(edge_data.get("lengthM"), 1.0)
+        base = _profile_traversal_time(edge_data, mobility_profile, routing_config)
         resource_ref = str(edge_data.get("resourceRef") or "")
         endpoint_policy = str(routing_config.get("riskEndpointPolicy", "target"))
         edge_precedence = bool(routing_config.get("riskEdgePrecedence", True))
@@ -130,6 +129,9 @@ class WeightSnapshotCompiler:
         return {
             "base": round(base, 6),
             "baseComponent": round(base_component, 6),
+            "baseUnit": "s",
+            "costPolicy": cost_policy,
+            "lengthM": round(length_m, 6),
             "riskCostModel": risk_model,
             "riskEndpointPolicy": endpoint_policy,
             "hazardRisk": round(hazard, 6),
@@ -157,7 +159,7 @@ class RoutingEngine:
         target_refs: list[str] | None = None,
         mobility_profile: MobilityProfile | None = None,
         algorithm: str = "dijkstra",
-        cost_policy: str = "shortest_distance",
+        cost_policy: str = "minimum_travel_time",
         hazard_state: HazardState | None = None,
         beacon_state: BeaconState | None = None,
         congestion: dict[str, int] | None = None,
@@ -191,7 +193,7 @@ class RoutingEngine:
             snapshot.graph,
             origin_id,
             targets,
-            heuristic=self._heuristic,
+            heuristic=self._time_heuristic(mobility_profile),
             config=RouteRecommendationConfig.from_routing_config(algorithm, routing_config),
         )
         planning_ms = (time.perf_counter() - planning_start) * 1000.0
@@ -216,18 +218,28 @@ class RoutingEngine:
                 targets.append(resolved)
         return targets
 
-    def _heuristic(self, left: str, right: str) -> float:
+    def _time_heuristic(self, mobility_profile: MobilityProfile | None) -> Callable[[str, str], float]:
+        speed = float(mobility_profile.base_speed_mps if mobility_profile else 1.2)
+        speed = max(speed, 0.01)
+
+        def heuristic(left: str, right: str) -> float:
+            distance = self._euclidean_distance(left, right)
+            return distance / speed if distance is not None else 0.0
+
+        return heuristic
+
+    def _euclidean_distance(self, left: str, right: str) -> float | None:
         left_pos = self.topology.node_position(left)
         right_pos = self.topology.node_position(right)
         if left_pos and right_pos:
             return math.dist(left_pos, right_pos)
-        return 0.0
+        return None
 
     @staticmethod
     def _route_from_path(path: list[str], snapshot: WeightedSnapshot, origin: str, target: str, algorithm: str, cost_policy: str) -> Route:
         arc_sequence = []
         total = 0.0
-        breakdown = {"base": 0.0, "hazardPenalty": 0.0, "beaconPenalty": 0.0, "congestionPenalty": 0.0}
+        breakdown = {"base": 0.0, "lengthM": 0.0, "hazardPenalty": 0.0, "beaconPenalty": 0.0, "congestionPenalty": 0.0}
         for source, dest in zip(path, path[1:]):
             data = snapshot.graph[source][dest]
             arc_sequence.append(str(data.get("arcId")))
@@ -235,6 +247,7 @@ class RoutingEngine:
             for key in breakdown:
                 breakdown[key] += float((data.get("breakdown") or {}).get(key, 0.0))
         breakdown = {key: round(value, 6) for key, value in breakdown.items()}
+        breakdown["baseUnit"] = "s"
         breakdown["total"] = round(total, 6)
         return Route(
             origin=origin,
@@ -276,6 +289,47 @@ def _profile_allows(edge_data: dict[str, Any], profile: MobilityProfile | None) 
     if connector_type == "Elevator" and not profile.can_use_elevators:
         return False
     return True
+
+
+def _profile_traversal_time(
+    edge_data: dict[str, Any],
+    profile: MobilityProfile | None,
+    routing_config: dict[str, Any],
+) -> float:
+    length_m = max(_non_negative_float(edge_data.get("lengthM"), 1.0), 0.01)
+    fallback_time = max(_non_negative_float(edge_data.get("baseTraversalTimeS"), length_m / 1.2), 0.01)
+    speed = float(profile.base_speed_mps if profile else 1.2)
+    if speed <= 0.0:
+        return fallback_time
+    connector_type = str(edge_data.get("connectorType") or "")
+    factor = _connector_speed_factor(connector_type, profile, routing_config)
+    return max(length_m / max(speed * factor, 0.01), 0.01)
+
+
+def _connector_speed_factor(
+    connector_type: str,
+    profile: MobilityProfile | None,
+    routing_config: dict[str, Any],
+) -> float:
+    defaults = {
+        "Stair": 0.55,
+        "Ramp": 0.7,
+        "Elevator": 0.5,
+    }
+    field = {
+        "Stair": "stairSpeedFactor",
+        "Ramp": "rampSpeedFactor",
+        "Elevator": "elevatorSpeedFactor",
+    }.get(connector_type)
+    if not field:
+        return 1.0
+    raw_value = None
+    if profile and field in profile.attributes:
+        raw_value = profile.attributes.get(field)
+    if raw_value is None:
+        raw_value = routing_config.get(field)
+    factor = _non_negative_float(raw_value, defaults[connector_type])
+    return min(max(factor, 0.01), 1.0)
 
 
 def _risk_for_edge(

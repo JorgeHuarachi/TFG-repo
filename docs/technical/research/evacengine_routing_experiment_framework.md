@@ -6,7 +6,7 @@ Este documento define el alcance metodologico y operativo del comparador de reco
 
 Evaluar como cambia una evacuacion indoor cuando la recomendacion de ruta prioriza:
 
-- tiempo o distancia minima;
+- tiempo minimo como base fisica de las aristas;
 - riesgo dinamico procedente de hazards y balizas;
 - robustez ante fallo de conexiones;
 - agilidad o capacidad de reencaminamiento desde nodos intermedios;
@@ -41,12 +41,13 @@ Esta separacion evita mezclar un algoritmo de busqueda con una politica de recom
 
 ## Funcion De Coste
 
-Sea una arista dirigida \(e=(u,v)\). El coste base puede ser distancia o tiempo:
+Sea una arista dirigida \(e=(u,v)\). El coste base de EvacEngine es siempre tiempo de recorrido estimado, medido en segundos. Esto es importante porque una escalera, una rampa o un ascensor pueden tener una proyeccion 2D similar a un tramo llano, pero no tienen el mismo tiempo de cruce.
 
 ```text
-b(e) = lengthM(e)                         si costPolicy = shortest_distance
-b(e) = baseTraversalTimeS(e) o lengthM(e)  si costPolicy = minimum_travel_time
+t(e) = lengthM(e) / (v_p * phi_c)
 ```
+
+Donde `v_p` es la velocidad base del perfil de movilidad y `phi_c` es el factor de velocidad del conector: por defecto `1.0` en espacios horizontales, `0.55` en escaleras, `0.7` en rampas y `0.5` en ascensores. Si el escenario define `stairSpeedFactor`, `rampSpeedFactor` o `elevatorSpeedFactor`, esos valores se usan en la simulacion.
 
 El riesgo se mantiene normalizado:
 
@@ -67,7 +68,7 @@ La forma canonica que conviene explicar en el TFG es:
 C(e) = alpha * t(e) + beta * r(e)
 ```
 
-Cuando hay varias fuentes de riesgo, EvacEngine expande ese termino como una suma ponderada: `beta * r(e)` puede materializarse como `beta_h * r_h(e) + beta_b * r_b(e)`. Asi queda claro que el algoritmo sigue usando pesos escalares no negativos, pero el origen de esos pesos sigue siendo auditable.
+Cuando hay varias fuentes de riesgo, EvacEngine expande ese termino como una suma ponderada: `beta * r(e)` puede materializarse como `beta_h * r_h(e) + beta_b * r_b(e)`. Asi queda claro que el algoritmo sigue usando pesos escalares no negativos, pero el origen de esos pesos sigue siendo auditable. Los modelos `multiplicative_beta` y `linear_time_risk` tambien parten de `t(e)`; no usan distancia como base fisica.
 
 ### Origen Del Riesgo
 
@@ -122,7 +123,7 @@ Modelo explicito tipo:
 C(e) = alpha * b(e) + U_r * (beta_h * r_h(e) + beta_b * r_b(e)) + congestion(e)
 ```
 
-`U_r = riskUnitCost` convierte riesgo adimensional a la misma unidad que `b(e)`. Si `b(e)` esta en segundos, `riskUnitCost` tambien se interpreta como segundos de penalizacion maxima por unidad de riesgo.
+`U_r = riskUnitCost` convierte riesgo adimensional a la misma unidad que `t(e)`. Como `t(e)` esta en segundos, `riskUnitCost` tambien se interpreta como segundos de penalizacion maxima por unidad de riesgo.
 
 ## Simbolos Y Parametros
 
@@ -152,8 +153,8 @@ Estos campos viven en `scenario.routing` o dentro de cada `experiments.routingPr
 
 | Campo | Uso |
 |---|---|
-| `algorithm` | algoritmo de busqueda/recomendacion: `dijkstra`, `astar`, `yen_ksp` o `robust_agility` |
-| `costPolicy` | define el coste base: `shortest_distance` o `minimum_travel_time` |
+| `algorithm` | algoritmo de busqueda/recomendacion: `dijkstra`, `astar`, `floyd_warshall`, `yen_ksp` o `robust_agility` |
+| `costPolicy` | define explicitamente la base temporal `minimum_travel_time` |
 | `riskCostModel` | formula de coste: `legacy_additive`, `multiplicative_beta` o `linear_time_risk` |
 | `riskEndpointPolicy` | como convertir riesgo de espacios en riesgo de arista: `target`, `source`, `mean`, `min`, `max` |
 | `riskEdgePrecedence` | si `true`, un riesgo propio de conexion tiene prioridad sobre el riesgo de origen/destino |
@@ -178,6 +179,54 @@ Estos campos viven en `scenario.routing` o dentro de cada `experiments.routingPr
 | `routeRecommendation.agilityWeight` | peso de agilidad en la politica combinada |
 | `routeRecommendation.agilityAggregation` | agregacion de agilidad de nodos intermedios: `mean` o `geometric` |
 
+## Cuando Se Recalcula La Ruta
+
+La simulacion mantiene para cada agente una ruta topologica formada por ids de `CellSpace`. En cada tick se evalua si hace falta calcularla de nuevo:
+
+```text
+recalcular = route is None
+          or remaining_route intersects blocked_cells
+          or step % replanIntervalSteps == 0
+```
+
+Con la configuracion por defecto:
+
+- `replanPolicy = on_blocked_or_interval`;
+- `replanIntervalSteps = 10`;
+- `noRouteRetryIntervalSteps = 10` si no se define otro valor.
+
+Por tanto, cada agente activo planifica al inicio y vuelve a planificar cada 10 pasos, ademas de hacerlo inmediatamente si una celda restante de su ruta queda bloqueada por hazards o balizas. Los agentes en `no_route` reintentan segun `noRouteRetryIntervalSteps`.
+
+Las metricas de salida incluyen:
+
+| Campo | Lectura |
+|---|---|
+| `routePlans` | numero de eventos `route_planned`; mide recalculos de agentes activos |
+| `routeRecoveries` | numero de eventos `agent_route_recovered`; mide agentes que salieron de `no_route` |
+| `noRouteEvents` | numero de veces que un agente no encontro ruta |
+
+En comparaciones de presets, la tabla del workbench muestra `plans` para comparar cuantas planificaciones ha provocado cada politica.
+
+### Origen Real De La Ruta
+
+Actualmente el recomendador recibe como origen `agent.current_cell`. Es decir, la busqueda en el grafo empieza en la celda topologica donde esta el agente, no en su coordenada continua exacta.
+
+La coordenada exacta si se usa en la capa de movimiento: waypoints locales, entrada al transfer, centrado en puertas/rampas/escaleras, repulsion, vision y restricciones geometricas. Esto significa que:
+
+- el algoritmo decide la secuencia de celdas desde la celda actual;
+- la fisica decide como moverse desde la posicion XY actual hasta la siguiente celda;
+- la primera arista todavia no se pondera por "distancia real desde el punto del agente hasta el transfer concreto".
+
+La mejora pendiente para un routing mas fino es hacer el primer salto position-aware:
+
+```text
+coste_total(vecino) =
+    coste_local(agent.xy -> entrada/centro del transfer vecino)
+  + coste_grafo(vecino -> salida)
+```
+
+Floyd-Warshall puede ayudar en esa arquitectura como tabla rapida de sufijos `vecino/transfer -> salida`, pero hace falta anadir una capa local que evalue los vecinos desde la posicion continua del agente.
+
 ## Algoritmos Y Politicas
 
 ### Dijkstra
@@ -186,7 +235,17 @@ Baseline para pesos no negativos. Sirve para medir la ruta optima bajo la funcio
 
 ### A*
 
-Debe devolver la misma ruta optima que Dijkstra si la heuristica es admisible. En EvacEngine se usa distancia euclidea entre puntos representativos cuando existe geometria. Se compara contra Dijkstra para medir si reduce latencia.
+Debe devolver la misma ruta optima que Dijkstra si la heuristica es admisible. En EvacEngine la heuristica es tiempo euclideo optimista: distancia entre puntos representativos dividida por la velocidad base del perfil. Se compara contra Dijkstra para medir si reduce latencia sin cambiar el resultado.
+
+### Floyd-Warshall
+
+Calcula distancias minimas entre todos los pares del snapshot ponderado actual. Para una unica consulta suele ser mas caro que Dijkstra/A*, pero es metodologicamente util porque:
+
+- permite comparar un algoritmo all-pairs contra algoritmos single-source/single-target;
+- da una referencia estable cuando se quieren consultar muchos origenes y destinos sobre el mismo snapshot;
+- encaja con un futuro routing por etapas, donde se precalculan sufijos desde transfers hacia salidas y la primera decision depende de la posicion continua del agente.
+
+En la implementacion actual se ejecuta sobre el snapshot de cada recalculo de ruta. Por tanto no es el algoritmo recomendado por defecto para escenarios dinamicos grandes; es una opcion de estudio y verificacion.
 
 ### Yen k-rutas
 
@@ -218,6 +277,7 @@ La agregacion geometrica tambien esta disponible para castigar rutas que atravie
 |---|---|---|---|
 | `dijkstra_time` | tiempo puro | Dijkstra | menor coste |
 | `astar_time` | tiempo puro | A* | menor coste |
+| `floyd_warshall_time` | tiempo puro | Floyd-Warshall | menor coste all-pairs |
 | `astar_risk_multiplicative` | tiempo x riesgo | A* | menor coste |
 | `yen_risk_lowest` | tiempo x riesgo | Yen | menor coste |
 | `yen_highest_robustness` | tiempo x riesgo | Yen | mayor robustez |
@@ -267,6 +327,12 @@ Comparar tres politicas:
 .\.venv\Scripts\python.exe -B -m src.evac_engine compare-routing --scenario examples\indoor_data_model\scenario_single_floor.json --presets dijkstra_time,astar_risk_multiplicative,yen_highest_robustness --output-dir outputs\routing_compare_single
 ```
 
+Comparar Dijkstra, A* y Floyd-Warshall con el mismo coste temporal:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m src.evac_engine compare-routing --scenario examples\indoor_data_model\scenario_single_floor.json --presets dijkstra_time,astar_time,floyd_warshall_time --output-dir outputs\routing_compare_shortest_path
+```
+
 Comparacion rapida sin salidas completas por preset:
 
 ```powershell
@@ -288,11 +354,25 @@ Flujo recomendado:
 3. Pulsar `Apply preset` para copiar sus parametros a los controles editables.
 4. Ajustar, si hace falta, `Safety-cost model`, `alpha`, `hazard beta`, `beacon beta`, `routeSelection`, `k` o tolerancias. En el JSON esos campos siguen llamandose `riskCostModel`, `hazardBeta`, `beaconBeta`, etc.
 5. Pulsar `Run preset visually` para ver ese caso en el canvas.
-6. Marcar varios presets en la lista y pulsar `Compare selected` para obtener una tabla con evacuados, activos, no-route, coste medio, latencia de planificacion, robustez y agilidad.
+6. Marcar varios presets en la lista y pulsar `Compare selected` para obtener una tabla con evacuados, activos, no-route, planes/recalculos, coste medio, latencia de planificacion, robustez y agilidad.
 
 La comparacion visual usa el estado actual del workbench: agentes manuales, grupo automatico, destino, balizas, curva temporal y eventos programados. Asi se puede comprobar el efecto de cambiar la politica de routing manteniendo constante el escenario.
 
 En la UI se usa la palabra `safety` porque es mas intuitiva: `safety = 1` significa espacio usable y `safety = 0` significa inseguro. Internamente, para mantener compatibilidad con el schema y los resultados existentes, EvacEngine guarda la perdida de seguridad como `riskPenalty = 1 - safety`.
+
+Lectura recomendada de los experimentos, de menor a mayor complejidad:
+
+1. `dijkstra_time`: baseline de evacuacion por menor tiempo.
+2. `astar_time`: mismo objetivo de tiempo, pero con heuristica para comparar latencia frente a Dijkstra.
+3. `floyd_warshall_time`: mismo coste de tiempo, calculo all-pairs para contrastar rutas y coste computacional.
+4. `astar_risk_multiplicative`: tiempo mas perdida de seguridad por balizas/hazards.
+5. `yen_risk_lowest`: varias rutas candidatas, seleccionando la de menor coste safety-tiempo.
+6. `yen_highest_robustness`: varias rutas candidatas, premiando alternativas si falla una arista.
+7. `yen_highest_agility`: varias rutas candidatas, premiando espacios con mayor agilidad/CE.
+8. `robust_agility`: seleccion combinada de coste, robustez y agilidad.
+9. `astar_risk_congestion`: incorpora congestion como penalizacion dinamica adicional.
+
+Este orden permite reproducir el estilo de `animate_dynamic_route.py`: partir de una mascara de movilidad y coste temporal simple, despues activar seguridad, despues rutas candidatas y finalmente criterios de robustez/agilidad/congestion. La diferencia es que ahora se conserva la arquitectura nueva de scenario + indoor model + simulador fisico.
 
 ### Estructura De La Seccion
 
@@ -305,7 +385,7 @@ La seccion visible esta pensada para uso normal:
 | `Run visually` | aplica el preset seleccionado y ejecuta una simulacion visible en el canvas |
 | `Compare checked` | ejecuta todos los presets marcados con los mismos agentes, balizas, destino y eventos |
 | `Presets to compare` | lista de estrategias que entran en la comparacion |
-| panel de resultados | muestra una tabla compacta: preset, algoritmo, evacuados, activos, no-route, coste medio, latencia, robustez y agilidad |
+| panel de resultados | muestra una tabla compacta: preset, algoritmo, evacuados, activos, no-route, planes/recalculos, coste medio, latencia, robustez y agilidad |
 
 La parte avanzada esta plegada en `Advanced safety/cost parameters` para no saturar la UI. Ahi se ajustan los parametros de calibracion:
 
@@ -318,6 +398,10 @@ La parte avanzada esta plegada en `Advanced safety/cost parameters` para no satu
 | Robustez | `robust tolerance`, `robust weight` | cuanto se premian rutas con alternativas ante fallo |
 | Agilidad | `CE tolerance`, `CE paths`, `CE overlap`, `Agility aggregation`, `agility weight` | como se valora pasar por espacios con mas alternativas de evacuacion |
 | Balance final | `cost weight`, `robust weight`, `agility weight` | ponderacion de la politica combinada `robust_agility` |
+
+El workbench muestra un bloque compacto de parametros activos/ignorados. Esto es deliberado: no todos los campos participan siempre. Por ejemplo, en `dijkstra_time`, `k routes`, tolerancias, robustez y CE/agility no se usan porque se calcula una unica ruta de menor tiempo. En `yen_ksp` o `robust_agility`, esos campos si participan porque se generan candidatas y despues se aplica una politica de seleccion.
+
+`CE/agility` se interpreta aqui como una medida operacional de centralidad de evacuacion: no es solo una centralidad grafica clasica, sino un indicador de cuantas alternativas eficientes y suficientemente distintas quedan al pasar por una zona. `agility` resume esa informacion a nivel de ruta; `robustness` mide que ocurre si fallan conexiones. La comparacion final interesante no es escoger una y descartar la otra, sino estudiar coste/latencia/agilidad/robustez por separado y luego justificar una combinacion.
 
 ### Relacion Safety / Risk Interno
 

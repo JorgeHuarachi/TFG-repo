@@ -10,7 +10,7 @@ from typing import Any, Callable, Iterable
 import networkx as nx
 
 
-SUPPORTED_ROUTE_ALGORITHMS = {"dijkstra", "astar", "yen_ksp", "robust_agility"}
+SUPPORTED_ROUTE_ALGORITHMS = {"dijkstra", "astar", "floyd_warshall", "yen_ksp", "robust_agility"}
 ADVANCED_ROUTE_SELECTIONS = {"highest_robustness", "highest_agility", "robust_agility"}
 
 
@@ -196,6 +196,8 @@ class EvacuationRouteRecommendationService:
         heuristic: Callable[[str, str], float] | None,
         weight: str,
     ) -> list[RouteCandidate]:
+        if algorithm == "floyd_warshall":
+            return self._floyd_warshall_candidates(graph, origin, targets, weight)
         candidates = []
         for target in targets:
             try:
@@ -206,6 +208,34 @@ class EvacuationRouteRecommendationService:
             except (nx.NetworkXNoPath, nx.NodeNotFound):
                 continue
             candidates.append(RouteCandidate(list(path), target, _path_cost(graph, path, weight)))
+        return candidates
+
+    def _floyd_warshall_candidates(
+        self,
+        graph: nx.Graph,
+        origin: str,
+        targets: list[str],
+        weight: str,
+    ) -> list[RouteCandidate]:
+        try:
+            predecessors, distances = nx.floyd_warshall_predecessor_and_distance(graph, weight=weight)
+        except nx.NodeNotFound:
+            return []
+        origin_distances = distances.get(origin, {})
+        origin_predecessors = predecessors.get(origin, {})
+        candidates = []
+        for target in targets:
+            distance = float(origin_distances.get(target, math.inf))
+            if not math.isfinite(distance):
+                continue
+            if target == origin:
+                candidates.append(RouteCandidate([origin], target, 0.0))
+                continue
+            try:
+                path = _reconstruct_floyd_path(origin, target, origin_predecessors)
+            except KeyError:
+                continue
+            candidates.append(RouteCandidate(path, target, distance))
         return candidates
 
     def _k_shortest_candidates(
@@ -362,6 +392,20 @@ def _remove_failed_connection(graph: nx.Graph, source: str, target: str) -> None
         return
     if graph.has_edge(source, target):
         graph.remove_edge(source, target)
+
+
+def _reconstruct_floyd_path(origin: str, target: str, predecessors: dict[Any, Any]) -> list[str]:
+    path = [target]
+    current = target
+    guard = 0
+    while current != origin:
+        current = predecessors[current]
+        path.append(current)
+        guard += 1
+        if guard > len(predecessors) + 1:
+            raise KeyError(target)
+    path.reverse()
+    return path
 
 
 def _zero_heuristic(_left: str, _right: str) -> float:

@@ -89,8 +89,8 @@ def _add_simulation_runtime_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_runtime_override_args(parser: argparse.ArgumentParser) -> None:
     _add_simulation_runtime_args(parser)
-    parser.add_argument("--algorithm", choices=["dijkstra", "astar", "yen_ksp", "robust_agility"], help="Override routing.algorithm")
-    parser.add_argument("--cost-policy", choices=["shortest_distance", "minimum_travel_time"], help="Override routing.costPolicy")
+    parser.add_argument("--algorithm", choices=["dijkstra", "astar", "floyd_warshall", "yen_ksp", "robust_agility"], help="Override routing.algorithm")
+    parser.add_argument("--cost-policy", choices=["minimum_travel_time"], help="Override routing.costPolicy")
 
 
 def main(argv: list[str] | None = None) -> int:

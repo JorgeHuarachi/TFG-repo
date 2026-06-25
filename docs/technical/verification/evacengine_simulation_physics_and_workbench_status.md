@@ -254,6 +254,43 @@ Si haces clic en pared o fuera de una celda navegable, el workbench ignora el cl
 
 Si tus `indoor_model.json` estan en otra carpeta, pega la ruta completa del archivo en `Indoor model path` y pulsa `Reload scenario`.
 
+### Lectura Rapida Del Panel Lateral
+
+`Scenario path` carga el escenario de simulacion: agentes por defecto, semilla, timestep, max steps, destino, routing, balizas/eventos y la referencia al indoor model. `Run simulation` usa una copia en memoria de ese escenario mas los cambios del panel; no escribe el JSON en disco.
+
+`Indoor model path` puede quedar vacio. En ese caso se usa el `indoorModelRef.path` definido dentro del scenario. Solo hace falta rellenarlo si quieres forzar otro indoor model para probar una geometria concreta.
+
+`Reload scenario` vuelve a leer scenario/indoor model desde disco y descarta los cambios que solo estaban en el panel. Es util despues de editar un JSON manualmente, cambiar la ruta o recuperar el estado guardado.
+
+`Time step * Max steps` define la ventana fisica simulada. El workbench muestra el equivalente en segundos/minutos debajo de esos campos. `Playback ms/frame` solo cambia la velocidad visual de reproduccion, no la fisica ni las trayectorias calculadas.
+
+`Seed` fija la aleatoriedad reproducible de spawns automaticos y decisiones estocasticas. Si el scenario trae `22`, ese valor se usa como configuracion inicial; puedes cambiarlo para generar otra distribucion comparable.
+
+`Destination mode` tiene dos lecturas:
+
+- `All scenario exits`: usa las salidas definidas por el scenario, normalmente lo correcto para evacuacion general.
+- `Selected only`: fuerza una salida o celda concreta para pruebas controladas.
+
+`Algorithm` se usa en la siguiente simulacion normal. Si aplicas un preset de `Routing Experiments`, el preset puede sobrescribirlo. `Cost` esta fijado a `minimum_travel_time`: el peso base de arista es tiempo de viaje, y escaleras/rampas/ascensores ya penalizan porque su factor de velocidad es menor.
+
+En `Agents > Automatic`, el workbench muestra una previsualizacion de la tanda actual. La lista de `Spawn cell` solo ofrece espacios generales habitables; no ofrece puertas, ventanas, salidas, escaleras, rampas ni ascensores como punto inicial. `SET batch` convierte esa tanda en agentes manuales visibles y cambia a la pestana `Manual`; puedes volver a `Automatic`, elegir otra celda y repetir sin borrar los anteriores. `DELETE cell` elimina los agentes manuales de la region conectada de habitacion seleccionada. `Spawn X/Y` solo gobierna la posicion cuando `Group distribution = fixed`; con `random_within_space` se reparten por la region conectada de `GeneralSpace` que toca la celda seleccionada. Esto evita que el reparto quede limitado a una sola pieza triangular cuando la habitacion se ha descompuesto en varias celdas.
+
+En `Beacons`, la UI habla de `safety loss` para que sea intuitivo:
+
+```text
+safety = 1 - safety_loss
+riskPenalty interno = safety_loss
+```
+
+Por compatibilidad con schema, outputs y tests, el JSON interno sigue usando nombres `risk*`. En el panel, `safety loss = 0` significa seguro y `safety loss = 1` significa totalmente inseguro/bloqueable.
+
+### Fisica Relevante Confirmada
+
+- Escaleras, rampas y ascensores ralentizan el movimiento real, no solo el coste de ruta: `stairSpeedFactor`, `rampSpeedFactor` y `elevatorSpeedFactor` se aplican al cruzar esos transfer.
+- La proximidad entre agentes se calcula por radios corporales/personales de cada perfil. Si dos agentes se acercan demasiado, se aplica repulsion social y una ralentizacion corta; si uno esta mas cerca de su objetivo inmediato, se le da prioridad para que la cola avance de uno en uno.
+- En puertas, escaleras, rampas y ascensores con capacidad llena, los agentes que no pueden entrar quedan en `waitReason = transfer_capacity`. La cola se activa antes de que el agente llegue a cruzar el transfer (`transferQueueActivationM`) y usa posiciones escalonadas antes de la entrada. Los agentes anclados en cola no son recolocados por el resolvedor global de solapes, y la correccion hacia el slot de cola se limita por velocidad del perfil con `queueCorrectionSpeedScale`.
+- La linea de vision no puede atravesar muros. `lineOfSightDistanceM` y `lineOfSightMaxNodes` controlan cuanto puede mirar por delante un agente; si ve varios nodos validos, mezcla el objetivo inmediato con el lookahead para curvar la trayectoria sin saltarse paredes.
+
 ## Formato De Agentes Manuales
 
 Ejemplo:

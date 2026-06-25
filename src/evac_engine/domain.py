@@ -201,6 +201,8 @@ class AgentState:
     no_route_reason: str | None = None
     proximity_slowdown_until_s: float = 0.0
     proximity_slowdown_scale: float = 1.0
+    wait_reason: str | None = None
+    waiting_for_cell: str | None = None
 
     def to_dict(self) -> JsonDict:
         return {
@@ -217,6 +219,8 @@ class AgentState:
             "travelTimeS": round(self.travel_time_s, 6),
             "evacuationTimeS": self.evacuation_time_s,
             "noRouteReason": self.no_route_reason,
+            "waitReason": self.wait_reason,
+            "waitingForCell": self.waiting_for_cell,
         }
 
 

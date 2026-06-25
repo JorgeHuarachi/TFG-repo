@@ -5,10 +5,11 @@ import unittest
 from pathlib import Path
 
 import networkx as nx
+from shapely.geometry import box
 
 from src.evac_engine.loaders import LoaderError, ScenarioModelLoader, load_project
 from src.evac_engine.overlays import BeaconState
-from src.evac_engine.experiments import compare_routing_presets
+from src.evac_engine.experiments import available_routing_presets, compare_routing_presets
 from src.evac_engine.route_recommendation import EvacuationRouteRecommendationService, RouteRecommendationConfig
 from src.evac_engine.routing import RoutingEngine
 from src.evac_engine.simulation import EvacuationModel
@@ -43,6 +44,26 @@ class EvacEngineRefactorTests(unittest.TestCase):
             path.write_text(json.dumps(invalid), encoding="utf-8")
             with self.assertRaises(LoaderError):
                 ScenarioModelLoader().load(path)
+
+    def test_shortest_distance_cost_policy_is_rejected(self):
+        source = json.loads((EXAMPLES / "minimal_scenario_model.json").read_text(encoding="utf-8"))
+        invalid = copy.deepcopy(source)
+        invalid["routing"]["costPolicy"] = "shortest_distance"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "invalid_cost_policy_scenario.json"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaises(LoaderError):
+                ScenarioModelLoader().load(path)
+
+    def test_floyd_warshall_algorithm_validates(self):
+        source = json.loads((EXAMPLES / "minimal_scenario_model.json").read_text(encoding="utf-8"))
+        source["routing"]["algorithm"] = "floyd_warshall"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "floyd_warshall_scenario.json"
+            path.write_text(json.dumps(source), encoding="utf-8")
+            scenario = ScenarioModelLoader().load(path)
+
+        self.assertEqual("floyd_warshall", scenario.routing["algorithm"])
 
     def test_evacuation_centrality_counts_efficient_dissimilar_paths(self):
         graph = nx.DiGraph()
@@ -143,6 +164,32 @@ class EvacEngineRefactorTests(unittest.TestCase):
             self.assertFalse(node_id.startswith("N_"))
             self.assertNotIn(":", node_id)
 
+    def test_floyd_warshall_route_matches_dijkstra_for_minimal_graph(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+        engine = RoutingEngine(topology)
+        profile = scenario.mobility_profiles["MP_WALKING_ROLLING"]
+        dijkstra = engine.find_route(
+            "CS_L00_ROOM_A",
+            target_refs=["CS_L00_ROOM_B"],
+            mobility_profile=profile,
+            algorithm="dijkstra",
+            cost_policy="minimum_travel_time",
+            routing_config=scenario.routing,
+        )
+        floyd = engine.find_route(
+            "CS_L00_ROOM_A",
+            target_refs=["CS_L00_ROOM_B"],
+            mobility_profile=profile,
+            algorithm="floyd_warshall",
+            cost_policy="minimum_travel_time",
+            routing_config=scenario.routing,
+        )
+
+        self.assertTrue(floyd.reachable)
+        self.assertEqual(dijkstra.node_sequence, floyd.node_sequence)
+        self.assertAlmostEqual(dijkstra.total_cost, floyd.total_cost, places=6)
+
     def test_beacon_block_threshold_removes_unsafe_cells_from_routes(self):
         indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
         topology = EvacTopology.from_indoor_model(indoor)
@@ -180,6 +227,31 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertEqual(0.5, breakdown["beaconRisk"])
         self.assertAlmostEqual(breakdown["base"] * 2.0, breakdown["total"], places=5)
 
+    def test_time_cost_uses_profile_speed_and_connector_slowdown(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_multilevel.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+        engine = RoutingEngine(topology)
+        profile = scenario.mobility_profiles["MP_WALKING_VERTICAL"]
+        route = engine.find_route(
+            "CS_L00_EP_VC_002_LEVEL_00",
+            target_refs=["CS_L01_EP_VC_002_LEVEL_01"],
+            mobility_profile=profile,
+            routing_config={**scenario.physics, **scenario.routing},
+        )
+
+        self.assertTrue(route.reachable)
+        self.assertEqual("s", route.weight_breakdown["baseUnit"])
+        self.assertGreater(route.weight_breakdown["lengthM"], 0.0)
+        self.assertGreater(route.weight_breakdown["base"], route.weight_breakdown["lengthM"] / profile.base_speed_mps)
+
+    def test_simulation_speed_factor_slows_vertical_connectors(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_multilevel.json")
+        model = EvacuationModel(indoor, scenario)
+
+        self.assertAlmostEqual(0.55, model._movement_speed_factor("CS_L00_ROOM_015", "CS_L00_EP_VC_002_LEVEL_00"))
+        self.assertAlmostEqual(0.7, model._movement_speed_factor("CS_L00_ROOM_018", "CS_L00_EP_VC_003_LEVEL_00"))
+        self.assertAlmostEqual(0.5, model._movement_speed_factor("CS_L00_ROOM_005", "CS_L00_EP_VC_001_LEVEL_00"))
+
     def test_compare_routing_presets_writes_summary_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             summary = compare_routing_presets(
@@ -199,6 +271,12 @@ class EvacEngineRefactorTests(unittest.TestCase):
             self.assertTrue((output / "comparison_summary.json").exists())
             self.assertTrue((output / "comparison_metrics.csv").exists())
             self.assertTrue((output / "comparison_routes.csv").exists())
+
+    def test_builtin_routing_presets_include_floyd_warshall(self):
+        presets = available_routing_presets()
+
+        self.assertIn("floyd_warshall_time", presets)
+        self.assertEqual("floyd_warshall", presets["floyd_warshall_time"]["routing"]["algorithm"])
 
     def test_no_route_agent_recovers_after_beacon_unblocks_path(self):
         source = json.loads((EXAMPLES / "minimal_scenario_model.json").read_text(encoding="utf-8"))
@@ -358,6 +436,152 @@ class EvacEngineRefactorTests(unittest.TestCase):
         qa = trajectory_quality_metrics(result.trajectories)
         self.assertEqual(expected_agents, qa["agentCount"])
 
+    def test_proximity_slowdown_memory_recovers_quickly(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        scenario.physics["proximitySlowdownMemoryS"] = 0.2
+        model = EvacuationModel(indoor, scenario)
+        agent = model.agents[0]
+        model.agents = [agent]
+
+        model._mark_proximity_slowdown(agent, 0.3)
+        self.assertEqual(0.3, agent.proximity_slowdown_scale)
+        model._mark_proximity_slowdown(agent, 0.8)
+        self.assertEqual(0.8, agent.proximity_slowdown_scale)
+        model.time_s = 0.1
+        self.assertLess(model._social_speed_scale(agent, (1.0, 0.0)), 1.0)
+        model.time_s = 0.25
+        self.assertEqual(1.0, model._social_speed_scale(agent, (1.0, 0.0)))
+        self.assertEqual(1.0, agent.proximity_slowdown_scale)
+
+    def test_agent_closer_to_immediate_goal_slows_less_in_queue(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        model = EvacuationModel(indoor, scenario)
+        leader, follower = model.agents[:2]
+        profile = scenario.mobility_profiles[leader.profile_id]
+        route = model.routing_engine.find_route(
+            origin="CS_L00_ROOM_A",
+            target_refs=["CS_L00_ROOM_B"],
+            mobility_profile=profile,
+            routing_config={**scenario.physics, **scenario.routing},
+        )
+        for agent in (leader, follower):
+            agent.current_cell = "CS_L00_ROOM_A"
+            agent.route = route
+            agent.route_index = 0
+            agent.velocity = (0.0, 0.0)
+        leader.position = (1.82, 1.0)
+        follower.position = (1.42, 1.0)
+        model.agents = [leader, follower]
+
+        leader_scale = model._social_speed_scale(leader, (1.0, 0.0))
+        follower_scale = model._social_speed_scale(follower, (1.0, 0.0))
+
+        self.assertGreater(leader_scale, follower_scale)
+
+    def test_transfer_capacity_lets_closest_agent_enter_first(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        model = EvacuationModel(indoor, scenario)
+        far_agent, mid_agent, near_agent = model.agents[:3]
+        far_agent.current_cell = "CS_L00_ROOM_A"
+        mid_agent.current_cell = "CS_L00_ROOM_A"
+        near_agent.current_cell = "CS_L00_ROOM_A"
+        far_agent.position = (1.4, 1.0)
+        mid_agent.position = (1.55, 1.0)
+        near_agent.position = (1.85, 1.0)
+        model.agents = [far_agent, mid_agent, near_agent]
+
+        filtered = model._apply_transfer_capacity(
+            [
+                (far_agent, "CS_L00_DOOR_1", far_agent.position, (1.0, 0.0)),
+                (mid_agent, "CS_L00_DOOR_1", mid_agent.position, (1.0, 0.0)),
+                (near_agent, "CS_L00_DOOR_1", near_agent.position, (1.0, 0.0)),
+            ]
+        )
+        by_agent = {agent.agent_id: (new_cell, new_pos, new_velocity) for agent, new_cell, new_pos, new_velocity in filtered}
+
+        self.assertEqual("CS_L00_ROOM_A", by_agent[far_agent.agent_id][0])
+        self.assertEqual("CS_L00_ROOM_A", by_agent[mid_agent.agent_id][0])
+        self.assertEqual("CS_L00_DOOR_1", by_agent[near_agent.agent_id][0])
+        self.assertEqual("transfer_capacity", far_agent.wait_reason)
+        self.assertEqual("transfer_capacity", mid_agent.wait_reason)
+        self.assertEqual("CS_L00_DOOR_1", far_agent.waiting_for_cell)
+        self.assertEqual((0.0, 0.0), by_agent[far_agent.agent_id][2])
+        self.assertNotEqual(by_agent[far_agent.agent_id][1], by_agent[mid_agent.agent_id][1])
+
+        profile = scenario.mobility_profiles[far_agent.profile_id]
+        far_agent.route = model.routing_engine.find_route(
+            origin="CS_L00_ROOM_A",
+            target_refs=["CS_L00_ROOM_B"],
+            mobility_profile=profile,
+            routing_config={**scenario.physics, **scenario.routing},
+        )
+        model._record_trajectory(far_agent)
+        self.assertEqual("transfer_capacity", model.trajectories[-1]["waitReason"])
+        self.assertIsNone(model.trajectories[-1]["intentX"])
+
+    def test_agent_queues_before_full_transfer_without_forward_dash(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        scenario.physics["doorQueueCorrectionMaxM"] = 2.0
+        scenario.physics["queueCorrectionSpeedScale"] = 0.35
+        model = EvacuationModel(indoor, scenario)
+        approaching, blocker = model.agents[:2]
+        profile = scenario.mobility_profiles[approaching.profile_id]
+        route = model.routing_engine.find_route(
+            origin="CS_L00_ROOM_A",
+            target_refs=["CS_L00_ROOM_B"],
+            mobility_profile=profile,
+            routing_config={**scenario.physics, **scenario.routing},
+        )
+        approaching.current_cell = "CS_L00_ROOM_A"
+        approaching.position = (1.7, 1.0)
+        approaching.route = route
+        approaching.route_index = 0
+        blocker.current_cell = "CS_L00_DOOR_1"
+        blocker.position = (2.1, 1.0)
+        model.agents = [approaching, blocker]
+
+        filtered = model._apply_transfer_capacity(
+            [(approaching, "CS_L00_ROOM_A", (1.95, 1.0), (0.5, 0.0))]
+        )
+        _, new_cell, new_pos, new_velocity = filtered[0]
+
+        self.assertEqual("CS_L00_ROOM_A", new_cell)
+        self.assertEqual("transfer_capacity", approaching.wait_reason)
+        self.assertEqual("CS_L00_DOOR_1", approaching.waiting_for_cell)
+        self.assertEqual((0.0, 0.0), new_velocity)
+        self.assertLessEqual(new_pos[0], approaching.position[0])
+        self.assertLessEqual(
+            ((new_pos[0] - approaching.position[0]) ** 2 + (new_pos[1] - approaching.position[1]) ** 2) ** 0.5,
+            profile.base_speed_mps * scenario.time_step_s * scenario.physics["queueCorrectionSpeedScale"] + 1e-6,
+        )
+
+        waiting_position = new_pos
+        approaching.position = waiting_position
+        approaching.wait_reason = "transfer_capacity"
+        blocker.current_cell = "CS_L00_ROOM_A"
+        blocker.position = waiting_position
+        model._resolve_overlaps([approaching, blocker])
+        self.assertEqual(waiting_position, approaching.position)
+
+    def test_trajectory_intent_is_hidden_when_line_of_sight_crosses_wall(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        model = EvacuationModel(indoor, scenario)
+        agent = model.agents[0]
+        profile = scenario.mobility_profiles[agent.profile_id]
+        agent.route = model.routing_engine.find_route(
+            origin=agent.current_cell,
+            target_refs=["CS_L00_ROOM_B"],
+            mobility_profile=profile,
+            routing_config={**scenario.physics, **scenario.routing},
+        )
+        model._wall_geometries_by_level[agent.level or ""] = box(1.0, 0.5, 1.5, 1.5)
+
+        model._record_trajectory(agent)
+        row = model.trajectories[-1]
+
+        self.assertIsNone(row["intentX"])
+        self.assertIsNone(row["intentY"])
+
     def test_minimal_simulation_can_render_gif(self):
         indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
         model = EvacuationModel(indoor, scenario)
@@ -394,6 +618,7 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertTrue(summary["groups"])
         self.assertTrue(summary["spawns"])
         self.assertIn("firstGroupCount", summary["config"])
+        self.assertIn("navigationType", summary["cells"][0])
 
     def test_workbench_model_summary_exposes_visual_categories(self):
         summary = load_model_summary(None, str(EXAMPLES / "scenario_single_floor.json"))
@@ -407,6 +632,7 @@ class EvacEngineRefactorTests(unittest.TestCase):
 
         self.assertIn("routingPresets", summary)
         self.assertIn("dijkstra_time", summary["routingPresets"])
+        self.assertIn("floyd_warshall_time", summary["routingPresets"])
         self.assertIn("riskCostModel", summary["config"])
         self.assertIn("routeRecommendation", summary["config"])
 
@@ -415,6 +641,17 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("Safety-cost model", WORKBENCH_HTML)
         self.assertIn("Advanced safety/cost parameters", WORKBENCH_HTML)
         self.assertIn("Safety loss curve preview", WORKBENCH_HTML)
+        self.assertIn("floyd_warshall", WORKBENCH_HTML)
+        self.assertIn("plans | routeCost", WORKBENCH_HTML)
+        self.assertIn("durationHint", WORKBENCH_HTML)
+        self.assertIn("SET batch", WORKBENCH_HTML)
+        self.assertIn("DELETE cell", WORKBENCH_HTML)
+        self.assertIn("routingParameterStatus", WORKBENCH_HTML)
+        self.assertIn("active/ignored parameters", WORKBENCH_HTML)
+        self.assertIn("automaticAgentsFromControls", WORKBENCH_HTML)
+        self.assertIn("spaceIsSpawnable", WORKBENCH_HTML)
+        self.assertIn("spawnRegionSpaces", WORKBENCH_HTML)
+        self.assertIn("Automatic spawn selected", WORKBENCH_HTML)
 
     def test_workbench_can_compare_routing_presets(self):
         comparison = compare_configured_routing(
@@ -460,7 +697,7 @@ class EvacEngineRefactorTests(unittest.TestCase):
                     "randomSeed": 7,
                     "firstGroupCount": 3,
                     "algorithm": "astar",
-                    "costPolicy": "shortest_distance",
+                    "costPolicy": "minimum_travel_time",
                     "destinationCells": ["CS_L00_ROOM_B"],
                     "useBeaconRisk": True,
                     "beaconBlockThreshold": 0.95,
@@ -488,6 +725,9 @@ class EvacEngineRefactorTests(unittest.TestCase):
             str(EXAMPLES / "minimal_scenario_model.json"),
         )
         self.assertEqual(3, payload["metrics"]["agentCount"])
+        self.assertGreaterEqual(payload["metrics"]["routePlans"], 1)
+        self.assertIn("routeRecoveries", payload["metrics"])
+        self.assertIn("noRouteEvents", payload["metrics"])
         self.assertIn("qa", payload)
         self.assertTrue(payload["trajectories"])
         self.assertEqual("BC_WORKBENCH_SNAPSHOT", payload["beacons"][0]["beaconId"])

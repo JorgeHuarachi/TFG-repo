@@ -132,6 +132,8 @@
     "bodySeparationSlackM": 0.04,
     "doorQueueClearanceM": 0.08,
     "doorQueueCorrectionMaxM": 0.32,
+    "transferQueueActivationM": 1.25,
+    "queueCorrectionSpeedScale": 0.55,
     "stairSpeedFactor": 0.55,
     "rampSpeedFactor": 0.7,
     "elevatorSpeedFactor": 0.5,
@@ -140,6 +142,8 @@
     "maxAccelerationMps2": 6.0,
     "velocityInertia": 0.2,
     "maxTurnRateRadS": 3.8,
+    "lineOfSightDistanceM": 18.0,
+    "lineOfSightMaxNodes": 6,
     "virtualBoundaryEntryInsetM": 0.08,
     "virtualBoundaryArrivalRadiusM": 0.35
   },
