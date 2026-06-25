@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .application import ApplicationService
+from .experiments import compare_routing_presets
 from .loaders import IndoorModelLoader, ScenarioModelLoader, load_project
 from .route_recommendation import EvacuationRouteRecommendationService
 from .routing import RoutingEngine
@@ -17,5 +18,6 @@ __all__ = [
     "IndoorModelLoader",
     "RoutingEngine",
     "ScenarioModelLoader",
+    "compare_routing_presets",
     "load_project",
 ]

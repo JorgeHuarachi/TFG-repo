@@ -10,12 +10,14 @@ from __future__ import annotations
 import json
 import copy
 import re
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .domain import ScenarioDefinition
+from .experiments import apply_routing_preset, available_routing_presets, summarize_routing_run
 from .loaders import load_project
 from .simulation import EvacuationModel
 from .visualization import build_visualization_payload
@@ -39,8 +41,8 @@ def run_workbench(
         library_root = resolved_library_root
 
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"EvacEngine workbench: http://{host}:{port}/?scenario={default_scenario}")
-    print(f"Model library root: {resolved_library_root}")
+    _safe_print(f"EvacEngine workbench: http://{host}:{port}/?scenario={default_scenario}")
+    _safe_print(f"Model library root: {resolved_library_root}")
     server.serve_forever()
 
 
@@ -74,18 +76,31 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_json({"error": str(exc), "scenarios": [], "indoorModels": []})
             return
+        if parsed.path == "/api/routing-presets":
+            try:
+                query = parse_qs(parsed.query)
+                scenario = query.get("scenario", [self.scenario_default])[0]
+                indoor_path = query.get("indoor", [None])[0]
+                _, scenario_definition = load_project(_workspace_path(indoor_path) if indoor_path else None, _workspace_path(scenario))
+                self._send_json({"presets": available_routing_presets(scenario_definition.raw)})
+            except Exception as exc:
+                self._send_json({"error": str(exc), "presets": {}})
+            return
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib hook
         parsed = urlparse(self.path)
-        if parsed.path != "/api/run":
+        if parsed.path not in {"/api/run", "/api/routing-compare"}:
             self.send_error(404)
             return
         try:
             length = int(self.headers.get("content-length", "0"))
             body = self.rfile.read(length).decode("utf-8")
             request = json.loads(body or "{}")
-            self._send_json(run_configured_simulation(request, self.scenario_default))
+            if parsed.path == "/api/routing-compare":
+                self._send_json(compare_configured_routing(request, self.scenario_default))
+            else:
+                self._send_json(run_configured_simulation(request, self.scenario_default))
         except Exception as exc:  # pragma: no cover - manual endpoint guard.
             self.send_response(500)
             self.send_header("content-type", "application/json; charset=utf-8")
@@ -93,7 +108,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": str(exc)}, ensure_ascii=True).encode("utf-8"))
 
     def log_message(self, format: str, *args: Any) -> None:
-        print(f"{self.address_string()} - {format % args}")
+        _safe_print(f"{self.address_string()} - {format % args}")
 
     def _send_html(self, html: str) -> None:
         self.send_response(200)
@@ -158,14 +173,26 @@ def load_model_summary(indoor_path: str | None, scenario_path: str) -> dict[str,
             "randomSeed": scenario.random_seed,
             "algorithm": scenario.routing.get("algorithm", "dijkstra"),
             "costPolicy": scenario.routing.get("costPolicy", "shortest_distance"),
+            "useHazardRisk": bool(scenario.routing.get("useHazardRisk", True)),
             "useBeaconRisk": bool(scenario.routing.get("useBeaconRisk", True)),
+            "useCongestion": bool(scenario.routing.get("useCongestion", False)),
             "beaconBlockThreshold": scenario.routing.get("beaconBlockThreshold", 0.85),
+            "riskCostModel": scenario.routing.get("riskCostModel", "legacy_additive"),
+            "riskEndpointPolicy": scenario.routing.get("riskEndpointPolicy", "target"),
+            "riskEdgePrecedence": bool(scenario.routing.get("riskEdgePrecedence", True)),
+            "riskAggregation": scenario.routing.get("riskAggregation", "sum"),
+            "riskAlpha": scenario.routing.get("riskAlpha", 1.0),
+            "hazardBeta": scenario.routing.get("hazardBeta", 20.0),
+            "beaconBeta": scenario.routing.get("beaconBeta", 5.0),
+            "riskUnitCost": scenario.routing.get("riskUnitCost", 1.0),
+            "routeRecommendation": scenario.routing.get("routeRecommendation") or {},
             "firstGroupCount": scenario.groups[0].get("count") if scenario.groups else 0,
             "firstSpawnCell": scenario.spawns[0].get("cellSpaceRef") if scenario.spawns else "",
             "firstSpawnPosition": (scenario.spawns[0].get("position") or {}).get("coordinates") if scenario.spawns else None,
             "firstGroupDistribution": scenario.groups[0].get("distribution", "random_within_space") if scenario.groups else "random_within_space",
             "destinationCells": (scenario.routing.get("destination") or {}).get("cellSpaceRefs") or [],
         },
+        "routingPresets": available_routing_presets(scenario.raw),
         "manualAgents": scenario.agents,
         "beacons": scenario.beacons,
         "scheduledEvents": scenario.raw.get("scheduledEvents") or [],
@@ -230,6 +257,13 @@ def _display_path(path: str | Path) -> str:
         return str(resolved).replace("\\", "/")
 
 
+def _safe_print(message: str) -> None:
+    try:
+        print(message)
+    except Exception:
+        pass
+
+
 def _looks_like_indoor_model(path: Path) -> bool:
     return path.name.endswith("indoor_model.json")
 
@@ -266,10 +300,7 @@ def run_configured_simulation(request: dict[str, Any], default_scenario: str) ->
     apply_request_to_scenario(scenario, request)
     run_beacons = copy.deepcopy(scenario.beacons)
     run_events = copy.deepcopy(scenario.raw.get("scheduledEvents") or [])
-    run_routing = {
-        "useBeaconRisk": bool(scenario.routing.get("useBeaconRisk", True)),
-        "beaconBlockThreshold": scenario.routing.get("beaconBlockThreshold", 0.85),
-    }
+    run_routing = copy.deepcopy(scenario.routing)
     model = EvacuationModel(indoor, scenario)
     result = model.run()
     config = request.get("config") or {}
@@ -287,6 +318,37 @@ def run_configured_simulation(request: dict[str, Any], default_scenario: str) ->
     return payload
 
 
+def compare_configured_routing(request: dict[str, Any], default_scenario: str) -> dict[str, Any]:
+    scenario_path = request.get("scenarioPath") or default_scenario
+    indoor_path = request.get("indoorPath") or None
+    _, seed_scenario = load_project(_workspace_path(indoor_path) if indoor_path else None, _workspace_path(scenario_path))
+    presets = available_routing_presets(seed_scenario.raw)
+    preset_ids = [str(item) for item in (request.get("presetIds") or []) if str(item) in presets]
+    if not preset_ids:
+        preset_ids = list(presets)[:4]
+    rows: list[dict[str, Any]] = []
+    route_rows: list[dict[str, Any]] = []
+    for preset_id in preset_ids:
+        preset = copy.deepcopy(presets[preset_id])
+        indoor, scenario = load_project(_workspace_path(indoor_path) if indoor_path else None, _workspace_path(scenario_path))
+        apply_request_to_scenario(scenario, request)
+        apply_routing_preset(scenario, preset)
+        started = time.perf_counter()
+        model = EvacuationModel(indoor, scenario)
+        result = model.run()
+        row = summarize_routing_run(preset_id, preset, model, result, (time.perf_counter() - started) * 1000.0)
+        route_rows.extend(row.pop("_routeRows", []))
+        rows.append(row)
+    return {
+        "scenarioPath": scenario_path,
+        "indoorPath": indoor_path,
+        "presetIds": preset_ids,
+        "presets": {preset_id: presets[preset_id] for preset_id in preset_ids},
+        "runs": rows,
+        "routeRows": route_rows,
+    }
+
+
 def apply_request_to_scenario(scenario: ScenarioDefinition, request: dict[str, Any]) -> None:
     config = request.get("config") or {}
     if config.get("timeStepS") is not None:
@@ -299,10 +361,21 @@ def apply_request_to_scenario(scenario: ScenarioDefinition, request: dict[str, A
         scenario.routing["algorithm"] = config["algorithm"]
     if config.get("costPolicy"):
         scenario.routing["costPolicy"] = config["costPolicy"]
+    for key in ("riskCostModel", "riskEndpointPolicy", "riskAggregation"):
+        if config.get(key):
+            scenario.routing[key] = str(config[key])
+    for key in ("useHazardRisk", "useBeaconRisk", "useCongestion", "riskEdgePrecedence"):
+        if config.get(key) is not None:
+            scenario.routing[key] = bool(config[key])
+    for key in ("riskAlpha", "hazardBeta", "beaconBeta", "riskUnitCost"):
+        if config.get(key) is not None:
+            scenario.routing[key] = float(config[key])
     if config.get("useBeaconRisk") is not None:
         scenario.routing["useBeaconRisk"] = bool(config["useBeaconRisk"])
     if config.get("beaconBlockThreshold") is not None:
         scenario.routing["beaconBlockThreshold"] = float(config["beaconBlockThreshold"])
+    if config.get("routeRecommendation") is not None:
+        scenario.routing["routeRecommendation"] = dict(config["routeRecommendation"] or {})
     if config.get("destinationCells"):
         scenario.routing.setdefault("destination", {})["cellSpaceRefs"] = list(config["destinationCells"])
     if scenario.groups and config.get("firstGroupCount") is not None:
@@ -351,10 +424,16 @@ WORKBENCH_HTML = """<!doctype html>
     textarea { min-height: 96px; resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
     button { border-color: #0f172a; background: #0f172a; color: white; cursor: pointer; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .row.three { grid-template-columns: 1fr 1fr 1fr; }
     .tabs { display: flex; gap: 6px; margin-top: 8px; }
     .tabs button { width: auto; flex: 1; border-color: #cbd5e1; background: #e2e8f0; color: #0f172a; }
     .tabs button.active { border-color: #0f172a; background: #0f172a; color: #fff; }
     .tab-panel[hidden] { display: none; }
+    details { margin-top: 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; padding: 8px; }
+    summary { cursor: pointer; font-size: 12px; color: #334155; font-weight: 600; }
+    .check-list { max-height: 132px; overflow: auto; margin-top: 6px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
+    .check-list label { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0; color: #0f172a; }
+    .check-list input { width: auto; margin-top: 2px; }
     .mini-canvas { display: block; width: 100%; height: 116px; margin-top: 4px; border: 1px solid #94a3b8; border-radius: 4px; background: #fff; }
     .status-box { margin-top: 8px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; font-family: Consolas, monospace; font-size: 12px; line-height: 1.35; color: #334155; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
     .toolbar { display: flex; gap: 8px; align-items: center; padding: 10px; border-top: 1px solid #cbd5e1; background: #fff; }
@@ -392,7 +471,7 @@ WORKBENCH_HTML = """<!doctype html>
       <div><label>Algorithm</label><select id="algorithm"><option>dijkstra</option><option>astar</option><option>yen_ksp</option><option>robust_agility</option></select></div>
       <div><label>Cost</label><select id="costPolicy"><option>shortest_distance</option><option>minimum_travel_time</option></select></div>
     </div>
-    <label><input id="useBeaconRisk" type="checkbox" style="width:auto"> Use beacon risk in routing</label>
+    <label><input id="useBeaconRisk" type="checkbox" style="width:auto"> Beacon safety affects routing</label>
     <label><input id="includeGeometryQa" type="checkbox" style="width:auto"> Geometry QA</label>
     <h2>Agents</h2>
     <div class="tabs">
@@ -428,12 +507,12 @@ WORKBENCH_HTML = """<!doctype html>
       <div><label>Sensor</label><input id="beaconSensor" value="smoke"></div>
     </div>
     <div class="row">
-      <div><label>Risk penalty</label><input id="beaconRisk" type="number" min="0" max="1" step="0.05" value="0.4"></div>
+      <div><label title="0 means safe; 1 means fully unsafe for routing. Saved internally as riskPenalty.">Safety loss</label><input id="beaconRisk" type="number" min="0" max="1" step="0.05" value="0.4"></div>
       <div><label>Radius m</label><input id="beaconRadius" type="number" min="0" step="0.1" value="3"></div>
     </div>
     <div class="row">
       <div><label>Inner radius m</label><input id="beaconInnerRadius" type="number" min="0" step="0.1" value="0"></div>
-      <div><label>Block threshold</label><input id="beaconBlockThreshold" type="number" min="0" max="1" step="0.05" value="0.85"></div>
+      <div><label title="Block the affected space when safety loss reaches this value.">Block at loss</label><input id="beaconBlockThreshold" type="number" min="0" max="1" step="0.05" value="0.85"></div>
     </div>
     <div class="row">
       <div><label>Click placement</label><button id="beaconPlacementMode" type="button">Off</button></div>
@@ -448,9 +527,9 @@ WORKBENCH_HTML = """<!doctype html>
       <button id="refreshBeaconPreview" type="button">Refresh preview</button>
     </div>
     <div class="muted" id="beaconHint">Click placement lets you drop a beacon on the selected level, including wall or column geometry.</div>
-    <label>Risk curve preview</label>
+    <label>Safety loss curve preview</label>
     <canvas id="beaconCurve" class="mini-canvas"></canvas>
-    <label>timeS -> riskPenalty points</label>
+    <label>timeS -> safety loss points</label>
     <textarea id="beaconCurvePoints" placeholder="0, 0.1&#10;30, 0.7&#10;90, 0.2"></textarea>
     <div class="row">
       <button id="seedBeaconCurve" type="button">Seed duration</button>
@@ -458,6 +537,69 @@ WORKBENCH_HTML = """<!doctype html>
     </div>
     <div id="beaconImpact" class="status-box">Beacon impact preview will appear after the model loads.</div>
     <textarea id="beacons"></textarea>
+    <h2>Routing Experiments</h2>
+    <div class="muted">Presets are complete routing strategies. Apply one, run it visually, or compare several with the same agents and beacons.</div>
+    <div class="row">
+      <div><label title="Predefined routing strategy. Apply copies its parameters into the controls.">Preset strategy</label><select id="routingPreset"></select></div>
+      <div><label title="Copies the selected strategy into the editable routing controls.">Use this preset</label><button id="applyRoutingPreset" type="button">Apply preset</button></div>
+    </div>
+    <div class="row">
+      <button id="runRoutingPreset" type="button" title="Apply the selected preset and run it in the canvas.">Run visually</button>
+      <button id="compareRoutingPresets" type="button" title="Run checked presets on the current agents, beacons and scenario.">Compare checked</button>
+    </div>
+    <label>Presets to compare</label>
+    <div id="routingPresetChecks" class="check-list"></div>
+    <details>
+      <summary>Advanced safety/cost parameters</summary>
+      <div class="row">
+        <div><label title="Formula used to convert travel time/distance and safety loss into an edge weight.">Safety-cost model</label><select id="riskCostModel"><option>legacy_additive</option><option>multiplicative_beta</option><option>linear_time_risk</option></select></div>
+        <div><label title="How space safety is mapped onto directed edges when there is no connection-specific value.">Safety source</label><select id="riskEndpointPolicy"><option>target</option><option>source</option><option>mean</option><option>min</option><option>max</option></select></div>
+      </div>
+      <div class="row">
+        <label><input id="useHazardRisk" type="checkbox" style="width:auto"> Hazard safety affects routes</label>
+        <label><input id="useCongestion" type="checkbox" style="width:auto"> Congestion affects routes</label>
+      </div>
+      <div class="row">
+        <label><input id="riskEdgePrecedence" type="checkbox" style="width:auto"> Connection value first</label>
+        <div><label title="Informative combined safety-loss value in route breakdowns.">Safety-loss aggregation</label><select id="riskAggregation"><option>sum</option><option>max</option><option>mean</option></select></div>
+      </div>
+      <div class="row three">
+        <div><label title="Weight of the base time/distance component.">alpha</label><input id="riskAlpha" type="number" min="0" step="0.05" value="1"></div>
+        <div><label title="Weight of hazard safety loss.">hazard beta</label><input id="hazardBeta" type="number" min="0" step="0.05" value="1"></div>
+        <div><label title="Weight of beacon safety loss.">beacon beta</label><input id="beaconBeta" type="number" min="0" step="0.05" value="1"></div>
+      </div>
+      <div class="row">
+        <div><label title="Safety-loss to cost conversion used by linear_time_risk.">safety unit cost</label><input id="riskUnitCost" type="number" min="0" step="0.05" value="1"></div>
+        <div><label title="Policy that selects a candidate route after the search algorithm generates candidates.">Route selection</label><select id="routeSelection"><option>lowest_cost</option><option>highest_robustness</option><option>highest_agility</option><option>robust_agility</option></select></div>
+      </div>
+      <div class="row three">
+        <div><label title="Number of candidate routes for Yen/advanced policies.">k routes</label><input id="kShortestPaths" type="number" min="1" step="1" value="6"></div>
+        <div><label title="Allowed extra cost versus the cheapest candidate.">cost tolerance</label><input id="candidateCostTolerance" type="number" min="0" step="0.05" value="0.35"></div>
+        <div><label title="Allowed detour when checking alternatives after an edge failure.">robust tolerance</label><input id="robustnessTolerance" type="number" min="0" step="0.05" value="0.2"></div>
+      </div>
+      <div class="row three">
+        <div><label title="Allowed extra cost when counting efficient alternatives for evacuation centrality.">CE tolerance</label><input id="centralityTolerance" type="number" min="0" step="0.05" value="0.35"></div>
+        <div><label title="Maximum paths considered when estimating evacuation centrality.">CE paths</label><input id="centralityMaxPaths" type="number" min="1" step="1" value="8"></div>
+        <div><label title="Maximum overlap allowed between centrality paths.">CE overlap</label><input id="centralityMaxOverlap" type="number" min="0" max="1" step="0.05" value="0.8"></div>
+      </div>
+      <div><label title="How node centrality is summarized into route agility.">Agility aggregation</label><select id="agilityAggregation"><option>mean</option><option>geometric</option></select></div>
+      <div class="row three">
+        <div><label title="Cost weight for robust_agility selection.">cost weight</label><input id="costWeight" type="number" min="0" step="0.05" value="1"></div>
+        <div><label title="Robustness weight for robust_agility selection.">robust weight</label><input id="robustnessWeight" type="number" min="0" step="0.05" value="0.35"></div>
+        <div><label title="Agility weight for robust_agility selection.">agility weight</label><input id="agilityWeight" type="number" min="0" step="0.05" value="0.35"></div>
+      </div>
+    </details>
+    <details>
+      <summary>Routing notes</summary>
+      <pre class="status-box">Safety = 1 means usable. Safety = 0 means unsafe.
+Safety loss = 1 - safety; internally this is stored as riskPenalty.
+C(e) = alpha*time(e) + beta*safety_loss(e)
+Dijkstra/A*: one best path under the current scalar cost
+Yen: k candidate paths, then a policy chooses one
+Robustness: path keeps alternatives if one connection fails
+Agility: path crosses spaces with more evacuation alternatives</pre>
+    </details>
+    <div id="routingResults" class="status-box">Choose a preset to see what it does, or compare checked presets.</div>
     <h2>Dynamic Events</h2>
     <textarea id="events"></textarea>
     <button id="run">Run simulation</button>
@@ -485,6 +627,7 @@ let model = null, payload = null, currentFrame = 0, timer = null, trajectoryByAg
 let beaconDraftMode = true;
 let draggedCurvePointIndex = null;
 let selectedCurvePointIndex = null;
+let routingPresets = {};
 $("scenarioPath").value = defaultScenario;
 $("indoorPath").value = defaultIndoor;
 const profileColors = { MP_WALKING: "#006dff", MP_WALKING_VERTICAL: "#006dff", MP_WALKING_ROLLING: "#0891b2", MP_ROLLING_ACCESSIBLE: "#c026d3", MP_ELDERLY: "#16a34a", MP_CHILD: "#f59e0b" };
@@ -517,6 +660,9 @@ async function loadModel() {
   $("destinationCell").value = model.config.destinationCells[0] || (model.exits[0] && model.exits[0].id) || "";
   $("algorithm").value = model.config.algorithm;
   $("costPolicy").value = model.config.costPolicy;
+  routingPresets = model.routingPresets || {};
+  populateRoutingPresets();
+  applyRoutingConfigToControls(model.config || {});
   $("useBeaconRisk").checked = Boolean(model.config.useBeaconRisk);
   $("beaconBlockThreshold").value = String(model.config.beaconBlockThreshold ?? 0.85);
   $("manualAgents").value = JSON.stringify(model.manualAgents.length ? model.manualAgents : [], null, 2);
@@ -555,28 +701,7 @@ function updateLevelOptions(counts) {
   if (current) $("level").value = current;
 }
 async function runSimulation() {
-  const request = {
-    scenarioPath: $("scenarioPath").value,
-    indoorPath: $("indoorPath").value.trim() || null,
-    config: {
-      timeStepS: Number($("timeStep").value),
-      maxSteps: Number($("maxSteps").value),
-      randomSeed: Number($("seed").value),
-      firstGroupCount: Number($("agentCount").value),
-      firstSpawnCell: $("spawnCell").value,
-      firstSpawnPosition: [Number($("spawnX").value), Number($("spawnY").value)],
-      firstGroupDistribution: $("distribution").value,
-      destinationCells: destinationCellsForRun(),
-      algorithm: $("algorithm").value,
-      costPolicy: $("costPolicy").value,
-      useBeaconRisk: $("useBeaconRisk").checked,
-      beaconBlockThreshold: Number($("beaconBlockThreshold").value),
-      includeGeometryQa: $("includeGeometryQa").checked
-    },
-    manualAgents: activeAgentMode() === "manual" ? JSON.parse($("manualAgents").value || "[]") : [],
-    beacons: JSON.parse($("beacons").value || "[]"),
-    scheduledEvents: JSON.parse($("events").value || "[]")
-  };
+  const request = buildSimulationRequest();
   $("metrics").textContent = "Running...";
   const res = await fetch("/api/run", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(request) });
   payload = await res.json();
@@ -591,7 +716,204 @@ async function runSimulation() {
   const bestLevel = Object.entries(levelCounts).sort((a,b) => b[1]-a[1])[0];
   if (bestLevel && bestLevel[0]) $("level").value = bestLevel[0];
   $("metrics").textContent = JSON.stringify({ metrics: payload.metrics, qa: payload.qa }, null, 2);
+  updateBeaconImpactPreview();
   draw();
+}
+function buildSimulationRequest() {
+  const routing = routingConfigFromControls();
+  const request = {
+    scenarioPath: $("scenarioPath").value,
+    indoorPath: $("indoorPath").value.trim() || null,
+    config: {
+      timeStepS: Number($("timeStep").value),
+      maxSteps: Number($("maxSteps").value),
+      randomSeed: Number($("seed").value),
+      firstGroupCount: Number($("agentCount").value),
+      firstSpawnCell: $("spawnCell").value,
+      firstSpawnPosition: [Number($("spawnX").value), Number($("spawnY").value)],
+      firstGroupDistribution: $("distribution").value,
+      destinationCells: destinationCellsForRun(),
+      ...routing,
+      beaconBlockThreshold: Number($("beaconBlockThreshold").value),
+      includeGeometryQa: $("includeGeometryQa").checked
+    },
+    manualAgents: activeAgentMode() === "manual" ? JSON.parse($("manualAgents").value || "[]") : [],
+    beacons: JSON.parse($("beacons").value || "[]"),
+    scheduledEvents: JSON.parse($("events").value || "[]")
+  };
+  return request;
+}
+function routingConfigFromControls() {
+  return {
+    algorithm: $("algorithm").value,
+    costPolicy: $("costPolicy").value,
+    useHazardRisk: $("useHazardRisk").checked,
+    useBeaconRisk: $("useBeaconRisk").checked,
+    useCongestion: $("useCongestion").checked,
+    riskCostModel: $("riskCostModel").value,
+    riskEndpointPolicy: $("riskEndpointPolicy").value,
+    riskEdgePrecedence: $("riskEdgePrecedence").checked,
+    riskAggregation: $("riskAggregation").value,
+    riskAlpha: numberFromInput("riskAlpha", 1),
+    hazardBeta: numberFromInput("hazardBeta", 1),
+    beaconBeta: numberFromInput("beaconBeta", 1),
+    riskUnitCost: numberFromInput("riskUnitCost", 1),
+    routeRecommendation: {
+      routeSelection: $("routeSelection").value,
+      kShortestPaths: Math.max(1, Math.round(numberFromInput("kShortestPaths", 6))),
+      candidateCostTolerance: numberFromInput("candidateCostTolerance", 0.35),
+      robustnessTolerance: numberFromInput("robustnessTolerance", 0.2),
+      centralityTolerance: numberFromInput("centralityTolerance", 0.35),
+      centralityMaxPaths: Math.max(1, Math.round(numberFromInput("centralityMaxPaths", 8))),
+      centralityMaxOverlap: clamp(numberFromInput("centralityMaxOverlap", 0.8), 0, 1),
+      costWeight: numberFromInput("costWeight", 1),
+      robustnessWeight: numberFromInput("robustnessWeight", 0.35),
+      agilityWeight: numberFromInput("agilityWeight", 0.35),
+      agilityAggregation: $("agilityAggregation").value,
+    }
+  };
+}
+function applyRoutingConfigToControls(config) {
+  const routeRecommendation = config.routeRecommendation || {};
+  setIfPresent("algorithm", config.algorithm);
+  setIfPresent("costPolicy", config.costPolicy);
+  setIfPresent("riskCostModel", config.riskCostModel);
+  setIfPresent("riskEndpointPolicy", config.riskEndpointPolicy);
+  setIfPresent("riskAggregation", config.riskAggregation);
+  setIfPresent("routeSelection", routeRecommendation.routeSelection);
+  $("useHazardRisk").checked = config.useHazardRisk !== false;
+  $("useBeaconRisk").checked = config.useBeaconRisk !== false;
+  $("useCongestion").checked = Boolean(config.useCongestion);
+  $("riskEdgePrecedence").checked = config.riskEdgePrecedence !== false;
+  setNumberIfPresent("riskAlpha", config.riskAlpha);
+  setNumberIfPresent("hazardBeta", config.hazardBeta);
+  setNumberIfPresent("beaconBeta", config.beaconBeta);
+  setNumberIfPresent("riskUnitCost", config.riskUnitCost);
+  setNumberIfPresent("kShortestPaths", routeRecommendation.kShortestPaths);
+  setNumberIfPresent("candidateCostTolerance", routeRecommendation.candidateCostTolerance);
+  setNumberIfPresent("robustnessTolerance", routeRecommendation.robustnessTolerance);
+  setNumberIfPresent("centralityTolerance", routeRecommendation.centralityTolerance);
+  setNumberIfPresent("centralityMaxPaths", routeRecommendation.centralityMaxPaths);
+  setNumberIfPresent("centralityMaxOverlap", routeRecommendation.centralityMaxOverlap);
+  setNumberIfPresent("costWeight", routeRecommendation.costWeight);
+  setNumberIfPresent("robustnessWeight", routeRecommendation.robustnessWeight);
+  setNumberIfPresent("agilityWeight", routeRecommendation.agilityWeight);
+  setIfPresent("agilityAggregation", routeRecommendation.agilityAggregation);
+  updateBeaconImpactPreview();
+}
+function setIfPresent(id, value) {
+  if (value == null || !$(`${id}`)) return;
+  const select = $(id);
+  if ([...select.options].some(option => option.value === String(value))) select.value = String(value);
+}
+function setNumberIfPresent(id, value) {
+  if (value != null && Number.isFinite(Number(value))) $(id).value = String(value);
+}
+function populateRoutingPresets() {
+  const rows = Object.values(routingPresets).sort((a, b) => String(a.presetId).localeCompare(String(b.presetId)));
+  fillSelect($("routingPreset"), rows, preset => `${preset.presetId} - ${preset.label || preset.presetId}`, preset => preset.presetId, "No presets");
+  const selectedDefaults = new Set(["dijkstra_time", "astar_risk_multiplicative", "yen_highest_robustness", "robust_agility"]);
+  $("routingPresetChecks").innerHTML = rows.map(preset => {
+    const id = String(preset.presetId);
+    const checked = selectedDefaults.has(id) ? "checked" : "";
+    const label = `${id} - ${preset.label || id}`;
+    return `<label title="${escapeHtml(preset.description || label)}"><input type="checkbox" class="routingPresetCheck" value="${escapeHtml(id)}" ${checked}> <span>${escapeHtml(label)}</span></label>`;
+  }).join("") || "<span class='muted'>No presets loaded</span>";
+  updateRoutingPresetInfo();
+}
+function selectedRoutingPresetIds() {
+  return [...document.querySelectorAll(".routingPresetCheck:checked")].map(input => input.value);
+}
+function selectedRoutingPreset() {
+  return routingPresets[$("routingPreset").value] || null;
+}
+function applySelectedRoutingPreset() {
+  const preset = selectedRoutingPreset();
+  if (!preset) return;
+  applyRoutingConfigToControls(deepMerge(routingConfigFromControls(), preset.routing || {}));
+  updateRoutingPresetInfo();
+}
+async function runSelectedRoutingPreset() {
+  applySelectedRoutingPreset();
+  await runSimulation();
+}
+async function compareSelectedRoutingPresets() {
+  const presetIds = selectedRoutingPresetIds();
+  if (!presetIds.length) {
+    $("routingResults").textContent = "Select at least one preset.";
+    return;
+  }
+  const request = buildSimulationRequest();
+  request.presetIds = presetIds;
+  $("routingResults").textContent = "Comparing routing presets...";
+  const res = await fetch("/api/routing-compare", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(request) });
+  const comparison = await res.json();
+  if (comparison.error) throw new Error(comparison.error);
+  $("routingResults").textContent = formatRoutingComparison(comparison);
+}
+function formatRoutingComparison(comparison) {
+  const lines = ["preset | alg | evacuated | active | noRoute | routeCost | planMs | robust | agility"];
+  for (const row of comparison.runs || []) {
+    lines.push([
+      row.presetId,
+      row.algorithm,
+      row.evacuated,
+      row.active,
+      row.noRoute,
+      formatMetric(row.meanRouteCost),
+      formatMetric(row.meanPlanningMs),
+      formatMetric(row.meanRobustness),
+      formatMetric(row.meanAgility),
+    ].join(" | "));
+  }
+  return lines.join("\\n");
+}
+function updateRoutingPresetInfo() {
+  const preset = selectedRoutingPreset();
+  if (!preset) return;
+  const routing = preset.routing || {};
+  const recommendation = routing.routeRecommendation || {};
+  $("routingResults").textContent =
+    `${preset.presetId}\\n` +
+    `${preset.label || ""}\\n` +
+    `${preset.description || ""}\\n\\n` +
+    `Algorithm: ${routing.algorithm || "scenario default"}\\n` +
+    `Cost: ${routing.costPolicy || "scenario default"}\\n` +
+    `Safety model: ${routing.riskCostModel || "legacy_additive"}\\n` +
+    `Safety source: ${routing.riskEndpointPolicy || "target"}\\n` +
+    `Selection: ${recommendation.routeSelection || "lowest_cost"}\\n` +
+    `Beacon safety: ${routing.useBeaconRisk === false ? "off" : "on"} | Hazard safety: ${routing.useHazardRisk === false ? "off" : "on"} | Congestion: ${routing.useCongestion ? "on" : "off"}\\n\\n` +
+    presetUseHint(preset) +
+    `\\n\\ntechnical patch\\n` +
+    JSON.stringify(routing, null, 2);
+}
+function presetUseHint(preset) {
+  const id = String(preset.presetId || "");
+  if (id.includes("dijkstra_time")) return "Use it as the simplest baseline: shortest evacuation time without safety penalties.";
+  if (id.includes("astar_time")) return "Use it to compare A* latency against Dijkstra while keeping the same time-only objective.";
+  if (id.includes("risk_multiplicative")) return "Use it when beacon/hazard safety should bend routes away from unsafe spaces.";
+  if (id.includes("yen_risk_lowest")) return "Use it to generate several candidate routes but still choose the cheapest safe one.";
+  if (id.includes("robustness")) return "Use it when you prefer routes that keep alternatives if a connection fails.";
+  if (id.includes("agility")) return "Use it when you prefer routes through spaces with more evacuation alternatives.";
+  if (id.includes("congestion")) return "Use it when current crowding should penalize route choices.";
+  return "Use this preset as a complete routing strategy. Apply it, then run or compare.";
+}
+function formatMetric(value) {
+  return value == null ? "-" : Number(value).toFixed(3);
+}
+function deepMerge(base, patch) {
+  const output = {...base};
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (value && typeof value === "object" && !Array.isArray(value) && output[key] && typeof output[key] === "object" && !Array.isArray(output[key])) {
+      output[key] = deepMerge(output[key], value);
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 }
 function activeAgentMode() {
   return $("manualTab").classList.contains("active") ? "manual" : "automatic";
@@ -866,7 +1188,7 @@ function drawBeaconCurve() {
   beaconCurveCtx.fillText(`${formatNumber(duration)}s`, w - right, h - 6 * ratio);
   if (!points.length) {
     beaconCurveCtx.textAlign = "center";
-    beaconCurveCtx.fillText("Add time, risk points or click the graph", w / 2, h / 2);
+    beaconCurveCtx.fillText("Add time and safety-loss points or click the graph", w / 2, h / 2);
     return;
   }
   const toPixel = point => [
@@ -1015,7 +1337,7 @@ function generateBeaconCurveEvents() {
     });
   }
   writeEvents([...keep, ...generated].sort((a, b) => Number(a.step || 0) - Number(b.step || 0)));
-  $("metrics").textContent = `Generated ${generated.length} scheduledEvents for ${beaconId}. Press Run simulation.`;
+  $("metrics").textContent = `Generated ${generated.length} safety events for ${beaconId}. Press Run simulation.`;
   updateBeaconImpactPreview();
 }
 function sampleCurveRisk(points, timeS) {
@@ -1143,17 +1465,17 @@ function updateBeaconImpactPreview() {
   const blockThreshold = beaconBlockThreshold();
   const blockedRows = playbackUsesBeaconRisk() ? rows.filter(row => row.risk >= blockThreshold) : [];
   const selectedText = selected
-    ? `${selected.beaconId}\nlevel ${selected.levelRef}\nspace ${((selected.attributes || {}).attachedSpaceRef || "no attachedSpaceRef")}\nrisk ${formatFixed(selectedRuntime.riskPenalty, 2)} | safety ${formatFixed(1 - selectedRuntime.riskPenalty, 2)}`
+    ? `${selected.beaconId}\nlevel ${selected.levelRef}\nspace ${((selected.attributes || {}).attachedSpaceRef || "no attachedSpaceRef")}\nsafety ${formatFixed(1 - selectedRuntime.riskPenalty, 2)} | safety loss ${formatFixed(selectedRuntime.riskPenalty, 2)}`
     : "none selected";
   const topRows = rows.slice(0, 8).map(row => {
     const safety = 1 - row.risk;
     const blocked = row.risk >= blockThreshold && playbackUsesBeaconRisk();
-    return `${row.id}: safety ${formatFixed(safety, 2)} | risk ${formatFixed(row.risk, 2)}${blocked ? " BLOCKED" : ""}`;
+    return `${row.id}: safety ${formatFixed(safety, 2)} | loss ${formatFixed(row.risk, 2)}${blocked ? " BLOCKED" : ""}`;
   }).join("\\n") || "none at current time";
   $("beaconImpact").textContent =
     `Safety preview ${mode}\\n` +
     `time ${formatFixed(timeS, 1)}s | beacons ${beacons.length}\\n` +
-    `block risk >= ${formatFixed(blockThreshold, 2)} | block safety <= ${formatFixed(1 - blockThreshold, 2)}\\n` +
+    `block when safety loss >= ${formatFixed(blockThreshold, 2)} | safety <= ${formatFixed(1 - blockThreshold, 2)}\\n` +
     `selected\\n${selectedText}\\n` +
     `selected events ${selectedEvents.length}\\n` +
     `affected spaces ${rows.length} | blocked ${blockedRows.length}\\n` +
@@ -1528,6 +1850,10 @@ $("timeStep").oninput = () => { drawBeaconCurve(); updateBeaconImpactPreview(); 
 $("maxSteps").oninput = () => { drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
 $("useBeaconRisk").onchange = () => { updateBeaconImpactPreview(); draw(); };
 $("beaconBlockThreshold").oninput = () => { updateBeaconImpactPreview(); draw(); };
+$("routingPreset").onchange = updateRoutingPresetInfo;
+$("applyRoutingPreset").onclick = applySelectedRoutingPreset;
+$("runRoutingPreset").onclick = () => runSelectedRoutingPreset().catch(err => $("metrics").textContent = err.message);
+$("compareRoutingPresets").onclick = () => compareSelectedRoutingPresets().catch(err => $("routingResults").textContent = err.message);
 $("run").onclick = () => runSimulation().catch(err => $("metrics").textContent = err.message);
 $("play").onclick = () => {
   if (timer) {

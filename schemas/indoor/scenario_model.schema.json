@@ -536,6 +536,48 @@
         "useCongestion": {
           "type": "boolean"
         },
+        "riskCostModel": {
+          "enum": [
+            "legacy_additive",
+            "multiplicative_beta",
+            "linear_time_risk"
+          ]
+        },
+        "riskEndpointPolicy": {
+          "enum": [
+            "target",
+            "source",
+            "mean",
+            "min",
+            "max"
+          ]
+        },
+        "riskEdgePrecedence": {
+          "type": "boolean"
+        },
+        "riskAggregation": {
+          "enum": [
+            "sum",
+            "max",
+            "mean"
+          ]
+        },
+        "riskAlpha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "hazardBeta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "beaconBeta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "riskUnitCost": {
+          "type": "number",
+          "minimum": 0
+        },
         "replanPolicy": {
           "enum": [
             "never",
@@ -870,6 +912,131 @@
           "items": {
             "type": "object"
           }
+        },
+        "routingPresets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingPreset"
+          }
+        }
+      }
+    },
+    "RoutingPreset": {
+      "type": "object",
+      "required": [
+        "presetId",
+        "routing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "presetId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "routing": {
+          "$ref": "#/$defs/RoutingPresetPatch"
+        }
+      }
+    },
+    "RoutingPresetPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "enum": [
+            "dijkstra",
+            "astar",
+            "yen_ksp",
+            "robust_agility"
+          ]
+        },
+        "costPolicy": {
+          "enum": [
+            "shortest_distance",
+            "minimum_travel_time"
+          ]
+        },
+        "useDynamicWeights": {
+          "type": "boolean"
+        },
+        "useBeaconRisk": {
+          "type": "boolean"
+        },
+        "beaconBlockThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "useHazardRisk": {
+          "type": "boolean"
+        },
+        "useCongestion": {
+          "type": "boolean"
+        },
+        "riskCostModel": {
+          "enum": [
+            "legacy_additive",
+            "multiplicative_beta",
+            "linear_time_risk"
+          ]
+        },
+        "riskEndpointPolicy": {
+          "enum": [
+            "target",
+            "source",
+            "mean",
+            "min",
+            "max"
+          ]
+        },
+        "riskEdgePrecedence": {
+          "type": "boolean"
+        },
+        "riskAggregation": {
+          "enum": [
+            "sum",
+            "max",
+            "mean"
+          ]
+        },
+        "riskAlpha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "hazardBeta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "beaconBeta": {
+          "type": "number",
+          "minimum": 0
+        },
+        "riskUnitCost": {
+          "type": "number",
+          "minimum": 0
+        },
+        "replanPolicy": {
+          "enum": [
+            "never",
+            "on_blocked_or_interval",
+            "every_step"
+          ]
+        },
+        "replanIntervalSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "noRouteRetryIntervalSteps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "routeRecommendation": {
+          "$ref": "#/$defs/RouteRecommendation"
         }
       }
     },

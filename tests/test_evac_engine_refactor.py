@@ -8,12 +8,13 @@ import networkx as nx
 
 from src.evac_engine.loaders import LoaderError, ScenarioModelLoader, load_project
 from src.evac_engine.overlays import BeaconState
+from src.evac_engine.experiments import compare_routing_presets
 from src.evac_engine.route_recommendation import EvacuationRouteRecommendationService, RouteRecommendationConfig
 from src.evac_engine.routing import RoutingEngine
 from src.evac_engine.simulation import EvacuationModel
 from src.evac_engine.topology import EvacTopology
 from src.evac_engine.visualization import save_result_gif, save_result_html, trajectory_quality_metrics
-from src.evac_engine.web_app import discover_model_library, load_model_summary, run_configured_simulation
+from src.evac_engine.web_app import WORKBENCH_HTML, compare_configured_routing, discover_model_library, load_model_summary, run_configured_simulation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,6 +155,50 @@ class EvacEngineRefactorTests(unittest.TestCase):
         )
 
         self.assertFalse(route.reachable)
+
+    def test_multiplicative_risk_cost_model_is_configurable(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+        snapshot = RoutingEngine(topology).compiler.compile(
+            mobility_profile=scenario.mobility_profiles["MP_WALKING_ROLLING"],
+            cost_policy="minimum_travel_time",
+            beacon_state=BeaconState(cell_risk={"CS_L00_DOOR_1": 0.5}),
+            routing_config={
+                "useBeaconRisk": True,
+                "useHazardRisk": False,
+                "riskCostModel": "multiplicative_beta",
+                "riskEndpointPolicy": "target",
+                "riskEdgePrecedence": False,
+                "riskAlpha": 1.0,
+                "beaconBeta": 2.0,
+            },
+        )
+
+        breakdown = snapshot.graph["CS_L00_ROOM_A"]["CS_L00_DOOR_1"]["breakdown"]
+
+        self.assertEqual("multiplicative_beta", breakdown["riskCostModel"])
+        self.assertEqual(0.5, breakdown["beaconRisk"])
+        self.assertAlmostEqual(breakdown["base"] * 2.0, breakdown["total"], places=5)
+
+    def test_compare_routing_presets_writes_summary_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = compare_routing_presets(
+                EXAMPLES / "minimal_indoor_model.json",
+                EXAMPLES / "minimal_scenario_model.json",
+                preset_ids=["dijkstra_time", "astar_time"],
+                output_dir=Path(tmp) / "routing_compare",
+                runtime_overrides={"maxSteps": 12, "firstGroupCount": 1},
+                write_run_outputs=False,
+                write_plot=False,
+            )
+
+            output = Path(summary["outputDir"])
+
+            self.assertEqual(["dijkstra_time", "astar_time"], summary["presetIds"])
+            self.assertEqual(2, len(summary["runs"]))
+            self.assertTrue((output / "comparison_summary.json").exists())
+            self.assertTrue((output / "comparison_metrics.csv").exists())
+            self.assertTrue((output / "comparison_routes.csv").exists())
 
     def test_no_route_agent_recovers_after_beacon_unblocks_path(self):
         source = json.loads((EXAMPLES / "minimal_scenario_model.json").read_text(encoding="utf-8"))
@@ -356,6 +401,45 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("Column", categories)
         self.assertIn("Stair", categories)
         self.assertIn("Ramp", categories)
+
+    def test_workbench_model_summary_exposes_routing_experiments(self):
+        summary = load_model_summary(None, str(EXAMPLES / "minimal_scenario_model.json"))
+
+        self.assertIn("routingPresets", summary)
+        self.assertIn("dijkstra_time", summary["routingPresets"])
+        self.assertIn("riskCostModel", summary["config"])
+        self.assertIn("routeRecommendation", summary["config"])
+
+    def test_workbench_routing_experiments_are_after_beacons_and_use_safety_labels(self):
+        self.assertLess(WORKBENCH_HTML.index("<h2>Beacons</h2>"), WORKBENCH_HTML.index("<h2>Routing Experiments</h2>"))
+        self.assertIn("Safety-cost model", WORKBENCH_HTML)
+        self.assertIn("Advanced safety/cost parameters", WORKBENCH_HTML)
+        self.assertIn("Safety loss curve preview", WORKBENCH_HTML)
+
+    def test_workbench_can_compare_routing_presets(self):
+        comparison = compare_configured_routing(
+            {
+                "scenarioPath": str(EXAMPLES / "minimal_scenario_model.json"),
+                "indoorPath": str(EXAMPLES / "minimal_indoor_model.json"),
+                "presetIds": ["dijkstra_time", "astar_time"],
+                "config": {
+                    "timeStepS": 0.25,
+                    "maxSteps": 12,
+                    "randomSeed": 7,
+                    "firstGroupCount": 1,
+                    "algorithm": "astar",
+                    "costPolicy": "minimum_travel_time",
+                    "useBeaconRisk": False,
+                },
+                "beacons": [],
+                "scheduledEvents": [],
+            },
+            str(EXAMPLES / "minimal_scenario_model.json"),
+        )
+
+        self.assertEqual(["dijkstra_time", "astar_time"], comparison["presetIds"])
+        self.assertEqual(2, len(comparison["runs"]))
+        self.assertTrue(comparison["routeRows"])
 
     def test_workbench_library_lists_available_scenarios_and_models(self):
         library = discover_model_library(EXAMPLES)

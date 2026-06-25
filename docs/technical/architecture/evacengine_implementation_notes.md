@@ -17,10 +17,11 @@ The legacy `src/MLSM_EvacEngine.py` remains available as a manual demo launcher,
 - `routing.py`: route planning with Dijkstra/A*, mobility filters and immutable weight snapshot compilation.
 - `overlays.py`: beacon observations and scheduled hazard state.
 - `simulation.py`: synchronous tick model, population materialization, route replanning, movement physics and output writers.
+- `experiments.py`: routing preset catalog and same-scenario comparison runner.
 - `visualization.py`: visual payloads, trajectory QA metrics, HTML viewer and GIF rendering.
 - `web_app.py`: local browser workbench for scenario editing, click placement, simulation and playback.
 - `application.py`: headless service boundary for CLI/UI/tests.
-- `cli.py`: `validate`, `route`, `run`, `render`, `workbench`, `beacons` and `ui` commands.
+- `cli.py`: `validate`, `route`, `run`, `render`, `compare-routing`, `workbench`, `beacons` and `ui` commands.
 - `__main__.py`: module entrypoint for `python -m src.evac_engine`.
 - `ui/desktop_app.py`: import-safe Tk desktop shell connected to `ApplicationService`.
 
@@ -53,6 +54,8 @@ Supported algorithms:
 
 - `dijkstra`
 - `astar`
+- `yen_ksp`
+- `robust_agility`
 
 Supported cost policies:
 
@@ -60,6 +63,8 @@ Supported cost policies:
 - `minimum_travel_time`
 
 Mobility filters prevent profiles from using stairs, ramps or elevators when profile flags disallow them.
+
+Dynamic routing weights support the legacy additive model and experimental cost models for route recommendation studies. The full experiment contract, symbols, presets and commands are documented in `docs/technical/research/evacengine_routing_experiment_framework.md`.
 
 ## Simulation
 
@@ -100,12 +105,42 @@ It supports:
 - automatic group count/spawn edits;
 - click placement of manual agents;
 - profile selection for clicked agents;
+- routing experiment presets, editable risk/cost parameters and same-scenario preset comparison;
 - JSON editing of manual agents, beacons and scheduled events;
 - optional geometry QA;
 - level switching and trajectory playback;
 - multilevel destination mode:
   - `All scenario exits`
   - `Selected only`
+
+The left panel is intentionally ordered as:
+
+1. scenario and simulation controls;
+2. agents;
+3. beacons and their temporal safety curve;
+4. routing experiments;
+5. raw dynamic events.
+
+This order keeps the workflow explicit: first define the scenario state, then compare route recommendation policies over that same state.
+
+The workbench labels beacon/routing safety in user-facing terms:
+
+- `Safety loss` is shown instead of `riskPenalty`;
+- `Safety-cost model` is shown instead of `riskCostModel`;
+- `Safety source` is shown instead of `riskEndpointPolicy`;
+- `Block at loss` is shown instead of a risk block threshold.
+
+The underlying JSON fields are unchanged for compatibility. In runtime data:
+
+```text
+safety_loss = 1 - safety
+riskPenalty = safety_loss
+```
+
+`Routing Experiments` is split into two levels:
+
+- the normal level exposes preset selection, `Apply preset`, `Run visually`, `Compare checked` and the preset checklist;
+- the advanced level is collapsed under `Advanced safety/cost parameters` and contains alpha/beta weights, candidate-route parameters, robustness/agility controls and the combined-policy weights.
 
 ## Outputs
 

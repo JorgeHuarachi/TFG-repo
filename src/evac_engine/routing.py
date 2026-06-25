@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 import networkx as nx
@@ -62,7 +63,7 @@ class WeightSnapshotCompiler:
                 continue
             if not _profile_allows(data, mobility_profile):
                 continue
-            breakdown = self._weight_breakdown(data, target, cost_policy, hazard_state, beacon_state, congestion, routing_config)
+            breakdown = self._weight_breakdown(data, source, target, cost_policy, hazard_state, beacon_state, congestion, routing_config)
             existing = graph.get_edge_data(source, target)
             if existing is None or breakdown["total"] < existing["weight"]:
                 graph.add_edge(source, target, weight=breakdown["total"], arcId=key, resourceRef=resource_ref, breakdown=breakdown, raw=data)
@@ -79,6 +80,7 @@ class WeightSnapshotCompiler:
     @staticmethod
     def _weight_breakdown(
         edge_data: dict[str, Any],
+        source: str,
         target: str,
         cost_policy: str,
         hazard_state: HazardState,
@@ -91,18 +93,51 @@ class WeightSnapshotCompiler:
         else:
             base = float(edge_data.get("lengthM") or 1.0)
         resource_ref = str(edge_data.get("resourceRef") or "")
-        hazard = float(hazard_state.edge_risk.get(resource_ref, 0.0) or hazard_state.cell_risk.get(target, 0.0))
-        beacon = float(beacon_state.edge_risk.get(resource_ref, 0.0) or beacon_state.cell_risk.get(target, 0.0))
+        endpoint_policy = str(routing_config.get("riskEndpointPolicy", "target"))
+        edge_precedence = bool(routing_config.get("riskEdgePrecedence", True))
+        hazard = _risk_for_edge(hazard_state.edge_risk, hazard_state.cell_risk, resource_ref, source, target, endpoint_policy, edge_precedence)
+        beacon = _risk_for_edge(beacon_state.edge_risk, beacon_state.cell_risk, resource_ref, source, target, endpoint_policy, edge_precedence)
         crowd = float(congestion.get(target, 0))
         use_hazard = bool(routing_config.get("useHazardRisk", True))
         use_beacon = bool(routing_config.get("useBeaconRisk", True))
         use_congestion = bool(routing_config.get("useCongestion", False))
-        hazard_penalty = base * hazard * 20.0 if use_hazard else 0.0
-        beacon_penalty = base * beacon * 5.0 if use_beacon else 0.0
+        hazard = hazard if use_hazard else 0.0
+        beacon = beacon if use_beacon else 0.0
+        risk_model = str(routing_config.get("riskCostModel", "legacy_additive"))
+        alpha = _non_negative_float(routing_config.get("riskAlpha"), 1.0)
+        hazard_beta = _non_negative_float(routing_config.get("hazardBeta"), 20.0 if risk_model == "legacy_additive" else 1.0)
+        beacon_beta = _non_negative_float(routing_config.get("beaconBeta"), 5.0 if risk_model == "legacy_additive" else 1.0)
+        combined_risk = _combine_risk(hazard, beacon, str(routing_config.get("riskAggregation", "sum")))
+        if risk_model == "linear_time_risk":
+            risk_unit_cost = _non_negative_float(routing_config.get("riskUnitCost"), base)
+            risk_penalty = risk_unit_cost * (hazard_beta * hazard + beacon_beta * beacon)
+            base_component = alpha * base
+            hazard_penalty = risk_unit_cost * hazard_beta * hazard
+            beacon_penalty = risk_unit_cost * beacon_beta * beacon
+            total_without_congestion = base_component + risk_penalty
+        elif risk_model == "multiplicative_beta":
+            base_component = alpha * base
+            hazard_penalty = base * hazard_beta * hazard
+            beacon_penalty = base * beacon_beta * beacon
+            total_without_congestion = base_component + hazard_penalty + beacon_penalty
+        else:
+            base_component = base
+            hazard_penalty = base * hazard * hazard_beta
+            beacon_penalty = base * beacon * beacon_beta
+            total_without_congestion = base_component + hazard_penalty + beacon_penalty
         congestion_penalty = crowd * 0.2 if use_congestion else 0.0
-        total = base + hazard_penalty + beacon_penalty + congestion_penalty
+        total = total_without_congestion + congestion_penalty
         return {
             "base": round(base, 6),
+            "baseComponent": round(base_component, 6),
+            "riskCostModel": risk_model,
+            "riskEndpointPolicy": endpoint_policy,
+            "hazardRisk": round(hazard, 6),
+            "beaconRisk": round(beacon, 6),
+            "combinedRisk": round(combined_risk, 6),
+            "riskAlpha": round(alpha, 6),
+            "hazardBeta": round(hazard_beta, 6),
+            "beaconBeta": round(beacon_beta, 6),
             "hazardPenalty": round(hazard_penalty, 6),
             "beaconPenalty": round(beacon_penalty, 6),
             "congestionPenalty": round(congestion_penalty, 6),
@@ -139,6 +174,7 @@ class RoutingEngine:
         if algorithm not in SUPPORTED_ROUTE_ALGORITHMS:
             return self._unreachable(origin_id, targets[0], algorithm, cost_policy, "UNSUPPORTED_ALGORITHM")
 
+        compile_start = time.perf_counter()
         snapshot = self.compiler.compile(
             step=step,
             time_s=time_s,
@@ -149,6 +185,8 @@ class RoutingEngine:
             congestion=congestion,
             routing_config=routing_config,
         )
+        snapshot_compile_ms = (time.perf_counter() - compile_start) * 1000.0
+        planning_start = time.perf_counter()
         candidate = self.recommendations.recommend(
             snapshot.graph,
             origin_id,
@@ -156,12 +194,18 @@ class RoutingEngine:
             heuristic=self._heuristic,
             config=RouteRecommendationConfig.from_routing_config(algorithm, routing_config),
         )
+        planning_ms = (time.perf_counter() - planning_start) * 1000.0
         if candidate:
             route = self._route_from_path(candidate.node_sequence, snapshot, origin_id, candidate.destination, algorithm, cost_policy)
+            route.weight_breakdown["snapshotCompileMs"] = round(snapshot_compile_ms, 6)
+            route.weight_breakdown["planningMs"] = round(planning_ms, 6)
             if candidate.metrics:
                 route.weight_breakdown["routeMetrics"] = dict(candidate.metrics)
             return route
-        return self._unreachable(origin_id, targets[0], algorithm, cost_policy, "NO_ROUTE")
+        route = self._unreachable(origin_id, targets[0], algorithm, cost_policy, "NO_ROUTE")
+        route.weight_breakdown["snapshotCompileMs"] = round(snapshot_compile_ms, 6)
+        route.weight_breakdown["planningMs"] = round(planning_ms, 6)
+        return route
 
     def _targets(self, target_refs: list[str] | None) -> list[str]:
         raw_targets = target_refs or self.topology.exit_candidates()
@@ -232,3 +276,52 @@ def _profile_allows(edge_data: dict[str, Any], profile: MobilityProfile | None) 
     if connector_type == "Elevator" and not profile.can_use_elevators:
         return False
     return True
+
+
+def _risk_for_edge(
+    edge_risk: dict[str, float],
+    cell_risk: dict[str, float],
+    resource_ref: str,
+    source: str,
+    target: str,
+    endpoint_policy: str,
+    edge_precedence: bool,
+) -> float:
+    if edge_precedence and resource_ref in edge_risk:
+        return _bounded_risk(edge_risk.get(resource_ref, 0.0))
+    source_risk = _bounded_risk(cell_risk.get(source, 0.0))
+    target_risk = _bounded_risk(cell_risk.get(target, 0.0))
+    if endpoint_policy == "source":
+        return source_risk
+    if endpoint_policy == "mean":
+        return (source_risk + target_risk) * 0.5
+    if endpoint_policy == "min":
+        return min(source_risk, target_risk)
+    if endpoint_policy == "max":
+        return max(source_risk, target_risk)
+    return target_risk
+
+
+def _combine_risk(hazard: float, beacon: float, aggregation: str) -> float:
+    if aggregation == "max":
+        return max(hazard, beacon)
+    if aggregation == "mean":
+        active = [value for value in (hazard, beacon) if value > 0.0]
+        return sum(active) / len(active) if active else 0.0
+    return min(1.0, hazard + beacon)
+
+
+def _bounded_risk(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, parsed))
+
+
+def _non_negative_float(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0.0 else default

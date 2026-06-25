@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .application import ApplicationService
+from .experiments import available_routing_presets, compare_routing_presets
 from .loaders import load_project
 from .overlays import BeaconSimulator
 from .simulation import EvacuationModel
@@ -61,19 +62,33 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--fps", type=int, default=8)
     render.add_argument("--max-frames", type=int)
     render.add_argument("--skip-geometry-qa", action="store_true", help="Skip expensive Shapely trajectory geometry checks")
+
+    compare = sub.add_parser("compare-routing", help="Run one scenario with multiple routing presets and compare metrics")
+    _add_project_args(compare, scenario_required=False)
+    _add_simulation_runtime_args(compare)
+    compare.add_argument("--preset", action="append", default=[], help="Preset id to run; repeat for several presets")
+    compare.add_argument("--presets", help="Comma-separated preset ids; appended after --preset values")
+    compare.add_argument("--output-dir", default="outputs/routing_comparison")
+    compare.add_argument("--list-presets", action="store_true", help="List built-in preset ids and exit")
+    compare.add_argument("--no-run-outputs", action="store_true", help="Only write comparison files, not per-preset run manifests")
+    compare.add_argument("--skip-plot", action="store_true", help="Skip comparison_plot.png generation")
     return parser
 
 
-def _add_project_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--scenario", required=True, help="Path to scenario_model.json")
+def _add_project_args(parser: argparse.ArgumentParser, *, scenario_required: bool = True) -> None:
+    parser.add_argument("--scenario", required=scenario_required, help="Path to scenario_model.json")
     parser.add_argument("--indoor", help="Path to indoor_model.json; defaults to scenario.indoorModelRef.path")
 
 
-def _add_runtime_override_args(parser: argparse.ArgumentParser) -> None:
+def _add_simulation_runtime_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--time-step", type=float, help="Override simulationConfig.timeStepS")
     parser.add_argument("--max-steps", type=int, help="Override simulationConfig.maxSteps")
     parser.add_argument("--seed", type=int, help="Override simulationConfig.randomSeed")
     parser.add_argument("--first-group-count", type=int, help="Override the first population group count")
+
+
+def _add_runtime_override_args(parser: argparse.ArgumentParser) -> None:
+    _add_simulation_runtime_args(parser)
     parser.add_argument("--algorithm", choices=["dijkstra", "astar", "yen_ksp", "robust_agility"], help="Override routing.algorithm")
     parser.add_argument("--cost-policy", choices=["shortest_distance", "minimum_travel_time"], help="Override routing.costPolicy")
 
@@ -136,6 +151,42 @@ def main(argv: list[str] | None = None) -> int:
                 "qa": build_visualization_payload(model.topology, result, include_geometry_qa=not args.skip_geometry_qa)["qa"],
                 "gif": str(gif_path) if gif_path else None,
                 "html": str(html_path) if html_path else None,
+            }
+        )
+        return 0
+    if args.command == "compare-routing":
+        if args.list_presets:
+            scenario_raw = None
+            if args.scenario:
+                _, scenario = load_project(args.indoor, args.scenario)
+                scenario_raw = scenario.raw
+            print_json({"presets": available_routing_presets(scenario_raw)})
+            return 0
+        if not args.scenario:
+            parser.error("compare-routing requires --scenario unless --list-presets is used")
+        presets = list(args.preset or [])
+        if args.presets:
+            presets.extend(item.strip() for item in args.presets.split(",") if item.strip())
+        summary = compare_routing_presets(
+            args.indoor,
+            args.scenario,
+            preset_ids=presets or None,
+            output_dir=args.output_dir,
+            runtime_overrides={
+                "timeStepS": args.time_step,
+                "maxSteps": args.max_steps,
+                "randomSeed": args.seed,
+                "firstGroupCount": args.first_group_count,
+            },
+            write_run_outputs=not args.no_run_outputs,
+            write_plot=not args.skip_plot,
+        )
+        print_json(
+            {
+                "outputDir": summary["outputDir"],
+                "presetIds": summary["presetIds"],
+                "runs": summary["runs"],
+                "plot": summary.get("plot"),
             }
         )
         return 0
