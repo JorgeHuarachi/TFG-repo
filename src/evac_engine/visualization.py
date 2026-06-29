@@ -168,10 +168,9 @@ class EvacuationRenderer:
             connector_access = source_category in {"Stair", "Ramp", "Elevator"} or target_category in {"Stair", "Ramp", "Elevator"}
             is_virtual = str(data.get("viaBoundaryRef") or "").upper().find("VIRTUAL") >= 0 or source.startswith("VTN_") or target.startswith("VTN_")
             if is_virtual:
-                if not connector_access:
-                    continue
                 color, linestyle, alpha = _connector_edge_style(data.get("connectorType"), source_category, target_category)
-                linestyle = "--"
+                if not connector_access:
+                    color, linestyle, alpha = "#64748b", "-", 0.28
             elif data.get("connectorType") in {"Stair", "Ramp", "Elevator"}:
                 color, linestyle, alpha = _connector_edge_style(data.get("connectorType"), source_category, target_category)
             else:

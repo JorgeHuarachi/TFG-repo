@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .application import ApplicationService
+from .cer_export import default_cer_output_dir, export_cer_analysis
 from .experiments import available_routing_presets, compare_routing_presets
 from .loaders import load_project
 from .overlays import BeaconSimulator
@@ -46,6 +47,21 @@ def build_parser() -> argparse.ArgumentParser:
     _add_project_args(beacons)
     beacons.add_argument("--step", type=int, default=0)
     beacons.add_argument("--time-s", type=float, default=0.0)
+
+    cer = sub.add_parser("cer", help="Export CER rerouting centrality debug visualizations")
+    _add_project_args(cer)
+    cer.add_argument("--origin", required=True, help="Origin CellSpace id/ref to explain")
+    cer.add_argument("--target", help="Target exit CellSpace id/ref; defaults to first scenario destination")
+    cer.add_argument("--profile", help="Mobility profile id; defaults to first group/agent profile")
+    cer.add_argument("--output-dir", help="Output folder for cer_debug.json, PNG, GIF and HTML")
+    cer.add_argument("--formats", default="json,png,html", help="Comma-separated: json,png,html,gif")
+    cer.add_argument("--gif", action="store_true", help="Also export cer_explanation.gif")
+    cer.add_argument("--level", help="Level to render in PNG/GIF")
+    cer.add_argument("--fps", type=int, default=2)
+    cer.add_argument("--max-frames", type=int, default=120)
+    cer.add_argument("--dynamic", action="store_true", help="Use dynamic snapshot with beacons/hazards at --step/--time-s")
+    cer.add_argument("--step", type=int, default=0)
+    cer.add_argument("--time-s", type=float, default=0.0)
 
     ui = sub.add_parser("ui", help="Open the desktop UI")
     ui.add_argument("--indoor")
@@ -203,6 +219,29 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         return 0
+    if args.command == "cer":
+        indoor, scenario = load_project(args.indoor, args.scenario)
+        target = args.target or _first_destination(scenario)
+        output_dir = args.output_dir or default_cer_output_dir(scenario.path, indoor.path, args.origin, target or "target")
+        formats = [item.strip() for item in str(args.formats).split(",") if item.strip()]
+        payload = export_cer_analysis(
+            indoor,
+            scenario,
+            origin=args.origin,
+            target=target,
+            profile_id=args.profile,
+            output_dir=output_dir,
+            formats=formats,
+            level=args.level,
+            use_dynamic_snapshot=bool(args.dynamic),
+            step=args.step,
+            time_s=args.time_s,
+            include_gif=bool(args.gif),
+            fps=args.fps,
+            max_frames=args.max_frames,
+        )
+        print_json({key: value for key, value in payload.items() if key != "result"})
+        return 0
     if args.command == "beacons":
         indoor, scenario = load_project(args.indoor, args.scenario)
         topology = EvacTopology.from_indoor_model(indoor)
@@ -254,6 +293,11 @@ def _apply_scenario_overrides(scenario: Any, args: argparse.Namespace) -> None:
         scenario.routing["algorithm"] = args.algorithm
     if args.cost_policy is not None:
         scenario.routing["costPolicy"] = args.cost_policy
+
+
+def _first_destination(scenario: Any) -> str | None:
+    destinations = list(((scenario.routing.get("destination") or {}).get("cellSpaceRefs") or []))
+    return destinations[0] if destinations else None
 
 
 if __name__ == "__main__":

@@ -167,6 +167,7 @@ class RoutingEngine:
         self.topology = topology
         self.compiler = WeightSnapshotCompiler(topology)
         self.recommendations = EvacuationRouteRecommendationService()
+        self._rerouting_centrality_cache: dict[tuple[Any, ...], tuple[dict[str, float], dict[str, Any]]] = {}
 
     def find_route(
         self,
@@ -252,12 +253,24 @@ class RoutingEngine:
         if not targets:
             return self._unreachable(origin_id, "", algorithm, cost_policy, "NO_TARGETS")
         planning_start = time.perf_counter()
+        recommendation_config = RouteRecommendationConfig.from_routing_config(algorithm, routing_config)
+        if recommendation_config.rerouting_enabled or recommendation_config.route_selection in {"cer_weighted", "cer_agility_yen"}:
+            scores, metadata = self._rerouting_centrality_scores(
+                snapshot,
+                targets,
+                mobility_profile,
+                cost_policy,
+                routing_config,
+                recommendation_config,
+            )
+            recommendation_config.rerouting_centrality_by_node = scores
+            recommendation_config.rerouting_metadata = metadata
         candidate = self.recommendations.recommend(
             snapshot.graph,
             origin_id,
             targets,
             heuristic=self._time_heuristic(mobility_profile),
-            config=RouteRecommendationConfig.from_routing_config(algorithm, routing_config),
+            config=recommendation_config,
         )
         planning_ms = (time.perf_counter() - planning_start) * 1000.0
         if candidate:
@@ -273,6 +286,51 @@ class RoutingEngine:
         route.weight_breakdown["planningMs"] = round(planning_ms, 6)
         route.weight_breakdown["originCandidates"] = self._origin_candidates(snapshot.graph, origin_id, targets)
         return route
+
+    def _rerouting_centrality_scores(
+        self,
+        snapshot: WeightedSnapshot,
+        targets: list[str],
+        mobility_profile: MobilityProfile | None,
+        cost_policy: str,
+        routing_config: dict[str, Any],
+        config: RouteRecommendationConfig,
+    ) -> tuple[dict[str, float], dict[str, Any]]:
+        structural = bool(config.rerouting_use_structural_precompute)
+        cache_key = (
+            "structural" if structural else "dynamic",
+            _mobility_cache_key(mobility_profile),
+            cost_policy,
+            tuple(sorted(targets)),
+            tuple(config.rerouting_failure_profiles),
+            config.rerouting_failure_unit,
+            config.rerouting_distinctness_policy,
+            round(config.rerouting_cost_tolerance, 6),
+            config.rerouting_max_combinations,
+            config.rerouting_max_runtime_ms,
+            snapshot.step if not structural else 0,
+        )
+        cached = self._rerouting_centrality_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        if structural:
+            structural_config = dict(routing_config)
+            structural_config.update({"useHazardRisk": False, "useBeaconRisk": False, "useCongestion": False})
+            graph = self.compiler.compile(
+                mobility_profile=mobility_profile,
+                cost_policy=cost_policy,
+                routing_config=structural_config,
+            ).graph
+        else:
+            graph = snapshot.graph
+        scores, metadata = self.recommendations.compute_rerouting_scores(
+            graph,
+            targets,
+            config,
+            graph_view=self.topology.graph_view_name,
+        )
+        self._rerouting_centrality_cache[cache_key] = (scores, metadata)
+        return scores, metadata
 
     def _target_refs(self, target_refs: list[str] | None) -> list[str]:
         raw_targets = target_refs or self.topology.exit_candidates()

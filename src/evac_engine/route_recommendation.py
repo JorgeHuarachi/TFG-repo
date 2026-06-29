@@ -9,9 +9,12 @@ from typing import Any, Callable, Iterable
 
 import networkx as nx
 
+from .rerouting_centrality import cer_node_scores, rerouting_evacuation_centrality
+
 
 SUPPORTED_ROUTE_ALGORITHMS = {"dijkstra", "astar", "floyd_warshall", "yen_ksp", "robust_agility"}
-ADVANCED_ROUTE_SELECTIONS = {"highest_robustness", "highest_agility", "robust_agility"}
+ADVANCED_ROUTE_SELECTIONS = {"highest_robustness", "highest_agility", "robust_agility", "cer_agility_yen"}
+CER_ROUTE_SELECTIONS = {"cer_weighted", "cer_agility_yen"}
 
 
 @dataclass(slots=True)
@@ -28,12 +31,29 @@ class RouteRecommendationConfig:
     robustness_weight: float = 0.35
     agility_weight: float = 0.35
     agility_aggregation: str = "mean"
+    centrality_type: str = "legacy"
+    rerouting_enabled: bool = False
+    rerouting_failure_profiles: tuple[tuple[int, ...], ...] = ((1,),)
+    rerouting_max_depth: int = 3
+    rerouting_max_k: int = 3
+    rerouting_cost_tolerance: float = 0.35
+    rerouting_failure_unit: str = "resource"
+    rerouting_distinctness_policy: str = "exact"
+    rerouting_max_combinations: int = 500
+    rerouting_max_runtime_ms: int = 1000
+    rerouting_use_structural_precompute: bool = True
+    rerouting_store_routes: bool = False
+    rerouting_max_overlap: float = 0.8
+    rerouting_centrality_by_node: dict[str, float] = field(default_factory=dict)
+    rerouting_metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_routing_config(cls, algorithm: str, routing_config: dict[str, Any] | None = None) -> "RouteRecommendationConfig":
         routing_config = routing_config or {}
         raw = dict(routing_config.get("routeRecommendation") or {})
         selection = str(raw.get("routeSelection") or ("robust_agility" if algorithm == "robust_agility" else "lowest_cost"))
+        centrality_type = str(raw.get("centralityType") or "legacy")
+        rerouting_enabled = bool(raw.get("reroutingEnabled", centrality_type == "rerouting" or selection in CER_ROUTE_SELECTIONS))
         return cls(
             algorithm=algorithm,
             route_selection=selection,
@@ -47,6 +67,19 @@ class RouteRecommendationConfig:
             robustness_weight=_non_negative_float(raw.get("robustnessWeight"), 0.35),
             agility_weight=_non_negative_float(raw.get("agilityWeight"), 0.35),
             agility_aggregation=str(raw.get("agilityAggregation") or "mean"),
+            centrality_type=centrality_type,
+            rerouting_enabled=rerouting_enabled,
+            rerouting_failure_profiles=_failure_profiles(raw.get("reroutingFailureProfiles")),
+            rerouting_max_depth=_positive_int(raw.get("reroutingMaxDepth"), 3),
+            rerouting_max_k=_positive_int(raw.get("reroutingMaxK"), 3),
+            rerouting_cost_tolerance=_non_negative_float(raw.get("reroutingCostTolerance"), _non_negative_float(raw.get("candidateCostTolerance"), 0.35)),
+            rerouting_failure_unit=str(raw.get("reroutingFailureUnit") or "resource"),
+            rerouting_distinctness_policy=str(raw.get("reroutingDistinctnessPolicy") or "exact"),
+            rerouting_max_combinations=_positive_int(raw.get("reroutingMaxCombinations"), 500),
+            rerouting_max_runtime_ms=_positive_int(raw.get("reroutingMaxRuntimeMs"), 1000),
+            rerouting_use_structural_precompute=bool(raw.get("reroutingUseStructuralPrecompute", True)),
+            rerouting_store_routes=bool(raw.get("reroutingStoreRoutes", False)),
+            rerouting_max_overlap=_bounded_float(raw.get("reroutingMaxOverlap"), _bounded_float(raw.get("centralityMaxOverlap"), 0.8, 0.0, 1.0), 0.0, 1.0),
         )
 
 
@@ -82,6 +115,9 @@ class EvacuationRouteRecommendationService:
             return None
         if config.algorithm not in SUPPORTED_ROUTE_ALGORITHMS:
             return None
+
+        if config.route_selection == "cer_weighted":
+            return self._cer_weighted_recommendation(graph, origin, targets, config, heuristic, weight)
 
         use_k_paths = config.algorithm in {"yen_ksp", "robust_agility"} or config.route_selection in ADVANCED_ROUTE_SELECTIONS
         if use_k_paths:
@@ -210,6 +246,51 @@ class EvacuationRouteRecommendationService:
             candidates.append(RouteCandidate(list(path), target, _path_cost(graph, path, weight)))
         return candidates
 
+    def _cer_weighted_recommendation(
+        self,
+        graph: nx.Graph,
+        origin: str,
+        targets: list[str],
+        config: RouteRecommendationConfig,
+        heuristic: Callable[[str, str], float] | None,
+        weight: str,
+    ) -> RouteCandidate | None:
+        adjusted = self._cer_adjusted_graph(graph, config, weight)
+        candidates = self._single_shortest_candidates(adjusted, origin, targets, config.algorithm, heuristic, weight)
+        if not candidates:
+            return None
+        selected = min(candidates, key=lambda item: (item.total_cost, len(item.node_sequence), item.destination))
+        original_cost = _path_cost(graph, selected.node_sequence, weight)
+        agility = self.route_agility(selected.node_sequence, config.rerouting_centrality_by_node, aggregation=config.agility_aggregation)
+        selected.metrics = {
+            "centralityType": "rerouting",
+            "routeSelection": "cer_weighted",
+            "reroutingAgility": round(agility, 6),
+            "agility": round(agility, 6),
+            "cerAdjustedCost": round(selected.total_cost, 6),
+            "originalCost": round(original_cost, 6),
+            "cerMaxNodeScore": round(max(config.rerouting_centrality_by_node.values(), default=0.0), 6),
+            "reroutingMetadata": dict(config.rerouting_metadata),
+        }
+        return selected
+
+    @staticmethod
+    def _cer_adjusted_graph(graph: nx.Graph, config: RouteRecommendationConfig, weight: str) -> nx.Graph:
+        scores = config.rerouting_centrality_by_node
+        max_score = max((float(value) for value in scores.values()), default=0.0)
+        if max_score <= 0.0 or config.agility_weight <= 0.0:
+            return graph.copy()
+        adjusted = graph.copy()
+        for source, target, data in adjusted.edges(data=True):
+            base = float(data.get(weight, 1.0))
+            target_score = max(0.0, float(scores.get(str(target), 0.0)))
+            normalized = target_score / max_score
+            penalty = config.agility_weight * max(0.0, 1.0 - normalized)
+            data[weight] = base + penalty
+            data["cerPenalty"] = round(penalty, 6)
+            data["cerNodeScore"] = round(target_score, 6)
+        return adjusted
+
     def _floyd_warshall_candidates(
         self,
         graph: nx.Graph,
@@ -278,15 +359,19 @@ class EvacuationRouteRecommendationService:
         weight: str,
     ) -> None:
         route_nodes = {node for candidate in candidates for node in candidate.node_sequence[1:-1]}
-        centrality = self.evacuation_centrality(
-            graph,
-            targets,
-            sources=route_nodes,
-            tolerance=config.centrality_tolerance,
-            max_paths=config.centrality_max_paths,
-            max_overlap=config.centrality_max_overlap,
-            weight=weight,
-        )
+        uses_rerouting = config.centrality_type == "rerouting" or config.route_selection in CER_ROUTE_SELECTIONS
+        if uses_rerouting:
+            centrality = {str(node): float(config.rerouting_centrality_by_node.get(str(node), 0.0)) for node in route_nodes}
+        else:
+            centrality = self.evacuation_centrality(
+                graph,
+                targets,
+                sources=route_nodes,
+                tolerance=config.centrality_tolerance,
+                max_paths=config.centrality_max_paths,
+                max_overlap=config.centrality_max_overlap,
+                weight=weight,
+            )
         best_cost = min(item.total_cost for item in candidates)
         max_agility = 0.0
         for candidate in candidates:
@@ -295,7 +380,9 @@ class EvacuationRouteRecommendationService:
             candidate.metrics = {
                 "robustness": round(robustness, 6),
                 "agility": round(agility, 6),
-                "evacuationCentrality": {node: round(float(centrality.get(node, 0.0)), 6) for node in candidate.node_sequence[1:-1]},
+                "evacuationCentrality": {} if uses_rerouting else {node: round(float(centrality.get(node, 0.0)), 6) for node in candidate.node_sequence[1:-1]},
+                "reroutingEvacuationCentrality": {node: round(float(centrality.get(str(node), 0.0)), 6) for node in candidate.node_sequence[1:-1]} if uses_rerouting else {},
+                "centralityType": "rerouting" if uses_rerouting else "legacy",
                 "costRatio": round(candidate.total_cost / best_cost, 6) if best_cost > 0 else 1.0,
             }
             max_agility = max(max_agility, agility)
@@ -335,9 +422,37 @@ class EvacuationRouteRecommendationService:
     def _select_advanced_candidate(candidates: list[RouteCandidate], config: RouteRecommendationConfig) -> RouteCandidate:
         if config.route_selection == "highest_robustness":
             return max(candidates, key=lambda item: (item.metrics["robustness"], -item.total_cost, item.metrics["agility"]))
-        if config.route_selection == "highest_agility":
+        if config.route_selection in {"highest_agility", "cer_agility_yen"}:
             return max(candidates, key=lambda item: (item.metrics["agility"], item.metrics["robustness"], -item.total_cost))
         return max(candidates, key=lambda item: (item.metrics["selectionScore"], item.metrics["robustness"], -item.total_cost))
+
+    def compute_rerouting_scores(
+        self,
+        graph: nx.Graph,
+        targets: Iterable[str],
+        config: RouteRecommendationConfig,
+        *,
+        sources: Iterable[str] | None = None,
+        graph_view: str | None = None,
+        weight: str = "weight",
+    ) -> tuple[dict[str, float], dict[str, Any]]:
+        result = rerouting_evacuation_centrality(
+            graph,
+            targets,
+            sources=sources,
+            failure_profiles=config.rerouting_failure_profiles,
+            failure_unit=config.rerouting_failure_unit,
+            cost_tolerance=config.rerouting_cost_tolerance,
+            distinctness_policy=config.rerouting_distinctness_policy,
+            max_depth=config.rerouting_max_depth,
+            max_k=config.rerouting_max_k,
+            max_combinations=config.rerouting_max_combinations,
+            max_runtime_ms=config.rerouting_max_runtime_ms,
+            max_overlap=config.rerouting_max_overlap,
+            graph_view=graph_view,
+            store_routes=config.rerouting_store_routes,
+        )
+        return cer_node_scores(result), result.metadata
 
 
 def _path_cost(graph: nx.Graph, path: Iterable[str], weight: str) -> float:
@@ -431,3 +546,17 @@ def _non_negative_float(value: Any, default: float) -> float:
 def _bounded_float(value: Any, default: float, minimum: float, maximum: float) -> float:
     parsed = _non_negative_float(value, default)
     return min(max(parsed, minimum), maximum)
+
+
+def _failure_profiles(value: Any) -> tuple[tuple[int, ...], ...]:
+    if not value:
+        return ((1,),)
+    profiles = []
+    for raw_profile in value:
+        if isinstance(raw_profile, int):
+            profile = (raw_profile,)
+        else:
+            profile = tuple(int(item) for item in raw_profile if int(item) > 0)
+        if profile:
+            profiles.append(profile)
+    return tuple(profiles) or ((1,),)

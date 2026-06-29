@@ -1,0 +1,294 @@
+{
+  "scenarioId": "SCENARIO_UNAPLANTA_INTENTO_1_ROLLING_DOC",
+  "scenarioName": "UnaPlanta_Intento_1_doc_rolling_suite",
+  "metadata": {
+    "name": "UnaPlanta_Intento_1_doc_rolling_suite",
+    "description": "Escenario documental generado para README: Rolling accessible only.",
+    "createdAt": "2026-06-29T11:33:19Z",
+    "modifiedAt": "2026-06-29T11:33:19Z",
+    "generator": "docs.tfg.documentation_sim_suite"
+  },
+  "indoorModelRef": {
+    "path": "../../spatial/indoor_model.json",
+    "schemaRef": "../../../../schemas/indoor/indoor_model.schema.json"
+  },
+  "catalogs": {},
+  "population": {
+    "mobilityProfiles": [
+      {
+        "profileId": "MP_WALKING",
+        "label": "Walking adults",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.25,
+        "bodyRadiusM": 0.25,
+        "personalRadiusM": 0.5,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ELDERLY",
+        "label": "Slower elderly pedestrians",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 0.75,
+        "bodyRadiusM": 0.27,
+        "personalRadiusM": 0.62,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_CHILD",
+        "label": "Smaller faster pedestrian",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.45,
+        "bodyRadiusM": 0.18,
+        "personalRadiusM": 0.42,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ROLLING_ACCESSIBLE",
+        "label": "Rolling accessible profile",
+        "locomotionTypes": [
+          "Rolling"
+        ],
+        "baseSpeedMps": 0.9,
+        "bodyRadiusM": 0.3,
+        "personalRadiusM": 0.58,
+        "canUseStairs": false,
+        "canUseRamps": true,
+        "canUseElevators": true
+      }
+    ],
+    "agentGroups": [],
+    "agentSpawns": [],
+    "agents": [
+      {
+        "agentId": "DOC_001",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_009",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            15.381,
+            2.1
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_002",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_002",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            4.413,
+            3.288
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_003",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_014",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            4.413,
+            0.381
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_004",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_017",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.381,
+            1.131
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_005",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_015",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            4.413,
+            6.037
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_006",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_018",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.381,
+            6.506
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_007",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_004",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            10.537,
+            5.415
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_008",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_019",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            5.913,
+            8.006
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_009",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_007",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            12.537,
+            3.401
+          ]
+        }
+      },
+      {
+        "agentId": "DOC_010",
+        "mobilityProfileRef": "MP_ROLLING_ACCESSIBLE",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            10.537,
+            0.495
+          ]
+        }
+      }
+    ]
+  },
+  "beaconSystem": {
+    "enabled": false,
+    "fusion": {
+      "method": "conservative_min",
+      "defaultRadiusM": 6.0
+    },
+    "beacons": []
+  },
+  "hazards": {
+    "enabled": false,
+    "sources": []
+  },
+  "environmentOverrides": {},
+  "routing": {
+    "algorithm": "dijkstra",
+    "costPolicy": "minimum_travel_time",
+    "destination": {
+      "mode": "explicit_cells",
+      "cellSpaceRefs": [
+        "CS_L00_EXIT_001"
+      ]
+    },
+    "deriveConnectivityFromEdges": true,
+    "useDynamicWeights": true,
+    "useBeaconRisk": false,
+    "beaconBlockThreshold": 0.85,
+    "useHazardRisk": true,
+    "useCongestion": true,
+    "replanPolicy": "on_blocked_or_interval",
+    "replanIntervalSteps": 2,
+    "noRouteRetryIntervalSteps": 2
+  },
+  "physics": {
+    "bodyRadiusM": 0.25,
+    "personalRadiusM": 0.5,
+    "wallRepulsion": 4.0,
+    "socialRepulsion": 2.4,
+    "proximitySlowdownMemoryS": 0.22,
+    "spawnMinSpacingM": 0.6,
+    "bodySeparationSlackM": 0.04,
+    "doorQueueClearanceM": 0.08,
+    "doorQueueCorrectionMaxM": 0.32,
+    "transferQueueActivationM": 1.25,
+    "queueCorrectionSpeedScale": 0.55,
+    "stairSpeedFactor": 0.55,
+    "rampSpeedFactor": 0.7,
+    "elevatorSpeedFactor": 0.5,
+    "stairCapacity": 1,
+    "rampCapacity": 1,
+    "maxAccelerationMps2": 6.0,
+    "velocityInertia": 0.2,
+    "maxTurnRateRadS": 3.8,
+    "lineOfSightDistanceM": 18.0,
+    "lineOfSightMaxNodes": 6,
+    "lineOfSightBlend": 0.45,
+    "nearLineOfSightBlend": 0.6,
+    "doorCenterBias": 0.0,
+    "doorEntryInsetM": 0.035,
+    "doorExitInsetM": 0.32,
+    "virtualBoundaryExitInsetM": 0.28,
+    "virtualBoundaryEntryInsetM": 0.08,
+    "virtualBoundaryArrivalRadiusM": 0.35,
+    "linearTransferExitInsetM": 0.45,
+    "doorApproachLookaheadM": 0.55,
+    "linearTransferLookaheadM": 0.9,
+    "doorPreEntryDistanceM": 0.36,
+    "linearTransferPreEntryDistanceM": 0.65,
+    "doorApproachLateralToleranceM": 0.18,
+    "wallRepulsionDistanceM": 0.8,
+    "wallClearanceM": 0.24,
+    "transferWallClearanceM": 0.14
+  },
+  "scheduledEvents": [],
+  "simulationConfig": {
+    "timeStepS": 0.5,
+    "maxSteps": 260,
+    "randomSeed": 202,
+    "enabledOverlays": [
+      "population"
+    ]
+  },
+  "experiments": {
+    "replications": 1,
+    "parameterSweep": []
+  },
+  "outputs": {
+    "outputFolder": "models/UnaPlanta_Intento_1/outputs/documentation/rolling",
+    "saveRoutes": true,
+    "saveMetrics": true,
+    "saveTimeSeries": false,
+    "saveEvents": true,
+    "saveTrajectories": true
+  },
+  "scenarioDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.2-draft",
+    "profile": "EvacEngine scenario overlay referencing indoor_model.json"
+  }
+}

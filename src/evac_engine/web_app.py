@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 from src.spatial_engine.project_workspace import related_scenarios_for_model
 
+from .cer_export import default_cer_output_dir, export_cer_analysis
 from .domain import ScenarioDefinition
 from .experiments import apply_routing_preset, available_routing_presets, summarize_routing_run
 from .loaders import load_project
@@ -128,7 +129,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib hook
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/run", "/api/routing-compare", "/api/save-scenario", "/api/render", "/api/save-routing-comparison"}:
+        if parsed.path not in {"/api/run", "/api/routing-compare", "/api/save-scenario", "/api/render", "/api/save-routing-comparison", "/api/cer-export"}:
             self.send_error(404)
             return
         try:
@@ -139,6 +140,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 self._send_json(save_configured_scenario(request, self.scenario_default))
             elif parsed.path == "/api/render":
                 self._send_json(render_configured_simulation(request, self.scenario_default))
+            elif parsed.path == "/api/cer-export":
+                self._send_json(save_configured_cer_analysis(request, self.scenario_default))
             elif parsed.path == "/api/save-routing-comparison":
                 self._send_json(save_configured_routing_comparison(request, self.scenario_default))
             elif parsed.path == "/api/routing-compare":
@@ -218,6 +221,7 @@ def load_model_summary(indoor_path: str | None, scenario_path: str) -> dict[str,
         "graphView": topology.graph_view_name,
         "graphEdges": graph_edge_payload(topology),
         "virtualBoundaries": virtual_boundary_payload(topology),
+        "transferNodes": _transfer_node_payload(topology),
         "graphSummary": topology.to_summary(),
         "cells": cells,
         "spaces": spaces,
@@ -283,6 +287,46 @@ def discover_model_library(root: Path = MODEL_LIBRARY_ROOT) -> dict[str, list[di
     scenarios.sort(key=lambda item: item["path"])
     indoor_models.sort(key=lambda item: item["path"])
     return {"scenarios": scenarios, "indoorModels": indoor_models}
+
+
+def _transfer_node_payload(topology: EvacTopology) -> list[dict[str, Any]]:
+    """Expose runtime graph nodes for CER/debug selection in the workbench."""
+
+    nodes: list[dict[str, Any]] = []
+    for node_id, data in topology.graph.nodes(data=True):
+        point = topology.node_position(str(node_id))
+        if not point:
+            continue
+        category = str(data.get("category") or "")
+        function = str(data.get("function") or "")
+        navigation_type = str(data.get("navigationType") or "")
+        transfer_kind = _transfer_kind(str(node_id), category, function, navigation_type)
+        nodes.append(
+            {
+                "id": str(node_id),
+                "level": topology.node_level(str(node_id)) or data.get("level") or "",
+                "category": category,
+                "function": function,
+                "navigationType": navigation_type,
+                "transferKind": transfer_kind,
+                "isExit": bool(data.get("isExit") or category == "Exit" or function == "AnchorSpace"),
+                "x": round(float(point[0]), 3),
+                "y": round(float(point[1]), 3),
+            }
+        )
+    return sorted(nodes, key=lambda item: (item["level"], item["transferKind"], item["id"]))
+
+
+def _transfer_kind(node_id: str, category: str, function: str, navigation_type: str) -> str:
+    if node_id.startswith("VTN_") or category == "VirtualTransferNode":
+        return "virtual boundary"
+    if category == "Exit" or function == "AnchorSpace":
+        return "exit"
+    if category in {"Door", "Window", "Stair", "Ramp", "Elevator"}:
+        return category.lower()
+    if navigation_type == "TransferSpace":
+        return "transfer"
+    return "graph node"
 
 
 def _scan_model_library_root(root: Path) -> dict[str, list[dict[str, str]]]:
@@ -545,6 +589,54 @@ def save_configured_routing_comparison(request: dict[str, Any], default_scenario
     }
 
 
+def save_configured_cer_analysis(request: dict[str, Any], default_scenario: str) -> dict[str, Any]:
+    """Persist CER debug artifacts for the current workbench scenario."""
+
+    scenario_path = request.get("scenarioPath") or default_scenario
+    indoor_path = request.get("indoorPath") or None
+    indoor, scenario = load_project(_workspace_path(indoor_path) if indoor_path else None, _workspace_path(scenario_path))
+    apply_request_to_scenario(scenario, request)
+    cer = request.get("cer") or {}
+    origin = str(cer.get("origin") or _default_cer_origin(scenario, request) or "").strip()
+    if not origin:
+        raise ValueError("CER origin is required. Select a spawn/manual agent cell or fill CER origin.")
+    target = str(cer.get("target") or _default_cer_target(scenario, request) or "").strip() or None
+    profile = str(cer.get("profile") or _default_cer_profile(scenario, request) or "").strip() or None
+    output_dir = _resolve_output_dir(
+        cer.get("outputDir") or default_cer_output_dir(scenario.path, indoor.path, origin, target or "target")
+    )
+    formats = cer.get("formats") or ["json", "png", "html"]
+    payload = export_cer_analysis(
+        indoor,
+        scenario,
+        origin=origin,
+        target=target,
+        profile_id=profile,
+        output_dir=output_dir,
+        formats=formats,
+        level=cer.get("level") or None,
+        use_dynamic_snapshot=bool(cer.get("dynamic")),
+        step=int(cer.get("step") or 0),
+        time_s=float(cer.get("timeS") or 0.0),
+        include_gif=bool(cer.get("gif")),
+        fps=int(cer.get("fps") or 2),
+        max_frames=int(cer["maxFrames"]) if cer.get("maxFrames") else 120,
+    )
+    outputs = {key: _display_path(value) for key, value in (payload.get("outputs") or {}).items()}
+    return {
+        "scenarioId": payload.get("scenarioId"),
+        "origin": payload.get("origin"),
+        "target": payload.get("target"),
+        "profileId": payload.get("profileId"),
+        "graphView": payload.get("graphView"),
+        "snapshot": payload.get("snapshot"),
+        "outputDir": _display_path(output_dir),
+        "outputs": outputs,
+        "metadata": payload.get("metadata"),
+        "nodeSummary": payload.get("nodeSummary"),
+    }
+
+
 def apply_request_to_scenario(scenario: ScenarioDefinition, request: dict[str, Any]) -> None:
     config = request.get("config") or {}
     if config.get("timeStepS") is not None:
@@ -639,6 +731,40 @@ def _default_output_dir(scenario_path: Path, indoor_path: Path, suffix: str = ""
     if model_dir is not None:
         return model_dir / "outputs" / scenario_slug
     return PROJECT_ROOT / "outputs" / "workbench" / scenario_slug
+
+
+def _default_cer_origin(scenario: ScenarioDefinition, request: dict[str, Any]) -> str | None:
+    manual_agents = request.get("manualAgents") or []
+    if manual_agents:
+        return manual_agents[0].get("initialCellSpaceRef")
+    agents = scenario.agents or []
+    if agents:
+        return agents[0].get("initialCellSpaceRef")
+    config = request.get("config") or {}
+    if config.get("firstSpawnCell"):
+        return str(config["firstSpawnCell"])
+    if scenario.spawns:
+        return scenario.spawns[0].get("cellSpaceRef")
+    return None
+
+
+def _default_cer_target(scenario: ScenarioDefinition, request: dict[str, Any]) -> str | None:
+    config = request.get("config") or {}
+    if config.get("destinationCells"):
+        return list(config["destinationCells"])[0]
+    destinations = list(((scenario.routing.get("destination") or {}).get("cellSpaceRefs") or []))
+    return destinations[0] if destinations else None
+
+
+def _default_cer_profile(scenario: ScenarioDefinition, request: dict[str, Any]) -> str | None:
+    manual_agents = request.get("manualAgents") or []
+    if manual_agents:
+        return manual_agents[0].get("mobilityProfileRef")
+    if scenario.agents:
+        return scenario.agents[0].get("mobilityProfileRef")
+    if scenario.groups:
+        return scenario.groups[0].get("mobilityProfileRef")
+    return next(iter(scenario.mobility_profiles), None)
 
 
 def _resolve_output_dir(value: str | Path) -> Path:
@@ -962,7 +1088,7 @@ WORKBENCH_HTML = """<!doctype html>
     <div class="compact-note">Run simulation usa los selectores actuales. Apply preset + run cambia esos selectores al preset antes de simular.</div>
     <label>Presets to compare</label>
     <div id="routingPresetChecks" class="check-list"></div>
-    <details>
+    <details id="cerDebugSection">
       <summary>Advanced safety/cost parameters</summary>
       <div class="compact-note" id="routingParameterStatus"></div>
       <div class="row">
@@ -984,7 +1110,7 @@ WORKBENCH_HTML = """<!doctype html>
       </div>
       <div class="row">
         <div><label title="Safety-loss to cost conversion used by linear_time_risk.">safety unit cost</label><input id="riskUnitCost" type="number" min="0" step="0.05" value="1"></div>
-        <div><label title="Policy that selects a candidate route after the search algorithm generates candidates.">Route selection</label><select id="routeSelection"><option>lowest_cost</option><option>highest_robustness</option><option>highest_agility</option><option>robust_agility</option></select></div>
+        <div><label title="Policy that selects a candidate route after the search algorithm generates candidates.">Route selection</label><select id="routeSelection"><option>lowest_cost</option><option>highest_robustness</option><option>highest_agility</option><option>robust_agility</option><option>cer_weighted</option><option>cer_agility_yen</option></select></div>
       </div>
       <div class="row three">
         <div><label title="Number of candidate routes for Yen/advanced policies.">k routes</label><input id="kShortestPaths" type="number" min="1" step="1" value="6"></div>
@@ -1002,6 +1128,20 @@ WORKBENCH_HTML = """<!doctype html>
         <div><label title="Robustness weight for robust_agility selection.">robust weight</label><input id="robustnessWeight" type="number" min="0" step="0.05" value="0.35"></div>
         <div><label title="Agility weight for robust_agility selection.">agility weight</label><input id="agilityWeight" type="number" min="0" step="0.05" value="0.35"></div>
       </div>
+      <div class="row">
+        <div><label title="Centrality family used by agility policies.">centrality type</label><select id="centralityType"><option>legacy</option><option>rerouting</option></select></div>
+        <label><input id="reroutingUseStructuralPrecompute" type="checkbox" style="width:auto" checked> structural CER precompute</label>
+      </div>
+      <div class="row three">
+        <div><label title="Failure profiles separated by semicolon, e.g. 1;1,1;2.">CER profiles</label><input id="reroutingFailureProfiles" type="text" value="1;1,1"></div>
+        <div><label title="CER tolerance: Cmax = (1 + tau) * C0.">CER tolerance</label><input id="reroutingCostTolerance" type="number" min="0" step="0.05" value="0.35"></div>
+        <div><label title="Physical unit removed during CER failures.">failure unit</label><select id="reroutingFailureUnit"><option>resource</option><option>arc</option><option>undirected_pair</option><option>cell</option></select></div>
+      </div>
+      <div class="row three">
+        <div><label title="Distinctness policy for alternative routes.">distinctness</label><select id="reroutingDistinctnessPolicy"><option>exact</option><option>overlap</option></select></div>
+        <div><label title="Maximum CER failure combinations per computation.">CER max cases</label><input id="reroutingMaxCombinations" type="number" min="1" step="1" value="500"></div>
+        <div><label title="Maximum CER computation time in milliseconds.">CER max ms</label><input id="reroutingMaxRuntimeMs" type="number" min="1" step="50" value="1000"></div>
+      </div>
     </details>
     <details>
       <summary>Routing notes</summary>
@@ -1011,7 +1151,28 @@ C(e) = alpha*time(e) + beta*safety_loss(e)
 Dijkstra/A*/Floyd-Warshall: one best path under the current scalar cost
 Yen: k candidate paths, then a policy chooses one
 Robustness: path keeps alternatives if one connection fails
-Agility: path crosses spaces with more evacuation alternatives</pre>
+Agility: path crosses spaces with more evacuation alternatives
+CER: rerouting centrality counts acceptable distinct alternatives after resource failures</pre>
+    </details>
+    <details>
+      <summary>CER visual debug</summary>
+      <div class="muted">Exports an auditable CER trace on the transfer-to-transfer backbone. Use transfer nodes as origin; the target is normally an exit transfer.</div>
+      <div class="row">
+        <div><label title="Transfer node where the CER explanation starts.">CER origin transfer</label><select id="cerOrigin"></select></div>
+        <div><label title="Exit or target transfer evaluated by CER.">CER target exit</label><select id="cerTarget"></select></div>
+      </div>
+      <div class="row">
+        <div><label>CER profile</label><select id="cerProfile"></select></div>
+        <label><input id="cerGif" type="checkbox" style="width:auto" checked> GIF</label>
+        <label><input id="cerDynamic" type="checkbox" style="width:auto"> dynamic snapshot</label>
+      </div>
+      <div class="row">
+        <button id="pickCerOrigin" type="button" title="Click the canvas to choose the nearest transfer node as CER origin.">Pick origin</button>
+        <button id="pickCerTarget" type="button" title="Click the canvas near an exit/transfer to choose the CER target.">Pick target</button>
+      </div>
+      <div id="cerPickStatus" class="compact-note">Open this panel to show transfer nodes on the canvas.</div>
+      <button id="saveCerDebug" type="button">Save CER debug</button>
+      <div id="cerResults" class="status-box">CER exports will appear here.</div>
     </details>
     <div id="routingResults" class="status-box">Choose a preset to see what it does, or compare checked presets.</div>
     <button id="saveRoutingComparison" type="button">Save comparison viewer</button>
@@ -1065,6 +1226,7 @@ let beaconDraftMode = true;
 let draggedCurvePointIndex = null;
 let selectedCurvePointIndex = null;
 let routingPresets = {};
+let cerPickMode = null;
 $("scenarioPath").value = defaultScenario;
 $("indoorPath").value = defaultIndoor;
 const profileColors = { MP_WALKING: "#006dff", MP_WALKING_VERTICAL: "#006dff", MP_WALKING_ROLLING: "#0891b2", MP_ROLLING_ACCESSIBLE: "#c026d3", MP_ELDERLY: "#16a34a", MP_CHILD: "#f59e0b" };
@@ -1211,6 +1373,42 @@ async function saveRoutingComparison() {
   $("routingResults").textContent = `${formatRoutingComparison(comparison)}\\n\\nSaved:\\n${comparison.html}\\n${comparison.metricsCsv}\\n${comparison.routesCsv}`;
 }
 
+async function saveCerDebug() {
+  const request = buildSimulationRequest();
+  request.cer = {
+    origin: $("cerOrigin").value,
+    target: $("cerTarget").value,
+    profile: $("cerProfile").value || $("autoProfile").value,
+    formats: $("cerGif").checked ? ["json", "png", "html", "gif"] : ["json", "png", "html"],
+    gif: $("cerGif").checked,
+    dynamic: $("cerDynamic").checked,
+    level: $("level").value || null,
+    fps: 2,
+    maxFrames: 120,
+  };
+  if (!request.cer.origin) {
+    $("cerResults").textContent = "Select a CER origin transfer first.";
+    return;
+  }
+  if (!request.cer.target) {
+    $("cerResults").textContent = "Select a CER target exit/transfer first.";
+    return;
+  }
+  $("cerResults").textContent = "Generating CER debug artifacts...";
+  const res = await fetch("/api/cer-export", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(request) });
+  const exported = await res.json();
+  if (exported.error) throw new Error(exported.error);
+  $("cerResults").textContent = JSON.stringify({
+    outputDir: exported.outputDir,
+    origin: exported.origin,
+    target: exported.target,
+    graphView: exported.graphView,
+    snapshot: exported.snapshot,
+    outputs: exported.outputs,
+    nodeSummary: exported.nodeSummary,
+  }, null, 2);
+}
+
 async function loadModel() {
   $("summary").textContent = "Loading model...";
   $("sessionInfo").textContent = `session ${workbenchSession} | loading`;
@@ -1230,6 +1428,11 @@ async function loadModel() {
   fillSelect($("level"), model.levels.map(level => ({id: level, label: levelLabel(level, null)})), c => c.label, c => c.id);
   fillSelect($("placementProfile"), model.profiles.map(profile => ({id: profile})), c => c.id, c => c.id);
   fillSelect($("autoProfile"), model.profiles.map(profile => ({id: profile})), c => c.id, c => c.id);
+  const cerOrigins = cerOriginOptions();
+  const cerTargets = cerTargetOptions();
+  fillSelect($("cerOrigin"), cerOrigins, cerNodeLabel, c => c.id, "No transfer nodes");
+  fillSelect($("cerTarget"), cerTargets, cerNodeLabel, c => c.id, "No exit transfers");
+  fillSelect($("cerProfile"), model.profiles.map(profile => ({id: profile})), c => c.id, c => c.id);
   $("timeStep").value = model.config.timeStepS;
   $("maxSteps").value = model.config.maxSteps;
   $("stairCapacity").value = model.config.stairCapacity ?? 1;
@@ -1246,6 +1449,11 @@ async function loadModel() {
   $("distribution").value = model.config.firstGroupDistribution || "random_within_space";
   $("destinationMode").value = "scenario";
   $("destinationCell").value = model.config.destinationCells[0] || (model.exits[0] && model.exits[0].id) || "";
+  const defaultCerOrigin = nearestTransferForCell($("spawnCell").value, node => !node.isExit);
+  if (defaultCerOrigin) $("cerOrigin").value = defaultCerOrigin.id;
+  const configuredTarget = cerTargets.find(node => node.id === $("destinationCell").value);
+  if (configuredTarget) $("cerTarget").value = configuredTarget.id;
+  $("cerProfile").value = $("autoProfile").value || $("cerProfile").value;
   $("algorithm").value = model.config.algorithm;
   $("costPolicy").value = model.config.costPolicy;
   routingPresets = model.routingPresets || {};
@@ -1407,6 +1615,15 @@ function routingConfigFromControls() {
       robustnessWeight: numberFromInput("robustnessWeight", 0.35),
       agilityWeight: numberFromInput("agilityWeight", 0.35),
       agilityAggregation: $("agilityAggregation").value,
+      centralityType: $("centralityType").value,
+      reroutingEnabled: $("centralityType").value === "rerouting" || $("routeSelection").value.startsWith("cer_"),
+      reroutingFailureProfiles: parseReroutingProfiles($("reroutingFailureProfiles").value),
+      reroutingCostTolerance: numberFromInput("reroutingCostTolerance", 0.35),
+      reroutingFailureUnit: $("reroutingFailureUnit").value,
+      reroutingDistinctnessPolicy: $("reroutingDistinctnessPolicy").value,
+      reroutingMaxCombinations: Math.max(1, Math.round(numberFromInput("reroutingMaxCombinations", 500))),
+      reroutingMaxRuntimeMs: Math.max(1, Math.round(numberFromInput("reroutingMaxRuntimeMs", 1000))),
+      reroutingUseStructuralPrecompute: $("reroutingUseStructuralPrecompute").checked,
     }
   };
 }
@@ -1436,8 +1653,25 @@ function applyRoutingConfigToControls(config) {
   setNumberIfPresent("robustnessWeight", routeRecommendation.robustnessWeight);
   setNumberIfPresent("agilityWeight", routeRecommendation.agilityWeight);
   setIfPresent("agilityAggregation", routeRecommendation.agilityAggregation);
+  setIfPresent("centralityType", routeRecommendation.centralityType);
+  if (routeRecommendation.reroutingFailureProfiles) $("reroutingFailureProfiles").value = formatReroutingProfiles(routeRecommendation.reroutingFailureProfiles);
+  setNumberIfPresent("reroutingCostTolerance", routeRecommendation.reroutingCostTolerance);
+  setIfPresent("reroutingFailureUnit", routeRecommendation.reroutingFailureUnit);
+  setIfPresent("reroutingDistinctnessPolicy", routeRecommendation.reroutingDistinctnessPolicy);
+  setNumberIfPresent("reroutingMaxCombinations", routeRecommendation.reroutingMaxCombinations);
+  setNumberIfPresent("reroutingMaxRuntimeMs", routeRecommendation.reroutingMaxRuntimeMs);
+  $("reroutingUseStructuralPrecompute").checked = routeRecommendation.reroutingUseStructuralPrecompute !== false;
   updateRoutingParameterStatus();
   updateBeaconImpactPreview();
+  updateCerPickStatus();
+}
+function parseReroutingProfiles(text) {
+  return String(text || "1").split(";").map(part =>
+    part.split(",").map(value => Math.max(1, Math.round(Number(value.trim()) || 0))).filter(Boolean)
+  ).filter(profile => profile.length);
+}
+function formatReroutingProfiles(profiles) {
+  return (profiles || [[1]]).map(profile => (profile || []).join(",")).join(";");
 }
 function setIfPresent(id, value) {
   if (value == null || !$(`${id}`)) return;
@@ -1450,7 +1684,7 @@ function setNumberIfPresent(id, value) {
 function populateRoutingPresets() {
   const rows = Object.values(routingPresets).sort((a, b) => String(a.presetId).localeCompare(String(b.presetId)));
   fillSelect($("routingPreset"), rows, preset => `${preset.presetId} - ${preset.label || preset.presetId}`, preset => preset.presetId, "No presets");
-  const selectedDefaults = new Set(["dijkstra_time", "floyd_warshall_time", "astar_risk_multiplicative", "yen_highest_robustness", "robust_agility"]);
+  const selectedDefaults = new Set(["dijkstra_time", "floyd_warshall_time", "astar_risk_multiplicative", "yen_highest_robustness", "robust_agility", "cer_weighted"]);
   $("routingPresetChecks").innerHTML = rows.map(preset => {
     const id = String(preset.presetId);
     const checked = selectedDefaults.has(id) ? "checked" : "";
@@ -1555,8 +1789,10 @@ function routingParameterWarnings(config = null) {
   notes.push(usesCandidates ? "k/tolerance parameters active: candidate routes are evaluated" : "k/tolerance parameters ignored: single best route only");
   const usesRobustness = selection === "highest_robustness" || selection === "robust_agility" || algorithm === "robust_agility";
   notes.push(usesRobustness ? "robustness active: alternatives after edge failure are scored" : "robustness ignored for this selection");
-  const usesAgility = selection === "highest_agility" || selection === "robust_agility" || algorithm === "robust_agility";
+  const usesAgility = selection === "highest_agility" || selection === "robust_agility" || selection === "cer_agility_yen" || selection === "cer_weighted" || algorithm === "robust_agility";
+  const usesCer = selection.startsWith("cer_") || recommendation.centralityType === "rerouting";
   notes.push(usesAgility ? "CE/agility active: intermediate spaces with more alternatives are scored" : "CE/agility ignored for this selection");
+  notes.push(usesCer ? "CER active: rerouting centrality is used for agility" : "CER inactive: legacy CE/agility or no centrality");
   return notes;
 }
 function updateRoutingParameterStatus(config = null) {
@@ -1584,12 +1820,14 @@ function updateControlAvailability() {
   const selection = recommendation.routeSelection || "lowest_cost";
   const usesCandidates = algorithm === "yen_ksp" || algorithm === "robust_agility" || selection !== "lowest_cost";
   const usesRobustness = selection === "highest_robustness" || selection === "robust_agility" || algorithm === "robust_agility";
-  const usesAgility = selection === "highest_agility" || selection === "robust_agility" || algorithm === "robust_agility";
+  const usesAgility = selection === "highest_agility" || selection === "robust_agility" || selection === "cer_agility_yen" || selection === "cer_weighted" || algorithm === "robust_agility";
+  const usesCer = selection.startsWith("cer_") || recommendation.centralityType === "rerouting";
   const usesWeightedSelection = selection === "robust_agility" || algorithm === "robust_agility";
 
   ["kShortestPaths", "candidateCostTolerance"].forEach(id => setControlDisabled(id, !usesCandidates, "Solo se usa con Yen, robust_agility o seleccion multicriterio."));
   ["robustnessTolerance", "robustnessWeight"].forEach(id => setControlDisabled(id, !usesRobustness, "Solo se usa en estrategias con robustez."));
   ["centralityTolerance", "centralityMaxPaths", "centralityMaxOverlap", "agilityAggregation", "agilityWeight"].forEach(id => setControlDisabled(id, !usesAgility, "Solo se usa en estrategias con agilidad/CE."));
+  ["centralityType", "reroutingFailureProfiles", "reroutingCostTolerance", "reroutingFailureUnit", "reroutingDistinctnessPolicy", "reroutingMaxCombinations", "reroutingMaxRuntimeMs", "reroutingUseStructuralPrecompute"].forEach(id => setControlDisabled(id, !usesCer, "Solo se usa con politicas CER/rerouting."));
   setControlDisabled("costWeight", !usesWeightedSelection, "Solo se usa en robust_agility.");
 
   const hasPresetSelection = selectedRoutingPresetIds().length > 0;
@@ -2343,6 +2581,55 @@ function destinationCellsForRun() {
   if (configured.length) return configured;
   return model ? model.exits.map(exit => exit.id) : [$("destinationCell").value].filter(Boolean);
 }
+function cerOriginOptions() {
+  if (!model) return [];
+  const nodes = model.transferNodes || [];
+  return nodes.filter(node => !node.isExit);
+}
+function cerTargetOptions() {
+  if (!model) return [];
+  const nodes = model.transferNodes || [];
+  const exits = nodes.filter(node => node.isExit);
+  return exits.length ? exits : nodes;
+}
+function cerNodeLabel(node) {
+  const kind = node.transferKind || node.category || "transfer";
+  return `${node.level} ${kind} ${node.id} [${node.x}, ${node.y}]`;
+}
+function transferNodeById(id) {
+  return model && (model.transferNodes || []).find(node => node.id === id);
+}
+function nearestTransferForCell(cellId, predicate = null) {
+  const point = selectedCellPoint(cellId);
+  const cell = model && model.cells.find(c => c.id === cellId);
+  if (!point || !cell) return null;
+  return nearestTransfer(cell.level, point, predicate);
+}
+function nearestTransfer(level, point, predicate = null) {
+  if (!model) return null;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const node of model.transferNodes || []) {
+    if (level && node.level !== level) continue;
+    if (predicate && !predicate(node)) continue;
+    const distance = Math.hypot(Number(node.x) - point[0], Number(node.y) - point[1]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = node;
+    }
+  }
+  return best;
+}
+function updateCerPickStatus() {
+  if (!$("cerPickStatus")) return;
+  const origin = transferNodeById($("cerOrigin").value);
+  const target = transferNodeById($("cerTarget").value);
+  const action = cerPickMode ? `Click the canvas to set CER ${cerPickMode}.` : "Open this panel to show transfer nodes on the canvas.";
+  $("cerPickStatus").textContent =
+    `${action}\n` +
+    `origin: ${origin ? cerNodeLabel(origin) : "not selected"}\n` +
+    `target: ${target ? cerNodeLabel(target) : "not selected"}`;
+}
 function selectedCellPoint(cellId) {
   const cell = model && model.cells.find(c => c.id === cellId);
   return cell ? [cell.x, cell.y] : null;
@@ -2445,6 +2732,7 @@ function draw() {
   drawBeaconRiskOverlay(level, project);
   drawEdges(level, project);
   drawVirtualBoundaries(level, project);
+  drawCerTransfers(level, project);
   drawBeaconRiskEdges(level, project);
   drawBeacons(level, project);
   drawRouteDebug(level, project);
@@ -2471,6 +2759,7 @@ function drawModelPreview() {
   drawBeaconRiskOverlay(level, project);
   drawEdges(level, project);
   drawVirtualBoundaries(level, project);
+  drawCerTransfers(level, project);
   drawBeacons(level, project);
   if (activeAgentMode() === "automatic") drawAutomaticAgents(level, project);
   else drawManualAgents(level, project);
@@ -2526,6 +2815,41 @@ function drawVirtualBoundaries(level, project) {
   ctx.restore();
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
+}
+function drawCerTransfers(level, project) {
+  if (!model || !shouldShowCerTransfers()) return;
+  const originId = $("cerOrigin").value;
+  const targetId = $("cerTarget").value;
+  ctx.save();
+  for (const node of model.transferNodes || []) {
+    if (node.level !== level) continue;
+    const p = project([Number(node.x), Number(node.y)]);
+    const selectedOrigin = node.id === originId;
+    const selectedTarget = node.id === targetId;
+    const selected = selectedOrigin || selectedTarget;
+    const radius = (selected ? 6.5 : node.isExit ? 4.8 : 3.4) * devicePixelRatio;
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], radius, 0, Math.PI * 2);
+    ctx.fillStyle = selectedOrigin ? "#f97316" : selectedTarget ? "#16a34a" : node.isExit ? "#22c55e" : "#ffffff";
+    ctx.strokeStyle = selected ? "#111827" : "#334155";
+    ctx.lineWidth = (selected ? 1.8 : 1.0) * devicePixelRatio;
+    ctx.globalAlpha = selected ? 0.98 : 0.82;
+    ctx.fill();
+    ctx.stroke();
+    if (selected) {
+      ctx.globalAlpha = 1;
+      ctx.font = `${10 * devicePixelRatio}px Segoe UI, Arial`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = selectedOrigin ? "#9a3412" : "#166534";
+      ctx.fillText(selectedOrigin ? "CER origin" : "CER target", p[0] + 8 * devicePixelRatio, p[1]);
+    }
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+function shouldShowCerTransfers() {
+  return Boolean(cerPickMode || ($("cerDebugSection") && $("cerDebugSection").open));
 }
 function drawRouteCostChart() {
   if (!routeCostChart) return;
@@ -3008,7 +3332,10 @@ $("manualTab").onclick = () => setAgentMode("manual");
 $("spawnCell").onchange = () => {
   const point = selectedCellPoint($("spawnCell").value);
   if (point) { $("spawnX").value = point[0]; $("spawnY").value = point[1]; }
+  const transfer = nearestTransferForCell($("spawnCell").value, node => !node.isExit);
+  if (transfer && $("cerOrigin")) $("cerOrigin").value = transfer.id;
   drawModelPreview();
+  updateCerPickStatus();
   updateControlAvailability();
 };
 $("agentCount").oninput = () => { drawModelPreview(); updateControlAvailability(); };
@@ -3053,6 +3380,14 @@ $("maxSteps").oninput = () => { updateDurationHint(); drawBeaconCurve(); updateB
 $("useBeaconRisk").onchange = () => { updateRoutingParameterStatus(); updateBeaconImpactPreview(); draw(); };
 $("beaconBlockThreshold").oninput = () => { updateBeaconImpactPreview(); draw(); };
 $("destinationMode").onchange = updateControlAvailability;
+$("destinationCell").onchange = () => {
+  if ($("cerTarget")) {
+    const target = transferNodeById($("destinationCell").value) || nearestTransferForCell($("destinationCell").value, node => node.isExit);
+    if (target) $("cerTarget").value = target.id;
+  }
+  updateCerPickStatus();
+  draw();
+};
 $("recordGif").onchange = updateControlAvailability;
 $("recordHtml").onchange = updateControlAvailability;
 $("manualAgents").oninput = updateControlAvailability;
@@ -3061,6 +3396,12 @@ $("applyRoutingPreset").onclick = applySelectedRoutingPreset;
 $("runRoutingPreset").onclick = () => runSelectedRoutingPreset().catch(err => $("metrics").textContent = err.message);
 $("compareRoutingPresets").onclick = () => compareSelectedRoutingPresets().catch(err => $("routingResults").textContent = err.message);
 $("saveRoutingComparison").onclick = () => saveRoutingComparison().catch(err => $("routingResults").textContent = err.message);
+$("saveCerDebug").onclick = () => saveCerDebug().catch(err => $("cerResults").textContent = err.message);
+$("pickCerOrigin").onclick = () => setCerPickMode("origin");
+$("pickCerTarget").onclick = () => setCerPickMode("target");
+$("cerOrigin").onchange = () => { updateCerPickStatus(); draw(); };
+$("cerTarget").onchange = () => { updateCerPickStatus(); draw(); };
+$("cerDebugSection").ontoggle = () => { updateCerPickStatus(); draw(); };
 $("run").onclick = () => runSimulation().catch(err => $("metrics").textContent = err.message);
 $("recordSimulation").onclick = () => recordSimulation().catch(err => $("metrics").textContent = err.message);
 $("play").onclick = () => {
@@ -3086,7 +3427,9 @@ $("level").onchange = draw;
   "beaconBeta", "riskUnitCost", "routeSelection", "kShortestPaths",
   "candidateCostTolerance", "robustnessTolerance", "centralityTolerance",
   "centralityMaxPaths", "centralityMaxOverlap", "costWeight", "robustnessWeight",
-  "agilityWeight", "agilityAggregation"
+  "agilityWeight", "agilityAggregation", "centralityType", "reroutingFailureProfiles",
+  "reroutingCostTolerance", "reroutingFailureUnit", "reroutingDistinctnessPolicy",
+  "reroutingMaxCombinations", "reroutingMaxRuntimeMs", "reroutingUseStructuralPrecompute"
 ].forEach(id => {
   const el = $(id);
   if (el) el.addEventListener("input", () => updateRoutingParameterStatus());
@@ -3102,6 +3445,10 @@ canvas.onclick = event => {
   const point = [event.clientX - rect.left, event.clientY - rect.top].map(v => v * devicePixelRatio);
   const level = $("level").value || model.levels[0];
   const world = unprojectFor(level)(point);
+  if (cerPickMode) {
+    pickCerTransferFromClick(level, world);
+    return;
+  }
   if (activeAgentMode() === "automatic") {
     const cell = cellAt(level, world);
     if (!cell) {
@@ -3132,6 +3479,31 @@ canvas.onclick = event => {
   writeManualAgents(agents);
   $("metrics").textContent = `Added ${agents[agents.length - 1].agentId} in ${cell.id}. Press Run simulation.`;
 };
+function setCerPickMode(mode) {
+  cerPickMode = cerPickMode === mode ? null : mode;
+  if (mode) {
+    $("cerDebugSection").open = true;
+    $("beaconPlacementMode").textContent = "Off";
+    $("placementMode").textContent = "Off";
+  }
+  updateCerPickStatus();
+  draw();
+}
+function pickCerTransferFromClick(level, world) {
+  const predicate = cerPickMode === "target" ? (node => node.isExit) : (node => !node.isExit);
+  let node = nearestTransfer(level, world, predicate);
+  if (!node && cerPickMode === "target") node = nearestTransfer(level, world);
+  if (!node) {
+    $("cerPickStatus").textContent = `No transfer node found on ${level}.`;
+    return;
+  }
+  if (cerPickMode === "origin") $("cerOrigin").value = node.id;
+  else $("cerTarget").value = node.id;
+  $("cerResults").textContent = `Selected CER ${cerPickMode}: ${cerNodeLabel(node)}`;
+  cerPickMode = null;
+  updateCerPickStatus();
+  draw();
+}
 function readManualAgents() {
   try { return JSON.parse($("manualAgents").value || "[]"); } catch { return []; }
 }

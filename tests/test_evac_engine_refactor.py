@@ -21,6 +21,7 @@ from src.evac_engine.web_app import (
     discover_model_library,
     load_model_summary,
     run_configured_simulation,
+    save_configured_cer_analysis,
     save_configured_routing_comparison,
     save_configured_scenario,
 )
@@ -698,10 +699,12 @@ class EvacEngineRefactorTests(unittest.TestCase):
 
         self.assertEqual("multilevel_transfer_to_transfer", summary["graphView"])
         self.assertGreater(len(graph_edges), 0)
+        self.assertGreater(len(summary["transferNodes"]), 0)
         self.assertGreater(len(summary["virtualBoundaries"]), 0)
         self.assertGreater(len(virtual_edges), 0)
         self.assertGreater(len(stair_edges), 0)
         self.assertTrue(all(edge.get("levels") for edge in virtual_edges))
+        self.assertTrue(any(node["transferKind"] == "virtual boundary" for node in summary["transferNodes"]))
 
     def test_graph_edge_payload_infers_levels_for_virtual_to_virtual_edges(self):
         indoor, _ = load_project(None, EXAMPLES / "scenario_multilevel.json")
@@ -761,6 +764,12 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("spaceIsSpawnable", WORKBENCH_HTML)
         self.assertIn("spawnRegionSpaces", WORKBENCH_HTML)
         self.assertIn("Automatic spawn selected", WORKBENCH_HTML)
+        self.assertIn("CER visual debug", WORKBENCH_HTML)
+        self.assertIn("saveCerDebug", WORKBENCH_HTML)
+        self.assertIn("CER origin transfer", WORKBENCH_HTML)
+        self.assertIn("pickCerOrigin", WORKBENCH_HTML)
+        self.assertIn("drawCerTransfers", WORKBENCH_HTML)
+        self.assertIn("cer_weighted", WORKBENCH_HTML)
 
     def test_workbench_can_compare_routing_presets(self):
         comparison = compare_configured_routing(
@@ -840,6 +849,38 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertTrue((ROOT / comparison["html"]).exists())
         self.assertTrue((ROOT / comparison["metricsCsv"]).exists())
         self.assertEqual(["dijkstra_time", "astar_time"], comparison["presetIds"])
+
+    def test_workbench_can_save_cer_debug_artifacts(self):
+        exported = save_configured_cer_analysis(
+            {
+                "scenarioPath": str(EXAMPLES / "minimal_scenario_model.json"),
+                "indoorPath": str(EXAMPLES / "minimal_indoor_model.json"),
+                "config": {
+                    "algorithm": "dijkstra",
+                    "costPolicy": "minimum_travel_time",
+                    "useBeaconRisk": False,
+                    "routeRecommendation": {
+                        "routeSelection": "cer_weighted",
+                        "centralityType": "rerouting",
+                        "reroutingFailureProfiles": [[1], [1, 1]],
+                    },
+                },
+                "cer": {
+                    "origin": "CS_L00_ROOM_A",
+                    "target": "CS_L00_ROOM_B",
+                    "profile": "MP_WALKING_ROLLING",
+                    "outputDir": "outputs/test_workbench_cer_debug",
+                    "formats": ["json", "png", "html"],
+                },
+            },
+            str(EXAMPLES / "minimal_scenario_model.json"),
+        )
+
+        self.assertEqual("CS_L00_ROOM_A", exported["origin"])
+        self.assertEqual("CS_L00_ROOM_B", exported["target"])
+        self.assertTrue((ROOT / exported["outputs"]["json"]).exists())
+        self.assertTrue((ROOT / exported["outputs"]["png"]).exists())
+        self.assertTrue((ROOT / exported["outputs"]["html"]).exists())
 
     def test_workbench_library_lists_available_scenarios_and_models(self):
         library = discover_model_library(EXAMPLES)

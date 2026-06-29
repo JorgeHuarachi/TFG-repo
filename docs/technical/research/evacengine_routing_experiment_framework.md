@@ -144,6 +144,7 @@ C(e) = alpha * b(e) + U_r * (beta_h * r_h(e) + beta_b * r_b(e)) + congestion(e)
 | \(k\) / `kShortestPaths` | numero de rutas candidatas | entero |
 | \(R(\pi)\) | robustez de ruta | `[0,1]` |
 | \(CE(v)\) | centralidad de evacuacion de nodo | conteo normalizable |
+| \(CER(v,d,p)\) | centralidad de evacuacion por reencaminamiento para origen, salida y perfil de fallo | rutas distintas aceptadas |
 | \(\Delta(\pi)\) | agilidad de ruta | media o producto de centralidades |
 | `planningMs` | latencia de recomendacion | ms |
 | `snapshotCompileMs` | latencia de compilacion del grafo ponderado | ms |
@@ -169,7 +170,8 @@ Estos campos viven en `scenario.routing` o dentro de cada `experiments.routingPr
 | `useBeaconRisk` | activa o desactiva la influencia de balizas |
 | `useCongestion` | activa o desactiva la penalizacion por ocupacion observada |
 | `beaconBlockThreshold` | umbral a partir del cual una celda afectada por baliza se bloquea para routing |
-| `routeRecommendation.routeSelection` | politica de seleccion: `lowest_cost`, `highest_robustness`, `highest_agility` o `robust_agility` |
+| `routeRecommendation.routeSelection` | politica de seleccion: `lowest_cost`, `highest_robustness`, `highest_agility`, `robust_agility`, `cer_weighted` o `cer_agility_yen` |
+| `routeRecommendation.centralityType` | `legacy` usa la CE aproximada anterior; `rerouting` usa CER |
 | `routeRecommendation.kShortestPaths` | numero maximo de candidatas que genera Yen |
 | `routeRecommendation.candidateCostTolerance` | margen permitido frente al coste de la mejor candidata |
 | `routeRecommendation.robustnessTolerance` | margen usado al evaluar alternativas ante fallo de arista |
@@ -180,6 +182,11 @@ Estos campos viven en `scenario.routing` o dentro de cada `experiments.routingPr
 | `routeRecommendation.robustnessWeight` | peso de robustez en la politica combinada |
 | `routeRecommendation.agilityWeight` | peso de agilidad en la politica combinada |
 | `routeRecommendation.agilityAggregation` | agregacion de agilidad de nodos intermedios: `mean` o `geometric` |
+| `routeRecommendation.reroutingFailureProfiles` | perfiles CER como `[ [1], [1,1] ]` |
+| `routeRecommendation.reroutingCostTolerance` | tolerancia CER: `Cmax = (1 + tau) * C0` |
+| `routeRecommendation.reroutingFailureUnit` | unidad de fallo CER: `resource`, `arc`, `undirected_pair` o `cell` |
+| `routeRecommendation.reroutingDistinctnessPolicy` | `exact` compara `tuple(path)`; `overlap` queda preparado |
+| `routeRecommendation.reroutingUseStructuralPrecompute` | si `true`, calcula CER estructural una vez y la combina con pesos dinamicos |
 
 ## Cuando Se Recalcula La Ruta
 
@@ -211,15 +218,7 @@ En comparaciones de presets, la tabla del workbench muestra `plans` para compara
 
 ### Origen Real De La Ruta
 
-Actualmente el recomendador recibe como origen `agent.current_cell`. Es decir, la busqueda en el grafo empieza en la celda topologica donde esta el agente, no en su coordenada continua exacta.
-
-La coordenada exacta si se usa en la capa de movimiento: waypoints locales, entrada al transfer, centrado en puertas/rampas/escaleras, repulsion, vision y restricciones geometricas. Esto significa que:
-
-- el algoritmo decide la secuencia de celdas desde la celda actual;
-- la fisica decide como moverse desde la posicion XY actual hasta la siguiente celda;
-- la primera arista todavia no se pondera por "distancia real desde el punto del agente hasta el transfer concreto".
-
-La mejora pendiente para un routing mas fino es hacer el primer salto position-aware:
+El recomendador recibe `agent.current_cell` y tambien la coordenada continua `agent.position`. La busqueda sigue siendo topologica, pero el primer salto ya es position-aware: el motor ajusta el coste desde la posicion XY actual hacia los transfers alcanzables de la celda antes de evaluar el sufijo del grafo.
 
 ```text
 coste_total(vecino) =
@@ -227,7 +226,7 @@ coste_total(vecino) =
   + coste_grafo(vecino -> salida)
 ```
 
-Floyd-Warshall puede ayudar en esa arquitectura como tabla rapida de sufijos `vecino/transfer -> salida`, pero hace falta anadir una capa local que evalue los vecinos desde la posicion continua del agente.
+Esto evita que dos agentes dentro de la misma sala reciban exactamente el mismo primer coste cuando uno esta mucho mas cerca de una puerta o transfer que el otro.
 
 ## Algoritmos Y Politicas
 
@@ -273,6 +272,35 @@ agility_mean(pi) = mean(CE(v) para v intermedio en pi)
 
 La agregacion geometrica tambien esta disponible para castigar rutas que atraviesan un nodo intermedio sin alternativas.
 
+### CER: Centralidad De Evacuacion Por Reencaminamiento
+
+CER es una metrica nueva y no sustituye por nombre a `evacuation_centrality(...)`. Para cada origen `v`, salida `d` y perfil de fallo `p`, calcula una ruta minima base `P0(v,d)` con coste `C0`, define:
+
+```text
+Cmax = (1 + tau) * C0
+```
+
+y explora fallos de recursos de la ruta. Tras cada fallo se recalcula la ruta; una alternativa cuenta si existe, respeta el snapshot ponderado y cumple:
+
+```text
+C_alt <= Cmax
+```
+
+El modo inicial de diferencia es `exact`: dos rutas son distintas si su secuencia de nodos no es identica. La salida primaria conserva detalle por:
+
+```text
+origen -> salida -> perfil de fallo
+```
+
+El resumen por nodo es derivado y sirve para politicas de recomendacion. La unidad recomendada es `failureUnit = resource`, porque al bloquear una puerta, rampa, tramo o conector se bloquea el recurso fisico completo identificado por `resourceRef`.
+
+Hay dos formas de usar CER:
+
+- `cer_weighted`: transforma CER en una penalizacion positiva por baja agilidad y permite usar Dijkstra/A* minimizando.
+- `cer_agility_yen`: genera candidatas con Yen y selecciona la que atraviesa nodos con mayor CER dentro de la tolerancia.
+
+La primera version operativa usa CER estructural precomputada (`reroutingUseStructuralPrecompute=true`) y la combina con pesos dinamicos de seguridad/balizas en el routing. La CER dinamica sobre cada snapshot queda preparada como opcion mas costosa.
+
 ## Presets Integrados
 
 | Preset | Coste | Algoritmo | Politica |
@@ -285,6 +313,8 @@ La agregacion geometrica tambien esta disponible para castigar rutas que atravie
 | `yen_highest_robustness` | tiempo x riesgo | Yen | mayor robustez |
 | `yen_highest_agility` | tiempo x riesgo | Yen | mayor agilidad |
 | `robust_agility` | tiempo x riesgo | Yen/robust_agility | score combinado |
+| `cer_weighted` | tiempo x riesgo + CER | Dijkstra | penalizacion por baja CER |
+| `cer_agility_yen` | tiempo x riesgo + CER | Yen | mayor CER en candidatas |
 | `astar_risk_congestion` | tiempo x riesgo + ocupacion | A* | menor coste dinamico |
 
 Los escenarios pueden declarar presets propios en:
@@ -346,7 +376,7 @@ Comparacion rapida sin salidas completas por preset:
 El workbench expone una seccion `Routing Experiments` para probar estos mismos parametros sin salir de la UI. La seccion esta colocada despues de `Beacons` de forma deliberada: primero se define el escenario que se va a comparar (agentes, destino, balizas y curva temporal de seguridad) y despues se decide que politica de routing se quiere evaluar.
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m src.evac_engine workbench --scenario examples\indoor_data_model\scenario_single_floor.json --host 127.0.0.1 --port 8765
+.\.venv\Scripts\python.exe -B -m src.evac_engine workbench --model UnaPlanta_ConConexionesVerticales --host 127.0.0.1 --port 8765
 ```
 
 Flujo recomendado:
@@ -360,6 +390,19 @@ Flujo recomendado:
 
 La comparacion visual usa el estado actual del workbench: agentes manuales, grupo automatico, destino, balizas, curva temporal y eventos programados. Asi se puede comprobar el efecto de cambiar la politica de routing manteniendo constante el escenario.
 
+Para explicar la CER de forma auditable se usa `CER visual debug`. A diferencia de los agentes, el origen CER debe ser un nodo del backbone `multilevel_transfer_to_transfer`: puerta, salida, virtual boundary o endpoint de conector vertical. El workbench muestra esos transfers al abrir la seccion CER y permite elegirlos con `Pick origin` / `Pick target` haciendo clic cerca del nodo en el canvas. La salida genera:
+
+- `cer_debug.json`: pasos, costes y decisiones aceptada/rechazada;
+- `cer_summary.png`: resumen del valor CER;
+- `cer_explanation.html`: visor interactivo con grafo base, ruta P0, recurso fallado y alternativa;
+- `cer_explanation.gif`: animacion recomendada para revisar el proceso paso a paso.
+
+Ejemplo CLI recomendado sobre un modelo de `models/`. Si no se indica `--output-dir`, EvacEngine guarda automaticamente dentro de `models\<modelo>\outputs\cer\...`:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m src.evac_engine cer --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --formats json,png,html --gif --level LEVEL_00
+```
+
 En la UI se usa la palabra `safety` porque es mas intuitiva: `safety = 1` significa espacio usable y `safety = 0` significa inseguro. Internamente, para mantener compatibilidad con el schema y los resultados existentes, EvacEngine guarda la perdida de seguridad como `riskPenalty = 1 - safety`.
 
 Lectura recomendada de los experimentos, de menor a mayor complejidad:
@@ -372,7 +415,9 @@ Lectura recomendada de los experimentos, de menor a mayor complejidad:
 6. `yen_highest_robustness`: varias rutas candidatas, premiando alternativas si falla una arista.
 7. `yen_highest_agility`: varias rutas candidatas, premiando espacios con mayor agilidad/CE.
 8. `robust_agility`: seleccion combinada de coste, robustez y agilidad.
-9. `astar_risk_congestion`: incorpora congestion como penalizacion dinamica adicional.
+9. `cer_weighted`: aplica la nueva CER como penalizacion directa por baja capacidad de reencaminamiento.
+10. `cer_agility_yen`: usa Yen para candidatas y selecciona por CER.
+11. `astar_risk_congestion`: incorpora congestion como penalizacion dinamica adicional.
 
 Este orden permite reproducir el estilo de `animate_dynamic_route.py`: partir de una mascara de movilidad y coste temporal simple, despues activar seguridad, despues rutas candidatas y finalmente criterios de robustez/agilidad/congestion. La diferencia es que ahora se conserva la arquitectura nueva de scenario + indoor model + simulador fisico.
 
@@ -471,6 +516,8 @@ Implementado:
 - seleccion del origen del riesgo con `riskEndpointPolicy`;
 - medicion de `snapshotCompileMs` y `planningMs`;
 - presets integrados de comparacion;
+- CER estructural por reencaminamiento con `failureUnit=resource`, perfiles configurables y `distinctnessPolicy=exact`;
+- politicas `cer_weighted` y `cer_agility_yen`;
 - comando `compare-routing`;
 - CSV/JSON/PNG de comparacion;
 - validacion JSON Schema para presets declarados en escenario.

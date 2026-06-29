@@ -98,7 +98,7 @@ Current movement includes:
 The browser workbench is launched with:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m src.evac_engine workbench --scenario examples\indoor_data_model\scenario_single_floor.json --host 127.0.0.1 --port 8765
+.\.venv\Scripts\python.exe -B -m src.evac_engine workbench --model UnaPlanta_ConConexionesVerticales --host 127.0.0.1 --port 8765
 ```
 
 It supports:
@@ -109,6 +109,7 @@ It supports:
 - click placement of manual agents;
 - profile selection for clicked agents;
 - routing experiment presets, editable risk/cost parameters and same-scenario preset comparison;
+- CER visual debug over `multilevel_transfer_to_transfer`, with transfer-node selectors and click picking for origin/target;
 - JSON editing of manual agents, beacons and scheduled events;
 - optional geometry QA;
 - level switching and trajectory playback;

@@ -1,432 +1,596 @@
-# MLSM Smart Evacuation
+﻿# Indoor Data Model, SpatialEngine y EvacEngine
 
-![MLSM Smart Evacuation Demo](./src/resultados/evacuacion_demo.gif)
+Este repositorio contiene el desarrollo del TFG alrededor de un modelo indoor tipo IndoorGML/IndoorJSON, un motor de autoria espacial (`SpatialEngine`) y un motor de simulacion de evacuacion (`EvacEngine`). La idea principal es pasar de prototipos estaticos a un flujo completo y reproducible, con agentes, escenarios configurables, seguridad dinamica y politicas de recomendacion de rutas:
 
-### Multi-Layer Spatial Model for Realistic Crowd Evacuation Simulation
-
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![Mesa Framework](https://img.shields.io/badge/Mesa-Agent%20Based%20Modeling-green?logo=python&logoColor=white)](https://mesa.readthedocs.io/)
-[![Shapely](https://img.shields.io/badge/Shapely-Geometric%20Operations-orange?logo=python&logoColor=white)](https://shapely.readthedocs.io/)
-[![NetworkX](https://img.shields.io/badge/NetworkX-Graph%20Theory-red?logo=python&logoColor=white)](https://networkx.org/)
-
-**Trabajo Fin de Grado en Ingeniería** | Simulación y Análisis de Evacuaciones en Edificios
-
----
-
-# 🎯 DESCRIPCIÓN GENERAL
-
-## ¿Qué es MLSM Smart Evacuation?
-
-MLSM Smart Evacuation es un **sistema integrado de simulación de evacuaciones de multitudes** desarrollado como Trabajo Fin de Grado. Combina un **motor CAD paramétrico** con un **simulador multi-agente basado en física realista** para analizar cómo grupos de personas evacúan edificios de manera segura y eficiente.
-
-El proyecto aborda un desafío crítico en ingeniería civil y seguridad: **¿Cómo validar y optimizar rutas de evacuación antes de construir un edificio?** Nuestra solución proporciona herramientas para diseñar planos con restricciones de evacuación y simular miles de escenarios de riesgo en segundos.
-
----
-
-## Arquitectura Multi-Capa: El Modelo MLSM
-
-Este proyecto implementa el **Multi-Layer Spatial Model (MLSM)**, una arquitectura de tres capas de abstracción que separa de forma elegante la *geometría*, la *topología* y la *semántica* del espacio:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     MLSM (3 Capas)                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  🔷 CAPA GEOMÉTRICA                                             │
-│     └─ Física de colisión: muros, puertas, salidas             │
-│        Representación: Polígonos 2D (Shapely)                  │
-│        Propósito: Detección de obstáculos, raycast             │
-│                                                                   │
-│  🔹 CAPA TOPOLÓGICA                                             │
-│     └─ Navegación y conectividad: grafo de nodos y aristas    │
-│        Representación: Grafo dirigido (NetworkX)               │
-│        Propósito: Cálculo de rutas dinámicas (Dijkstra)       │
-│                                                                   │
-│  🔸 CAPA SEMÁNTICA                                              │
-│     └─ Atributos de locomoción: perfiles de movilidad         │
-│        Representación: Metadatos IndoorGML                      │
-│        Propósito: Adaptar comportamiento según tipo de agente  │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
+```text
+dibujar edificio -> generar Indoor Data Model -> crear escenarios -> simular agentes -> comparar politicas de ruta -> exportar evidencias
 ```
 
-Esta separación permite:
-- **Reutilizar** geometría en múltiples simulaciones
-- **Ajustar** rutas sin rediseñar la planta
-- **Representar** distintos perfiles demográficos (Walking, Rolling, Elderly)
+El README funciona como mapa ejecutivo del proyecto para que el lector pueda ver rapido que se ha conseguido y donde esta cada pieza. La memoria formal del TFG esta en `docs/tfg/memoria/`, y los detalles tecnicos extensos estan en `docs/technical/`.
 
----
+## Estado para revisión rápida
 
-## Características Principales
+Este README resume el estado actual del TFG mientras la memoria formal se está reorganizando. El documento Word todavía contiene partes antiguas de la evolución del proyecto, por lo que este archivo actúa temporalmente como mapa ejecutivo del sistema implementado y de las evidencias disponibles.
 
-### 🎨 Motor SpatialEngine: Diseño Paramétrico
-Un editor CAD interactivo que interpreta clics del usuario y genera automáticamente:
-- **Operaciones booleanas automáticas**: resta geométrica de puertas en muros sin fisuras
-- **Generación topológica inteligente**: infiere adyacencias y conectividades entre espacios
-- **Stack de deshacer**: Command Pattern para reversibilidad completa
-- **Exportación JSON**: serialización en formato MLSM compatible con simulador
+El objetivo actual del proyecto es construir un flujo reproducible para modelado indoor y simulación de evacuación:
 
-### ⚡ Motor EvacEngine: Simulación Realista
-Un simulador multi-agente con física continua y comportamientos cognitivos:
-- **Steering behaviors avanzados**: atracción a destino + repulsión de muros y multitud
-- **Pathfinding dinámico**: Dijkstra adaptativo con pesos que varían por congestión y fuego
-- **Visión artificial**: raycast para detectar atajos visuales en tiempo real
-- **3 perfiles demográficos**: Walking (70%), Rolling (15%), Elderly (15%)
-- **Métricas en tiempo real**: registro de evacuaciones, cruces de puertas, eventos de congestión
-
-### 📊 Resultados Exportables
-- **Animación GIF**: visualización fluida de la simulación (multitud, trayectorias, bottlenecks)
-- **Datos CSV**: métricas por agente (posición, velocidad, tiempo de evacuación, distancia recorrida)
-- **Compatible IndoorGML 2.0**: estándar OGC para modelos de edificios semánticos
-
----
-
-## ¿Por Qué Tres Capas?
-
-La separación MLSM no es arbitraria; responde a principios de ingeniería de software:
-
-| Capa | Ventaja | Ejemplo |
-|------|---------|---------|
-| **Geométrica** | Reutilizable en otros proyectos CAD | El mismo fichero `planta_v4.json` sirve para diseño estructural y evacuación |
-| **Topológica** | Cálculo separado de física | Cambiar algoritmo de rutas sin tocar geometría |
-| **Semántica** | Extensible a nuevos perfiles | Agregar "Visually Impaired" sin recodificar motores |
-
----
-
-## Casos de Uso
-
-1. **Validación de códigos de construcción**: Verificar que el tiempo de evacuación cumple normativas de seguridad
-2. **Optimización de salidas**: Identificar bottlenecks y redimensionar puertas antes de construir
-3. **Investigación académica**: Estudiar cómo diferentes factores (ancho, señalética, fuego) afectan evacuación
-4. **Entrenamiento**: Generar GIFs realistas para cursos de seguridad y emergencias
-
----
-
-## Stack Tecnológico
-
-| Componente | Tecnología | Rol |
-|------------|-----------|-----|
-| **Simulación** | Mesa Framework | Motor multi-agente (ABM) |
-| **Geometría** | Shapely | Operaciones booleanas, raycast, colisiones |
-| **Grafos** | NetworkX | Dijkstra, análisis topológico |
-| **Visualización CAD** | Matplotlib | Editor interactivo con eventos de ratón |
-| **Álgebra** | NumPy | Cálculos vectoriales, normalizaciones |
-| **Datos** | Pandas | Exportación a CSV, auditoría |
-| **Serialización** | JSON | Formato MLSM estándar |
-| **Lenguaje** | Python 3.8+ | Prototipado rápido, readibilidad |
-
----
-
-# 🛠️ REQUISITOS TÉCNICOS
-
-## Sistema Operativo
-- **Windows 10/11** (recomendado para desarrollo)
-- **Linux** (Ubuntu 18.04+, Fedora 30+)
-- **macOS** (10.14+)
-
-## Versión de Python
-- **Python 3.8 o superior** (recomendado Python 3.10+)
-
-## Dependencias Principales
-
-| Librería | Versión | Propósito en la Simulación |
-|----------|---------|----------------------------|
-| **Mesa** | 2.4.0 | Framework de modelado multi-agente para ejecutar simulaciones de evacuación con agentes autónomos |
-| **Shapely** | 2.1.2 | Operaciones geométricas (unión, intersección, buffer) para modelar muros, puertas y detección de colisiones |
-| **NetworkX** | 3.3 | Construcción y análisis de grafos para rutas de evacuación (algoritmo Dijkstra dinámico) |
-| **Matplotlib** | 3.10.8 | Visualización interactiva del editor CAD y generación de animaciones GIF de simulaciones |
-| **NumPy** | 2.4.4 | Cálculos numéricos vectoriales para física de agentes (fuerzas, velocidades, posiciones) |
-| **Pandas** | 2.2.2 | Manipulación y exportación de datos CSV con métricas de evacuación por agente |
-
-## Requisitos de Hardware
-- **RAM**: Mínimo 4GB, recomendado 8GB+
-- **CPU**: Procesador de 2 núcleos o superior
-- **Espacio en disco**: 500MB para instalación + espacio para resultados de simulaciones
-
----
-
-# 📦 INSTALACIÓN PASO A PASO
-
-## Paso 1: Clonar el Repositorio
-
-```bash
-git clone https://github.com/tu-usuario/MLSM-Smart-Evacuation.git
-cd MLSM-Smart-Evacuation
+```text
+SpatialEngine
+→ indoor_model.json
+→ scenario_model.json
+→ EvacEngine
+→ simulación multiagente
+→ políticas de recomendación de rutas
+→ métricas, GIF/HTML y evidencias visuales
 ```
 
-## Paso 2: Crear Entorno Virtual
+Estado resumido:
 
-### Opción A: Windows (PowerShell/Command Prompt)
+| Bloque                                                 | Estado                                              |
+| ------------------------------------------------------ | --------------------------------------------------- |
+| Autoría espacial con SpatialEngine                     | Implementado                                        |
+| Exportación de `indoor_model.json`                     | Implementado                                        |
+| Separación `indoor_model.json` / `scenario_model.json` | Implementada                                        |
+| Workbench local de EvacEngine                          | Implementado                                        |
+| Simulación multiagente con perfiles de movilidad       | Implementada y en calibración                       |
+| Visualización GIF/HTML                                 | Implementada                                        |
+| Comparación de políticas de routing                    | Implementada / en ampliación                        |
+| Balizas y seguridad dinámica                           | Implementadas como escenario/simulación             |
+| CER: Centralidad de Evacuación por Reencaminamiento    | En integración como aportación principal de routing |
+| Mapeo SQL/PostGIS                                      | Diseñado como proyección futura/complementaria      |
+| Memoria Word                                           | En reorganización                                   |
 
-```bash
-# Crear entorno virtual
-python -m venv venv
+La lectura recomendada es:
 
-# Activar entorno virtual
-venv\Scripts\activate
+1. Revisar primero las evidencias visuales.
+2. Leer el flujo general del sistema.
+3. Revisar las decisiones de diseño.
+4. Consultar los comandos reproducibles.
+5. Revisar el estado actual y trabajo en curso.
+
+
+## Evidencias Visuales
+
+La parte mas importante para presentar el avance esta en los GIFs/PNGs. Los outputs brutos se generan dentro de cada modelo, pero las evidencias seleccionadas para README, documentacion y memoria se guardan en `docs/tfg/media/`.
+
+### Autoria De Modelos En SpatialEngine
+
+Estos GIFs muestran el flujo real de dibujo del modelo: se crea la geometria, se definen espacios y despues el sistema exporta un `indoor_model.json` reutilizable.
+
+| Modelo dibujado | GIF |
+|---|---|
+| Una planta con conexiones verticales | <img src="docs/tfg/media/authoring/Dibujado_Space_UnaPlanta_ConConexionesVerticales.gif" width="360"> |
+| Una planta con solo puertas | <img src="docs/tfg/media/authoring/Dibujado_Space_UnaPlanta_ConSoloPuertas.gif" width="360"> |
+
+### Suite De Simulaciones EvacEngine
+
+Se ha generado una suite documental sobre los modelos disponibles en `models/`. Para cada modelo hay tres escenarios independientes:
+
+```text
+doc_walking_suite.json
+doc_rolling_suite.json
+doc_mixed_suite.json
+```
+****
+Cada simulacion se ha renderizado desde su escenario correspondiente y usa el grafo operativo `multilevel_transfer_to_transfer`.
+
+| Modelo | Walking only | Rolling only | Mixed mobility |
+|---|---|---|---|
+| `Mi_Planta_SoloPuertas` | <img src="docs/tfg/media/simulation/mi-planta-solopuertas_walking.gif" width="260"> | <img src="docs/tfg/media/simulation/mi-planta-solopuertas_rolling.gif" width="260"> | <img src="docs/tfg/media/simulation/mi-planta-solopuertas_mixed.gif" width="260"> |
+| `UnaPlanta_ConConexionesVerticales` | <img src="docs/tfg/media/simulation/unaplanta-conconexionesverticales_walking.gif" width="260"> | <img src="docs/tfg/media/simulation/unaplanta-conconexionesverticales_rolling.gif" width="260"> | <img src="docs/tfg/media/simulation/unaplanta-conconexionesverticales_mixed.gif" width="260"> |
+| `UnaPlanta_Intento_1` | <img src="docs/tfg/media/simulation/unaplanta-intento-1_walking.gif" width="260"> | <img src="docs/tfg/media/simulation/unaplanta-intento-1_rolling.gif" width="260"> | <img src="docs/tfg/media/simulation/unaplanta-intento-1_mixed.gif" width="260"> |
+
+Resultado de la tanda documental:
+
+| Modelo | Caso | Agentes evacuados | Tiempo maximo | QA |
+|---|---:|---:|---:|---|
+| `Mi_Planta_SoloPuertas` | walking | 10/10 | 18.5 s | sin saltos ni solapes |
+| `Mi_Planta_SoloPuertas` | rolling | 10/10 | 25.5 s | sin saltos ni solapes |
+| `Mi_Planta_SoloPuertas` | mixed | 12/12 | 26.0 s | sin saltos ni solapes |
+| `UnaPlanta_ConConexionesVerticales` | walking | 10/10 | 19.5 s | sin saltos ni solapes |
+| `UnaPlanta_ConConexionesVerticales` | rolling | 10/10 | 28.5 s | sin saltos ni solapes |
+| `UnaPlanta_ConConexionesVerticales` | mixed | 12/12 | 30.5 s | 1 muestra aislada de solape |
+| `UnaPlanta_Intento_1` | walking | 10/10 | 18.5 s | sin saltos ni solapes |
+| `UnaPlanta_Intento_1` | rolling | 10/10 | 25.0 s | sin saltos ni solapes |
+| `UnaPlanta_Intento_1` | mixed | 12/12 | 30.0 s | sin saltos ni solapes |
+
+El detalle reproducible de la suite esta en `docs/tfg/media/simulation/README.md`.
+
+### CER Y Recomendacion De Rutas
+
+La CER explica visualmente la Centralidad de Evacuacion por Reencaminamiento: ruta base, recurso fallado, ruta alternativa, tolerancia y contador acumulado.
+
+| Proceso | Evidencia |
+|---|---|
+| Centralidad de Evacuacion por Reencaminamiento | <img src="docs/tfg/media/routing/cer/cer_rerouting_explanation.gif" width="520"> |
+| Resumen estatico CER | <img src="docs/tfg/media/routing/cer/cer_rerouting_summary.png" width="520"> |
+
+## Resumen Ejecutivo
+
+El sistema actual permite:
+
+* Crear modelos indoor por niveles con muros, puertas, ventanas, columnas, rampas, escaleras, ascensores y virtual boundaries.
+* Exportar un `indoor_model.json` independiente de la simulacion.
+* Crear varios `scenario_model.json` para el mismo modelo, con agentes, beacons, destino, duracion, semilla, perfiles y politica de routing.
+* Ejecutar simulaciones multiagente con trayectorias, colisiones, repulsion social, restricciones en puertas y conectores verticales.
+* Visualizar y exportar simulaciones como GIF/HTML/JSON.
+* Comparar politicas de recomendacion de rutas, no solo algoritmos aislados.
+* Calcular y visualizar la CER: Centralidad de Evacuacion por Reencaminamiento.
+
+La contribucion principal no es simplemente aplicar Dijkstra, A*, Floyd-Warshall o Yen. Es construir un marco donde esos algoritmos son herramientas para evaluar politicas de evacuacion basadas en tiempo, seguridad, movilidad, beacons, restricciones fisicas y capacidad de reencaminamiento.
+
+## Valor Del Estado Actual
+
+Antes el proyecto estaba mas cerca de una simulacion estatica o de prototipos separados. Ahora el flujo esta integrado:
+
+* `SpatialEngine` crea el edificio y sus grafos.
+* `Indoor Data Model` conserva geometria, semantica y topologia de forma reutilizable.
+* `EvacEngine` crea escenarios sobre ese mismo modelo.
+* La simulacion tiene agentes con movimiento continuo y diferencias de movilidad.
+* El routing usa un grafo operativo de transferencias, no solo una conectividad generica de espacios.
+* Las beacons modifican la seguridad durante la simulacion.
+* CER permite estudiar capacidad de reencaminamiento ante fallos.
+* Los resultados pueden exportarse como GIF, HTML, PNG, JSON y metricas.
+
+Esto permite explicar el TFG como una arquitectura completa: autoria del edificio, modelo indoor, simulacion, recomendacion de rutas y analisis visual.
+
+## Flujo General
+
+```mermaid
+flowchart LR
+    A["SpatialEngine<br/>autoria geometrica"] --> B["indoor_model.json<br/>modelo espacial limpio"]
+    B --> C["scenario_model.json<br/>agentes, beacons, routing"]
+    C --> D["EvacEngine<br/>simulacion multiagente"]
+    D --> E["outputs por modelo<br/>metricas, GIF, HTML, JSON"]
+    B --> F["visores y validacion<br/>capas, grafos, conectores"]
+    D --> G["experimentos routing<br/>presets y comparativas"]
+    G --> H["CER<br/>centralidad por reencaminamiento"]
+    E --> I["memoria TFG<br/>figuras y evidencias"]
+    H --> I
 ```
 
-### Opción B: Linux/macOS (Terminal)
+## Organizacion Actual
 
-```bash
-# Crear entorno virtual
-python3 -m venv venv
+La estructura importante del repositorio es:
 
-# Activar entorno virtual
-source venv/bin/activate
+```text
+models/
+  <nombre_modelo>/
+    README.md
+    spatial/
+      indoor_model.json
+    evacuation/
+      scenarios/
+        baseline.json
+        <otros_escenarios>.json
+    outputs/
+      runs/
+      cer/
+      routing_comparison/
+
+src/
+  spatial_engine/
+  evac_engine/
+
+schemas/
+  indoor/
+    indoor_model.schema.json
+    scenario_model.schema.json
+
+docs/
+  technical/
+  tfg/
+    memoria/
+    figuras/
+    media/
+      authoring/
+      simulation/
+      routing/cer/
+
+research/
+  prototipos antiguos y experimentos exploratorios
 ```
 
-## Paso 3: Instalar Dependencias
+Los outputs generados por una simulacion concreta deben quedarse en `models/<modelo>/outputs/`. Los GIFs o videos seleccionados para explicar el trabajo en la memoria deben copiarse a `docs/tfg/media/`.
 
-```bash
-# Instalar todas las librerías requeridas
-pip install -r requirements.txt
+## Donde Guardar GIFs y Videos para la Memoria
+
+Para grabaciones hechas con ScreenToGif o videos de demostracion manual:
+
+```text
+docs/tfg/media/authoring/
+  GIFs de dibujar modelos indoor en SpatialEngine.
+
+docs/tfg/media/simulation/
+  GIFs seleccionados de simulaciones de EvacEngine.
+
+docs/tfg/media/routing/cer/
+  GIFs, PNG o HTML exportados para explicar CER y routing.
 ```
 
-## Paso 4: Verificación de Instalación
+Los nombres recomendados son descriptivos y estables:
 
-```bash
-# Verificar Python
-python --version
-
-# Verificar librerías clave
-python -c "import mesa, shapely, networkx, matplotlib, numpy, pandas; print('Todas las dependencias instaladas correctamente')"
+```text
+authoring/Dibujado_Space_UnaPlanta_ConConexionesVerticales.gif
+authoring/Dibujado_Space_UnaPlanta_ConSoloPuertas.gif
+simulation/mi-planta-solopuertas_walking.gif
+simulation/mi-planta-solopuertas_rolling.gif
+simulation/mi-planta-solopuertas_mixed.gif
+simulation/unaplanta-conconexionesverticales_walking.gif
+simulation/unaplanta-conconexionesverticales_rolling.gif
+simulation/unaplanta-conconexionesverticales_mixed.gif
+simulation/unaplanta-intento-1_walking.gif
+simulation/unaplanta-intento-1_rolling.gif
+simulation/unaplanta-intento-1_mixed.gif
+routing/cer/cer_rerouting_explanation.gif
 ```
 
-## Paso 5: Ejecutar una Simulación de Prueba (Opcional)
+No conviene mezclar estos recursos curados con los outputs brutos. Los brutos sirven para reproducir; los de `docs/tfg/media/` sirven para contar el proyecto.
 
-```bash
-# Ejecutar el motor de simulación con un escenario de ejemplo
-python src/MLSM_EvacEngine.py --scenario src/escenarios/Escenario_v4_FINAL.json
+## SpatialEngine
+
+`SpatialEngine` es el motor de autoria del modelo indoor. Su responsabilidad es crear y validar el edificio, no configurar evacuaciones. Exporta un `indoor_model.json` reutilizable.
+
+### Proceso De SpatialEngine
+
+```mermaid
+flowchart TD
+    A["Usuario dibuja primitivas<br/>muros, puertas, columnas, conectores"] --> B["Validacion geometrica<br/>intersecciones, cierres, niveles"]
+    B --> C["GeneralSpaces<br/>espacios navegables por planta"]
+    C --> D["Descomposicion espacial<br/>triangulacion u otras divisiones futuras"]
+    D --> E["CellSpaces y CellBoundaries<br/>geometria primal"]
+    E --> F["Grafo dual<br/>nodos y transiciones"]
+    F --> G["Graph views<br/>space, transfer, multilevel"]
+    G --> H["indoor_model.json"]
+    H --> I["Visor por capas<br/>auditoria del modelo"]
 ```
 
-Si la instalación es exitosa, deberías ver la simulación ejecutándose y generando un archivo GIF en `src/resultados/`.
+### Que Se Comprueba Visualmente
 
----
+El visor permite revisar:
 
-# 🏛️ ARQUITECTURA DETALLADA
+* geometria dibujada;
+* espacios navegables;
+* non-navigable spaces;
+* puertas, ventanas, columnas y virtual boundaries;
+* conectores verticales;
+* grafo de conectividad;
+* grafo `transfer_to_transfer` y `multilevel_transfer_to_transfer`.
 
-## Flujo de Datos General
+Esta separacion es importante porque el edificio debe poder validarse antes de simularlo.
 
-El sistema MLSM Smart Evacuation sigue una arquitectura modular de dos motores integrados que procesan datos de manera secuencial:
+## Indoor Data Model
 
-```
-┌─────────────────────────────┐       ┌─────────────────────────────┐
-│   MLSM_SpatialEngine.py     │       │   MLSM_EvacEngine.py        │
-│   (Motor de Diseño CAD)     │       │   (Motor de Simulación)     │
-│                             │       │                             │
-│ 1. Diseño Interactivo       │──────▶│ 1. Carga JSON MLSM         │
-│    - Muros, puertas, salidas│       │    - Geometría + Topología  │
-│    - Habitaciones poligonales│      │    - Semántica IndoorGML   │
-│                             │       │                             │
-│ 2. Procesamiento CSG        │       │ 2. Instancia Agentes        │
-│    - Operaciones booleanas  │       │    - Perfiles demográficos  │
-│    - Geometría recortada    │       │    - Posiciones iniciales   │
-│                             │       │                             │
-│ 3. Inferencia Topológica    │       │ 3. Simulación Física        │
-│    - Grafo de conexiones    │       │    - Steering behaviors     │
-│    - Atributos de navegación│       │    - Pathfinding dinámico   │
-│                             │       │                             │
-│ 4. Exportación JSON MLSM    │       │ 4. Registro de Métricas     │
-│    - Formato híbrido        │──────▶│    - Eventos por agente     │
-│    - Compatible simulación  │       │    - Congestión, tiempos    │
-└─────────────────────────────┘       └─────────────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────────┐
-                    │   OUTPUTS           │
-                    │ • GIF Animación     │
-                    │ • CSV Métricas      │
-                    └─────────────────────┘
+El `indoor_model.json` es el nucleo estable del sistema. Representa el edificio y sus relaciones espaciales sin agentes ni eventos de emergencia.
+
+### Relacion Con IndoorGML
+
+El modelo sigue la idea conceptual de IndoorGML:
+
+```text
+CellSpace    -> nodo del espacio interior
+CellBoundary -> transicion o frontera entre espacios
+Dual graph   -> grafo de navegacion derivado del espacio
 ```
 
-## Componentes Clave
+En EvacEngine, los identificadores runtime son los `CellSpace.id`. Por eso, una ruta no se calcula sobre objetos graficos sueltos, sino sobre nodos del modelo indoor.
 
-### Motor SpatialEngine: Diseño Paramétrico
-La clase `DiseñadorConectado` implementa un editor CAD interactivo que:
-- Interpreta clics del usuario para construir geometría 2D
-- Aplica operaciones booleanas (Shapely) para recortar puertas en muros
-- Infiera automáticamente grafos topológicos usando algoritmos de proximidad
-- Exporta archivos JSON con las 3 capas MLSM (geométrica, topológica, semántica)
+### Relacion Con IndoorJSON
 
-### Motor EvacEngine: Simulación Multi-Agente
-La clase `AgentePro` representa agentes individuales con subsistemas cognitivos:
-- **Cerebro**: Pathfinding con Dijkstra dinámico sobre NetworkX
-- **Ojos**: Raycast para detección visual de atajos
-- **Cuerpo**: Física continua con steering behaviors (atracción + repulsión)
-- Integrado en el entorno `ModeloAvanzado` (hereda de Mesa) para simulación ABM
+La estructura se acerca a IndoorJSON porque separa:
 
-El `GestorDatos` registra métricas en tiempo real para auditoría posterior.
+* `IndoorFeatures`;
+* niveles o capas;
+* espacio primal;
+* grafo dual;
+* propiedades semanticas.
 
----
+No se declara todavia como conformidad completa con IndoorJSON u OGC IndoorGML. La ventaja practica es que el modelo ya esta ordenado para poder mapearse despues a esos formatos o a una base espacial.
 
-# 📂 ESTRUCTURA DE DIRECTORIOS
+### Estructura Conceptual
 
-```
-TFG-repo/
-├── src/                          # Código fuente principal
-│   ├── MLSM_EvacEngine.py        # Motor de simulación multi-agente
-│   ├── MLSM_SpatialEngine.py     # Motor CAD paramétrico
-│   ├── docs/                     # Documentación técnica detallada
-│   │   ├── 01_Arquitectura_EvacEngine.md
-│   │   └── 01_Arquitecture_SpatialEngine.md
-│   ├── escenarios/               # Archivos JSON MLSM (diseños pre-hechos)
-│   │   ├── Escenario_v4_FINAL.json
-│   │   └── PLANTA_FINAL.json
-│   └── resultados/                # Outputs de simulaciones
-│       ├── evacuacion_demo.gif   # Animaciones GIF
-│       └── simulacion_prueba_1.csv  # Métricas CSV
-├── database/                     # Base de datos y diagramas
-│   ├── sql/                      # Scripts SQL para BD relacional
-│   │   ├── 00_create_database.sql
-│   │   └── 02_tables.sql
-│   └── diagramas_entidad_relacion/  # Diagramas ER
-├── docs/                         # Documentación del proyecto
-│   ├── Memoria.md                # Memoria completa del TFG
-│   ├── bibliografia.md           # Referencias académicas
-│   └── contenido/                # Contenido estructurado
-├── research/                     # Investigaciones complementarias
-│   ├── Centralidad_aplicada_a_la_evacuacion/
-│   └── sim_estatica/
-└── README.md                     # Este archivo
+```mermaid
+flowchart TD
+    A["Indoor Data Model"] --> B["Building"]
+    A --> C["Levels"]
+    C --> D["CellSpaces<br/>rooms, doors, exits, stairs, ramps"]
+    C --> E["CellBoundaries<br/>walls, openings, virtual boundaries"]
+    D --> F["Dual Nodes<br/>CellSpace.id"]
+    E --> G["Dual Edges<br/>transiciones"]
+    F --> H["Graph Views"]
+    G --> H
+    H --> I["space_connectivity"]
+    H --> J["transfer_to_transfer"]
+    H --> K["multilevel_transfer_to_transfer"]
 ```
 
-### Funciones de Carpetas Clave
+## Scenario Model
 
-- **`src/`**: Núcleo del sistema con los dos motores principales y sus dependencias (escenarios de prueba, documentación técnica)
-- **`database/`**: Esquemas SQL antiguos para almacenamiento de configuraciones (no crítico para ejecución básica)
-- **`docs/`**: Memoria del TFG y referencias bibliográficas (documentación académica)
-- **`research/`**: Experimentos complementarios como análisis de centralidad y simulaciones estáticas
+El `scenario_model.json` no redefine el edificio. Describe una situacion de evacuacion sobre un `indoor_model.json`.
 
----
+Incluye:
 
-# 📊 RESULTADOS & MÉTRICAS
+* agentes y grupos de poblacion;
+* perfiles de movilidad;
+* posicion inicial manual o automatica;
+* destino o salidas;
+* timestep, max steps y seed;
+* beacons y curvas de seguridad;
+* politica de routing;
+* parametros de simulacion.
 
-El resultado principal del proyecto incluye una animación GIF y un archivo CSV de métricas. El CSV real `src/resultados/simulacion_prueba_1.csv` registra eventos de simulación por agente y por step.
+Esto permite crear varios escenarios sobre el mismo edificio:
 
-### Ejemplo de salida real
-
-El CSV contiene estas columnas:
-
-- `Step`: número de iteración de la simulación
-- `AgenteID`: identificador único del agente
-- `Evento`: tipo de evento registrado (por ejemplo, `CAMBIO_RUTA`, `RECALCULO`, `FUEGO_CREADO`)
-- `Valor`: información adicional del evento, como la ruta seleccionada o el motivo del cambio
-- `Pos_X`: coordenada X del agente en ese momento
-- `Pos_Y`: coordenada Y del agente en ese momento
-
-### Qué representa cada campo
-
-- `Step` permite reconstruir la evolución temporal de la evacuación.
-- `AgenteID` habilita análisis por individuo y agrupar trayectorias.
-- `Evento` muestra decisiones clave del motor: recalculos de ruta, cambios de trayectoria y activación de amenazas.
-- `Valor` documenta la ruta elegida o el estado, por ejemplo:
-  - `Habitacion_2 -> Frontera_virtual_6 -> ... -> Salida_5`
-  - `Fuego detectado`
-- `Pos_X` / `Pos_Y` dan la posición física exacta del agente al registrar el evento.
-
-### Uso práctico
-
-Este formato permite:
-- analizar desviaciones de ruta
-- detectar congestiones en puertas y fronteras virtuales
-- verificar cambios de ruta tras detección de fuego
-- generar visualizaciones de trayectorias y mapas de densidad
-
----
-
-# ⚙️ LIMITACIONES & TRABAJO FUTURO
-
-## Limitaciones actuales
-
-- La simulación es **bidimensional (2D)** y no modela desniveles complejos, rampas ni variaciones de altura.
-- El modelo solo considera **física de colisión y steering behaviors**, sin un modelo completo de pánico social, estrés o comportamientos grupales avanzados.
-- La persistencia de datos es mínima: los resultados se exportan a archivos locales (`GIF`, `CSV`, `JSON`) y no se integran en una base de datos relacional.
-- Las capas semántica y de IndoorGML están encaminadas, pero la compatibilidad plena con el estándar OGC IndoorGML 2.0 aún está en fase de desarrollo.
-
-## Trabajo futuro
-
-- Integrar los scripts de `database/sql/` para gestionar la persistencia de escenarios, resultados y métricas en **PostgreSQL/PostGIS**.
-- Añadir un módulo de **persistencia relacional** que almacene:
-  - escenarios MLSM
-  - rutas calculadas
-  - métricas de evacuación
-  - eventos de incendio o congestión
-- Extender el modelo hacia **3D o semi-3D** para considerar desniveles y escaleras con más precisión.
-- Mejorar el comportamiento de agentes con modelos sociales de evacuación, pánico y decisión colectiva.
-- Vincular la salida de `MLSM_SpatialEngine.py` a una **pipeline de validación topológica** basada en estándares GIS (por ejemplo, usando PostGIS).
-
----
-
-# 📚 REFERENCIAS ACADÉMICAS
-
-## Documentación del proyecto
-
-- `docs/Memoria.md` — documento principal de la memoria del TFG
-- `docs/bibliografia.md` — bibliografía organizada sobre IndoorGML, bases de datos espaciales y evacuación
-- `docs/estructura_tfg.md` — propuesta de estructura del trabajo académico
-
-## Estándares y frameworks clave
-
-- **OGC IndoorGML 2.0** — estándar de referencia para modelado semántico de espacios interiores
-- **Mesa** — framework de modelado multi-agente en Python
-- **Shapely** — operaciones geométricas y CSG en 2D
-- **NetworkX** — análisis de grafos y cálculo de rutas dinámicas
-
-## Referencias recomendadas
-
-- OGC® IndoorGML 1.1 / IndoorGML 2.0
-- Documentación de Mesa Framework
-- Documentación de PostGIS para persistencia espacial
-- Recursos académicos sobre evacuación y modelado indoor listados en `docs/bibliografia.md`
-
-
----
-
-# ⚡ QUICK START (5 Minutos)
-
-## 1. Diseñar un Escenario Nuevo
-
-Ejecuta el motor CAD para crear un plano de edificio desde cero:
-
-```bash
-python src/MLSM_SpatialEngine.py
+```text
+mismo indoor_model.json
+  -> baseline.json
+  -> beacon_blocked_corridor.json
+  -> dense_population.json
+  -> rolling_users_only.json
 ```
 
-- Se abre una ventana interactiva de Matplotlib
-- Haz clic para dibujar muros (tecla 'm'), puertas (tecla 'p'), habitaciones (tecla 'h')
-- Presiona 'e' para exportar el diseño como JSON MLSM
-- Cierra la ventana para finalizar
+## EvacEngine
 
-## 2. Ejecutar una Simulación Pre-Hecha
+`EvacEngine` carga un modelo indoor y un escenario, construye la topologia de evacuacion y simula agentes en continuo.
 
-Usa un escenario existente para ver una evacuación completa:
+### Loop De Simulacion
 
-```bash
-python src/MLSM_EvacEngine.py --scenario src/escenarios/Escenario_v4_FINAL.json
+```mermaid
+flowchart TD
+    A["Cargar indoor_model + scenario"] --> B["EvacTopology"]
+    B --> C["Grafo operativo<br/>multilevel_transfer_to_transfer"]
+    C --> D["WeightSnapshotCompiler<br/>tiempo, movilidad, seguridad"]
+    D --> E["Inicializar agentes"]
+    E --> F["Step de simulacion"]
+    F --> G["Actualizar beacons/hazards"]
+    G --> H["Recalcular rutas segun politica"]
+    H --> I["Movimiento fisico<br/>inercia, repulsion, colisiones"]
+    I --> J["Puertas, rampas, escaleras<br/>capacidad y paso"]
+    J --> K["Registrar trayectorias y metricas"]
+    K --> L{"Fin?"}
+    L -- "no" --> F
+    L -- "si" --> M["Exportar JSON, GIF, HTML, metricas"]
 ```
 
-- Carga automáticamente el JSON MLSM
-- Ejecuta 1000 steps de simulación (aprox. 5-10 segundos)
-- Genera automáticamente:
-  - `src/resultados/evacuacion_demo.gif` (animación)
-  - `src/resultados/simulacion_prueba_1.csv` (métricas)
+### Comportamiento Fisico Actual
 
-## 3. Visualizar Resultados
+El simulador incorpora:
 
-Abre los archivos generados:
-- **GIF**: Visualiza la animación de la multitud evacuando
-- **CSV**: Analiza métricas por agente (tiempo de evacuación, trayectorias, congestiones)
+* perfiles de movilidad, como walking, rolling y elder;
+* velocidad y aceleracion por perfil;
+* repulsion entre agentes;
+* evitacion de solapamiento fisico;
+* separacion respecto a muros y obstaculos;
+* paso controlado por puertas, rampas, escaleras y ascensores;
+* trayectorias dibujadas;
+* vision y seguimiento de objetivos inmediatos;
+* replanificacion periodica.
 
-¡Listo! Has completado un ciclo completo: diseño → simulación → análisis.
+Este modelo aun no pretende ser una validacion normativa final, pero ya permite observar efectos que una simulacion estatica no podia mostrar: congestiones, bloqueos, cambios de ruta, esperas, colisiones y diferencias por perfil de movilidad.
 
----
+## Routing Y Politicas De Recomendacion
 
-## Solución de Problemas Rápida
+La base del coste de las aristas es el tiempo, no la distancia geometrica pura. Esto es clave: una escalera o rampa puede parecer corta en 2D, pero tardarse mas por movilidad, pendiente, capacidad o tipo de usuario.
 
-- **Error de importación**: Asegúrate de tener activado el entorno virtual (`venv\Scripts\activate` en Windows)
-- **Ventana no se abre**: Verifica que tengas Matplotlib instalado y un backend gráfico disponible
-- **Simulación lenta**: Reduce el número de agentes en el JSON o limita los steps de simulación
+### Grafo Operativo
 
----
+El routing avanzado usa:
 
+```text
+multilevel_transfer_to_transfer
+```
+
+Este grafo representa el backbone de evacuacion: puertas, salidas, virtual boundaries y conectores verticales. El agente parte de su coordenada exacta y se conecta a los transfers relevantes de su espacio; desde ahi se calcula la ruta.
+
+### Coste
+
+La formulacion general preparada para el TFG es:
+
+```text
+Coste(e) = alpha * t(e) + beta * r(e) + otros terminos futuros
+```
+
+Donde:
+
+* `t(e)` es tiempo de cruce o desplazamiento.
+* `r(e)` es riesgo o penalizacion de seguridad normalizada.
+* `alpha` controla la importancia del tiempo.
+* `beta` controla la importancia de seguridad/riesgo.
+
+En la practica actual, el tiempo es la base estable. La seguridad de beacons y bloqueos dinamicos entra en el snapshot ponderado del grafo.
+
+### Algoritmos Frente A Politicas
+
+```mermaid
+flowchart LR
+    A["Politica de evacuacion"] --> B["Define pesos, filtros y preferencias"]
+    B --> C["Algoritmo de resolucion"]
+    C --> D["Dijkstra"]
+    C --> E["A*"]
+    C --> F["Floyd-Warshall"]
+    C --> G["Yen k-rutas"]
+    D --> H["Ruta recomendada"]
+    E --> H
+    F --> H
+    G --> H
+```
+
+Comparar algoritmos tiene sentido computacional. Comparar politicas tiene sentido de investigacion de evacuacion: tiempo minimo, seguridad, robustez, agilidad, tolerancia al fallo y reencaminamiento.
+
+## Beacons Y Seguridad Dinamica
+
+Las beacons permiten simular lectura temporal de seguridad en una zona. En la UI se pueden colocar sobre el modelo, definir una curva temporal y observar como el valor afecta al snapshot de pesos.
+
+```mermaid
+flowchart TD
+    A["Beacon"] --> B["Curva temporal de safety"]
+    B --> C["Observaciones por tiempo"]
+    C --> D["Fusion por celda afectada"]
+    D --> E["Riesgo o bloqueo"]
+    E --> F["WeightSnapshotCompiler"]
+    F --> G["Grafo ponderado"]
+    G --> H["Rutas y simulacion"]
+```
+
+La decision de usar `safety` en la interfaz facilita la interpretacion: `1` significa seguro y `0` significa no seguro. Internamente puede transformarse a riesgo/penalizacion para que el algoritmo minimice coste.
+
+## CER: Centralidad De Evacuacion Por Reencaminamiento
+
+La CER mide la capacidad de un nodo para conservar alternativas de evacuacion cuando fallan recursos de una ruta. No sustituye al camino minimo; lo complementa.
+
+Para un origen `v` y una salida `d`:
+
+```text
+P0(v,d) = ruta minima inicial
+C0(v,d) = coste de P0
+Cmax(v,d) = (1 + tau) * C0
+```
+
+Una ruta alternativa cuenta si:
+
+```text
+coste(P_alt) <= Cmax
+```
+
+La unidad de fallo preferida es `resource`: si falla una puerta, rampa o conector, falla el recurso fisico completo, no solo un arco dirigido.
+
+### Calculo CER
+
+```mermaid
+flowchart TD
+    A["Snapshot ponderado<br/>multilevel_transfer_to_transfer"] --> B["Elegir origen y salida"]
+    B --> C["Calcular ruta base P0"]
+    C --> D["Coste C0 y limite Cmax"]
+    D --> E["Aplicar perfil de fallo<br/>(1), (2), (1,1), ..."]
+    E --> F["Eliminar recurso(s)"]
+    F --> G["Recalcular ruta"]
+    G --> H{"Existe y cumple Cmax?"}
+    H -- "si" --> I["Contar ruta alternativa distinta"]
+    H -- "no" --> J["Marcar rechazada"]
+    I --> K["Actualizar contador CER"]
+    J --> K
+    K --> L["Exportar debug JSON, PNG, HTML, GIF"]
+```
+
+La visualizacion CER muestra el grafo base, la ruta inicial, el recurso fallado, la ruta alternativa, si fue aceptada o rechazada y el contador acumulado. Sirve para auditar el razonamiento, no solo para generar una animacion bonita.
+
+## Preparacion Para SQL Y Bases De Datos
+
+El modelo esta preparado para un mapeo relacional o espacial porque usa entidades separadas e identificadores estables.
+
+```mermaid
+flowchart LR
+    A["indoor_model.json"] --> B["building"]
+    A --> C["level"]
+    A --> D["cell_space"]
+    A --> E["cell_boundary"]
+    A --> F["graph_node"]
+    A --> G["graph_edge"]
+    A --> H["connection_resource"]
+    I["scenario_model.json"] --> J["scenario"]
+    I --> K["agent_group"]
+    I --> L["beacon"]
+    I --> M["routing_config"]
+    N["simulation outputs"] --> O["trajectory_sample"]
+    N --> P["event_log"]
+    N --> Q["route_plan"]
+    N --> R["metrics"]
+```
+
+Una evolucion natural seria almacenar geometria como PostGIS, graph views como vistas materializadas y escenarios como overlays sobre el modelo indoor.
+
+## Comandos Utiles
+
+Interfaz rapida:
+
+```powershell
+python tools\quick_start.py
+```
+
+Abrir EvacEngine con un modelo:
+
+```powershell
+python -m src.evac_engine workbench --model UnaPlanta_ConConexionesVerticales --port 8765
+```
+
+Ejecutar simulacion y guardar GIF/HTML:
+
+```powershell
+python -m src.evac_engine run --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --output-dir models\UnaPlanta_ConConexionesVerticales\outputs\runs\baseline --gif models\UnaPlanta_ConConexionesVerticales\outputs\runs\baseline\simulation.gif --html models\UnaPlanta_ConConexionesVerticales\outputs\runs\baseline\simulation.html --level LEVEL_00
+```
+
+Comparar presets de routing:
+
+```powershell
+python -m src.evac_engine compare-routing --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --output-dir models\UnaPlanta_ConConexionesVerticales\outputs\routing_comparison
+```
+
+Exportar visualizacion CER:
+
+```powershell
+python -m src.evac_engine cer --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --formats json,png,html --gif --level LEVEL_00
+```
+
+Cuando no se indica `--output-dir`, la CER se guarda dentro del modelo:
+
+```text
+models\<modelo>\outputs\cer\<scenario>__<origin>__<target>\
+```
+
+## Interfaces Locales Y Puertos
+
+Las interfaces web del proyecto son locales. Cuando se ejecuta un workbench, Python levanta un servidor HTTP en `127.0.0.1:<puerto>`.
+
+Ejemplo:
+
+```text
+http://127.0.0.1:8765/
+```
+
+El puerto solo identifica donde escucha esa sesion local. Si el navegador muestra `ERR_CONNECTION_REFUSED`, significa que el servidor no esta arrancado o que se abrio una URL antigua de una sesion ya cerrada.
+
+## Decisiones De Diseño
+
+* `indoor_model.json` y `scenario_model.json` estan separados para poder reutilizar un edificio en muchos experimentos.
+* Los modelos de trabajo viven en `models/<modelo>/`, no dispersos por carpetas antiguas.
+* Los outputs de simulacion se guardan dentro del modelo que los produjo.
+* El grafo operativo de evacuacion es `multilevel_transfer_to_transfer`.
+* El coste base es tiempo, no distancia.
+* Los algoritmos se interpretan como herramientas de politicas de recomendacion.
+* CER se calcula sobre el grafo operativo o sobre snapshots ponderados, y se visualiza con pasos auditables.
+* La interfaz debe servir para configurar y verificar; la CLI debe servir para reproducir y generar tablas.
+
+## Estado Actual Y Trabajo En Curso
+
+Ya existe un flujo funcional de autoria, modelo, escenario, simulacion, visualizacion y CER. El trabajo actual se centra en:
+
+* terminar de calibrar fisica de agentes;
+* mejorar politicas de recomendacion de rutas;
+* documentar comparativas de routing;
+* trasladar resultados a la memoria;
+* consolidar graficos, GIFs y outputs explicativos.
+
+El objetivo final es que el lector pueda abrir el repositorio y entender rapidamente tres capas:
+
+1. Como se crea el modelo indoor.
+2. Como se configura y simula una evacuacion.
+3. Como se estudian politicas de recomendacion de rutas sobre ese modelo.
+
+
+
+| Feedback | Respuesta actual |
+|---|---|
+| Validación empírica | Se están consolidando suites de simulación, métricas, tiempos, QA visual y comparativas de routing. |
+| Función de coste | El README distingue coste base temporal, seguridad/riesgo y políticas de recomendación. |
+| Dijkstra, A*, Floyd-Warshall y Yen | Se reformulan como herramientas de cálculo, no como la contribución principal. |
+| Figuras y evidencias | Se han preparado GIFs, PNGs, HTML y diagramas Mermaid para trasladar después a la memoria. |
+| IndoorGML/PostGIS | Se conserva como base conceptual y posible proyección SQL/PostGIS, pero el runtime actual usa JSON. |
+| Redacción de la memoria | El Word está siendo reestructurado para reflejar el sistema actual. |
+
+## Documentacion Relacionada
+
+* `docs/technical/architecture/indoor_data_model_architecture.md`
+* `docs/technical/architecture/evacengine_implementation_notes.md`
+* `docs/technical/research/evacengine_routing_experiment_framework.md`
+* `docs/tfg/memoria/`
+* `docs/tfg/media/README.md`
