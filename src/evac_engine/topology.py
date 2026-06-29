@@ -31,26 +31,33 @@ class EvacTopology:
         indoor: IndoorModelBundle,
         graph: nx.MultiDiGraph,
         resources: dict[str, ConnectionResource],
+        graph_view_name: str,
         diagnostics: list[Diagnostic] | None = None,
     ) -> None:
         self.indoor = indoor
         self.graph = graph
         self.resources = resources
+        self.graph_view_name = graph_view_name
         self.diagnostics = diagnostics or []
 
     @classmethod
     def from_indoor_model(cls, indoor: IndoorModelBundle) -> "EvacTopology":
-        view = indoor.graph_views.get("multilevel_space_connectivity") or indoor.graph_views.get("space_connectivity") or {}
+        graph_view_name, view = _preferred_graph_view(indoor.graph_views)
         graph = nx.MultiDiGraph()
         resources: dict[str, ConnectionResource] = {}
         diagnostics: list[Diagnostic] = []
+        skipped_nodes: set[str] = set()
 
         for node in view.get("nodes", []):
             node_id = node.get("id")
             if not node_id:
                 continue
+            if node.get("traversable") is False:
+                skipped_nodes.add(node_id)
+                continue
             cell = indoor.cells_by_id.get(node_id)
             if cell and not cell.is_navigable:
+                skipped_nodes.add(node_id)
                 continue
             level = node.get("level") or (cell.level if cell else None)
             category = node.get("transferCategory") or (cell.category if cell else node.get("nodeType"))
@@ -74,6 +81,8 @@ class EvacTopology:
                 continue
             left, right = connects
             if left not in graph or right not in graph:
+                if left in skipped_nodes or right in skipped_nodes:
+                    continue
                 diagnostics.append(
                     Diagnostic("warning", "SKIPPED_DANGLING_EDGE", "Connectivity edge endpoint is not in canonical topology.", [str(edge.get("id")), left, right])
                 )
@@ -94,6 +103,9 @@ class EvacTopology:
                 metadata={
                     "viaBoundaryRef": edge.get("viaBoundaryRef") or edge.get("boundaryRef"),
                     "viaBaseEdgeRef": edge.get("viaBaseEdgeRef"),
+                    "viaSpaceRef": edge.get("viaSpaceRef"),
+                    "viaSpaceRefs": list(edge.get("viaSpaceRefs") or []),
+                    "viaRoomRef": edge.get("viaRoomRef"),
                     "transferSpaceRef": edge.get("transferSpaceRef"),
                     "connectorId": edge.get("connectorId") or (edge.get("attributes") or {}).get("connectorId"),
                     "relationshipType": edge.get("relationshipType"),
@@ -117,17 +129,28 @@ class EvacTopology:
                     locomotionTypes=locomotion,
                     connectorType=resource_type,
                     viaBoundaryRef=resource.metadata.get("viaBoundaryRef"),
+                    viaSpaceRef=resource.metadata.get("viaSpaceRef"),
+                    viaSpaceRefs=list(resource.metadata.get("viaSpaceRefs") or []),
+                    viaRoomRef=resource.metadata.get("viaRoomRef"),
                     transferSpaceRef=resource.metadata.get("transferSpaceRef"),
                     raw=edge,
                 )
         _infer_missing_node_levels(graph)
-        return cls(indoor=indoor, graph=graph, resources=resources, diagnostics=diagnostics)
+        return cls(indoor=indoor, graph=graph, resources=resources, graph_view_name=graph_view_name, diagnostics=diagnostics)
 
     def node_position(self, node_id: str) -> tuple[float, float] | None:
-        return self.graph.nodes.get(node_id, {}).get("position")
+        position = self.graph.nodes.get(node_id, {}).get("position")
+        if position:
+            return position
+        cell = self.indoor.cells_by_id.get(node_id)
+        return cell.representative_point if cell else None
 
     def node_level(self, node_id: str) -> str | None:
-        return self.graph.nodes.get(node_id, {}).get("level")
+        level = self.graph.nodes.get(node_id, {}).get("level")
+        if level:
+            return level
+        cell = self.indoor.cells_by_id.get(node_id)
+        return cell.level if cell else None
 
     def cell_geometry(self, cell_id: str) -> Any | None:
         cell = self.indoor.cells_by_id.get(cell_id)
@@ -144,16 +167,56 @@ class EvacTopology:
         ]
         return sorted(cell_id for cell_id in anchors if cell_id in self.graph)
 
+    def transfer_nodes_for_space(self, cell_id: str) -> list[str]:
+        """Return transfer graph nodes reachable inside a GeneralSpace cell."""
+        result: set[str] = set()
+        for node_id, data in self.graph.nodes(data=True):
+            raw = data.get("raw") or {}
+            if cell_id in set(raw.get("spaceRefs") or []):
+                result.add(node_id)
+        for source, target, data in self.graph.edges(data=True):
+            spaces = set(data.get("viaSpaceRefs") or [])
+            via_space = data.get("viaSpaceRef")
+            if via_space:
+                spaces.add(via_space)
+            if cell_id in spaces:
+                result.add(source)
+                result.add(target)
+        return sorted(result)
+
+    def route_corridor_cells_for_arc(self, arc_id: str) -> list[str]:
+        for source, target, key, data in self.graph.edges(keys=True, data=True):
+            if key != arc_id and data.get("arcId") != arc_id:
+                continue
+            cells: list[str] = []
+            for value in (source, target, data.get("transferSpaceRef"), data.get("viaSpaceRef")):
+                if value and value in self.indoor.cells_by_id and value not in cells:
+                    cells.append(value)
+            for value in data.get("viaSpaceRefs") or []:
+                if value in self.indoor.cells_by_id and value not in cells:
+                    cells.append(value)
+            return cells
+        return []
+
     def to_summary(self) -> dict[str, Any]:
         levels = sorted({data.get("level") for _, data in self.graph.nodes(data=True) if data.get("level")})
         return {
             "nodes": self.graph.number_of_nodes(),
             "arcs": self.graph.number_of_edges(),
             "resources": len(self.resources),
+            "graphView": self.graph_view_name,
             "levels": levels,
             "exitCandidates": self.exit_candidates(),
             "diagnostics": [item.to_dict() for item in self.diagnostics],
         }
+
+
+def _preferred_graph_view(graph_views: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    for name in ("multilevel_transfer_to_transfer", "transfer_to_transfer", "multilevel_space_connectivity", "space_connectivity"):
+        view = graph_views.get(name)
+        if view:
+            return name, view
+    return "transfer_to_transfer", {}
 
 
 def _point_for_node(indoor: IndoorModelBundle, node_id: str, node: dict[str, Any]) -> tuple[float, float] | None:
@@ -188,6 +251,8 @@ def _edge_length(indoor: IndoorModelBundle, graph: nx.MultiDiGraph, left: str, r
         right_z = (indoor.levels_by_id.get(right_level) or {}).get("floorZ")
         if left_z is not None and right_z is not None and float(left_z) != float(right_z):
             return max(abs(float(left_z) - float(right_z)), 0.01)
+    if edge.get("distanceM") is not None:
+        return max(float(edge.get("distanceM") or 0.0), 0.01)
     geom = edge.get("geometry")
     if geom:
         try:

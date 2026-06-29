@@ -13,7 +13,7 @@ The legacy `src/MLSM_EvacEngine.py` remains available as a manual demo launcher,
 
 - `domain.py`: dataclasses shared across loaders, topology, routing and simulation.
 - `loaders.py`: JSON loading, JSON Schema validation, cross-reference checks and Indoor Data Model indexing.
-- `topology.py`: canonical `networkx.MultiDiGraph` built from `derive_graph_views(...)[multilevel_space_connectivity]`.
+- `topology.py`: canonical `networkx.MultiDiGraph` built preferably from `derive_graph_views(...)[multilevel_transfer_to_transfer]`.
 - `routing.py`: route planning with Dijkstra/A*, mobility filters and immutable weight snapshot compilation.
 - `overlays.py`: beacon observations and scheduled hazard state.
 - `simulation.py`: synchronous tick model, population materialization, route replanning, movement physics and output writers.
@@ -29,16 +29,17 @@ The legacy `src/MLSM_EvacEngine.py` remains available as a manual demo launcher,
 
 Runtime nodes are canonical `CellSpace.id` values. Node IDs from the dual graph are accepted as input references only where the loader can resolve them through `Node.duality`.
 
-Vertical connectivity follows the fixed `graph_views` contract: `vertical_connectivity.edges[*].connects` and `multilevel_space_connectivity.edges[*].connects` are `CellSpace` endpoint IDs, not dual `Node` IDs.
+Vertical connectivity follows the fixed `graph_views` contract: `vertical_connectivity.edges[*].connects`, `multilevel_transfer_to_transfer.edges[*].connects` and `multilevel_space_connectivity.edges[*].connects` are `CellSpace` endpoint IDs, not dual `Node` IDs.
 
 ## Runtime Graph
 
-`EvacTopology` builds a directed `networkx.MultiDiGraph` from multilevel graph views. Each undirected Indoor Data Model connection becomes two runtime arcs that share a `ConnectionResource`.
+`EvacTopology` builds a directed `networkx.MultiDiGraph` from multilevel graph views. The active evacuation backbone is `multilevel_transfer_to_transfer`: rooms/general spaces are not persistent routing nodes unless they are needed as synthetic origin/destination endpoints for a specific route request. Each undirected Indoor Data Model connection becomes two runtime arcs that share a `ConnectionResource`.
 
 The topology preserves:
 
 - source graph edge refs;
 - boundary refs;
+- via-space refs for transfer-to-transfer corridors;
 - transfer-space refs;
 - connector IDs/types;
 - locomotion types;
@@ -66,7 +67,7 @@ The routing base weight is always traversal time in seconds. `WeightSnapshotComp
 
 Dynamic routing weights support the legacy additive model and experimental cost models for route recommendation studies. The full experiment contract, symbols, presets and commands are documented in `docs/technical/research/evacengine_routing_experiment_framework.md`.
 
-Route planning currently starts from `agent.current_cell`, the topological cell occupied by the agent. The continuous XY position is used by movement/steering after the next cell has been selected, but the first graph edge is not yet scored from the exact point of the agent to a specific transfer entrance. Run metrics expose `routePlans`, `routeRecoveries` and `noRouteEvents` so routing churn can be measured directly.
+Route planning uses the agent's exact continuous XY position for the first graph step. If `agent.current_cell` is a GeneralSpace that is not present in `multilevel_transfer_to_transfer`, the planner adds a temporary endpoint node for that route request and connects it to reachable transfers inside the same cell. The same mechanism supports GeneralSpace destinations in legacy/minimal scenarios. Run metrics expose `routePlans`, `routeRecoveries` and `noRouteEvents` so routing churn can be measured directly.
 
 ## Simulation
 
@@ -80,7 +81,7 @@ The simulation uses synchronous phases:
 6. commit movements;
 7. record events and trajectories.
 
-Agents keep a topological route and continuous XY position. Movement advances toward the representative point of the next `CellSpace` waypoint.
+Agents keep a topological route and continuous XY position. Movement advances toward transfer waypoints, using each route arc's `viaSpaceRefs` as the geometric corridor when the route jumps from one transfer to another through a GeneralSpace.
 
 Current movement includes:
 

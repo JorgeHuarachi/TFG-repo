@@ -58,24 +58,26 @@ class BeaconSimulator:
             radius = float(influence.get("radiusM", self.config.get("defaultRadiusM", 8.0)))
             inner = float(influence.get("innerRadiusM", 0.0))
             risk = float(((beacon.get("effects") or beacon.get("affects") or {}).get("riskPenalty", 1.0)))
-            for node_id, data in self.topology.graph.nodes(data=True):
-                if level and data.get("level") != level:
+            for cell_id, cell in self.topology.indoor.cells_by_id.items():
+                if not cell.is_navigable:
                     continue
-                node_pos = data.get("position")
-                if not node_pos:
+                if level and cell.level != level:
                     continue
-                distance = position.distance(Point(node_pos))
+                cell_pos = cell.representative_point
+                if not cell_pos:
+                    continue
+                distance = position.distance(Point(cell_pos))
                 signal = smoothstep(distance, inner, radius)
                 if signal <= 0:
                     continue
                 value = max(0.0, min(1.0, signal * risk))
-                by_cell.setdefault(node_id, []).append(value)
+                by_cell.setdefault(cell_id, []).append(value)
                 state.observations.append(
                     {
                         "step": step,
                         "timeS": round(time_s, 6),
                         "beaconId": beacon.get("beaconId"),
-                        "cellSpaceRef": node_id,
+                        "cellSpaceRef": cell_id,
                         "distanceM": round(distance, 6),
                         "risk": round(value, 6),
                     }
@@ -88,8 +90,9 @@ class BeaconSimulator:
                 fused = max(values)
             state.cell_risk[cell_id] = max(0.0, min(1.0, fused))
         for source, target, key, data in self.topology.graph.edges(keys=True, data=True):
-            left = state.cell_risk.get(source, 0.0)
-            risk = max(left, state.cell_risk.get(target, 0.0))
+            risk_cells = [source, target, data.get("transferSpaceRef"), data.get("viaSpaceRef")]
+            risk_cells.extend(data.get("viaSpaceRefs") or [])
+            risk = max((state.cell_risk.get(cell_id, 0.0) for cell_id in risk_cells if cell_id), default=0.0)
             if risk:
                 state.edge_risk[str(data.get("resourceRef") or key)] = risk
         return state

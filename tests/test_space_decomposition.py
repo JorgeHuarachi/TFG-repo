@@ -7,8 +7,8 @@ from src.indoor_authoring.space_decomposition import decompose_space
 
 
 class SpaceDecompositionTests(unittest.TestCase):
-    def assert_decomposition_valid(self, polygon, min_parts=1):
-        result = decompose_space(polygon)
+    def assert_decomposition_valid(self, polygon, min_parts=1, strategy="triangulation"):
+        result = decompose_space(polygon, strategy=strategy)
         self.assertGreaterEqual(len(result.parts), min_parts)
         union = unary_union(result.parts)
         self.assertLessEqual(polygon.symmetric_difference(union).area, 1e-6)
@@ -35,6 +35,25 @@ class SpaceDecompositionTests(unittest.TestCase):
             with self.subTest(shape=shape.wkt):
                 result = self.assert_decomposition_valid(shape, min_parts=2)
                 self.assertGreaterEqual(len(result.virtual_boundaries), 1)
+
+    def test_rectilinear_strategy_splits_orthogonal_l_shape(self):
+        poly = Polygon([(0, 0), (4, 0), (4, 1), (1, 1), (1, 4), (0, 4)])
+        result = self.assert_decomposition_valid(poly, min_parts=2, strategy="rectilinear")
+
+        self.assertEqual(result.report["strategy"], "rectilinear")
+        self.assertGreaterEqual(len(result.virtual_boundaries), 1)
+        for part in result.parts:
+            coords = list(part.exterior.coords)
+            for (x1, y1), (x2, y2) in zip(coords, coords[1:]):
+                self.assertTrue(abs(x1 - x2) <= 1e-9 or abs(y1 - y2) <= 1e-9)
+
+    def test_none_strategy_preserves_original_polygon(self):
+        poly = Polygon([(0, 0), (4, 0), (4, 1), (1, 1), (1, 4), (0, 4)])
+        result = self.assert_decomposition_valid(poly, min_parts=1, strategy="none")
+
+        self.assertEqual(len(result.parts), 1)
+        self.assertEqual(result.report["strategy"], "none")
+        self.assertFalse(result.virtual_boundaries)
 
 
 if __name__ == "__main__":

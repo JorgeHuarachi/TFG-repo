@@ -605,14 +605,21 @@ class AgentePro(mesa.Agent):
         else:
             self.velocidad_actual *= 0.1 # Colisión "blanda": pierde casi toda su energía si toca un polígono
 
-# --- 5. EJECUCIÓN (ESCENARIOS) ---
+# --- 5. EJECUCIÓN (DEMO LEGACY) ---
 
 def run_legacy_demo():
     
     BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
     
-    # Unimos esa ruta base con las carpetas de nuestro proyecto
-    ruta_escenario = os.path.join(BASE_DIR, "escenarios", "v3_TEST5_FINAL.json")
+    # Unimos esa ruta base con la carpeta canonica de modelos del proyecto.
+    ruta_escenario = os.path.join(
+        os.path.dirname(BASE_DIR),
+        "models",
+        "Legacy_Demo",
+        "evacuation",
+        "scenarios",
+        "v3_TEST5_FINAL.json",
+    )
     ruta_resultados = os.path.join(BASE_DIR, "resultados", "simulacion_prueba_1.csv")
     # Inicializar modelo 
     model = ModeloAvanzado(

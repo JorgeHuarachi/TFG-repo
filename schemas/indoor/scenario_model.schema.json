@@ -729,6 +729,14 @@
           "minimum": 0,
           "maximum": 1
         },
+        "transferCenterPull": {
+          "type": "number",
+          "minimum": 0
+        },
+        "linearTransferCenterPull": {
+          "type": "number",
+          "minimum": 0
+        },
         "stairSpeedFactor": {
           "type": "number",
           "minimum": 0,
@@ -743,6 +751,40 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "edgeAccelerationDelayS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "doorTraversalPenaltyS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "transferTraversalPenaltyS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "linearTransferTraversalPenaltyS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "virtualBoundaryTraversalPenaltyS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "elevatorTraversalPenaltyS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "linearTransferFlowMode": {
+          "enum": [
+            "single_file",
+            "platoon"
+          ]
+        },
+        "linearTransferQueueSpacingM": {
+          "type": "number",
+          "minimum": 0
         },
         "stairCapacity": {
           "type": "integer",

@@ -203,6 +203,7 @@ class AgentState:
     proximity_slowdown_scale: float = 1.0
     wait_reason: str | None = None
     waiting_for_cell: str | None = None
+    wait_queue_rank: int | None = None
 
     def to_dict(self) -> JsonDict:
         return {
@@ -221,6 +222,7 @@ class AgentState:
             "noRouteReason": self.no_route_reason,
             "waitReason": self.wait_reason,
             "waitingForCell": self.waiting_for_cell,
+            "waitQueueRank": self.wait_queue_rank,
         }
 
 

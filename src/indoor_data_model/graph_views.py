@@ -34,6 +34,7 @@ def derive_graph_views(model: dict[str, Any]) -> dict[str, Any]:
         id_prefix="D2D",
         group_by_logical_room=False,
     )
+    multilevel_transfer_to_transfer = _multilevel_space_connectivity(transfer_to_transfer, vertical_connectivity)
     return {
         "base_dual": _base_dual(index),
         "space_adjacency": space_adjacency,
@@ -47,6 +48,7 @@ def derive_graph_views(model: dict[str, Any]) -> dict[str, Any]:
         "transfer_to_transfer": transfer_to_transfer,
         "door_to_door": door_to_door,
         "vertical_connectivity": vertical_connectivity,
+        "multilevel_transfer_to_transfer": multilevel_transfer_to_transfer,
         "multilevel_space_connectivity": multilevel_space_connectivity,
     }
 
@@ -408,9 +410,21 @@ def _transfer_to_transfer(
 
     public_nodes = []
     used_nodes = {node_id for edge in edges for node_id in edge.get("connects", [])}
+    space_refs_by_transfer: dict[str, set[str]] = defaultdict(set)
+    component_refs_by_transfer: dict[str, set[str]] = defaultdict(set)
+    for component_id, transfer_ids in memberships.items():
+        room_spaces = components.get(component_id, {}).get("spaceRefs", [])
+        for transfer_id in transfer_ids:
+            component_refs_by_transfer[transfer_id].add(component_id)
+            for space_ref in room_spaces:
+                space_refs_by_transfer[transfer_id].add(space_ref)
+    for transfer_ids in memberships.values():
+        used_nodes.update(transfer_ids)
     for node_id in sorted(used_nodes):
         node = dict(transfer_nodes[node_id])
         node.pop("_geometry", None)
+        node["spaceRefs"] = sorted(space_refs_by_transfer.get(node_id, []))
+        node["componentRefs"] = sorted(component_refs_by_transfer.get(node_id, []))
         public_nodes.append(node)
     return {"nodes": public_nodes, "edges": edges}
 

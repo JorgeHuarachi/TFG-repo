@@ -20,7 +20,7 @@ El motor delega las operaciones complejas en librerías científicas probadas en
   * **Intersección Tolerante (`buffer` e `intersection`):** Infla las habitaciones milimétricamente para detectar adyacencias reales, calculando áreas de choque para descartar falsos positivos (roces de esquinas).
   * **Cálculo de Masas (`centroid`):** Encuentra el centro de gravedad exacto de polígonos irregulares para ubicar los nodos del grafo.
 * `numpy`: Acelerador algebraico. Se utiliza para el cálculo de álgebra lineal, específicamente para hallar hipotenusas (`np.hypot`) y normalizar vectores perpendiculares necesarios para extruir el grosor de los muros a partir de una línea directriz 1D.
-* `json` y `os`: Gestores de I/O (Input/Output). Estructuran la complejidad espacial en diccionarios anidados legibles por máquinas y manejan el sistema de archivos del sistema operativo para enrutar los "Bakeos" (horneados) a la carpeta `./escenarios/` de forma autónoma.
+* `json` y `os`: Gestores de I/O (Input/Output). Estructuran la complejidad espacial en diccionarios anidados legibles por máquinas y manejan el sistema de archivos del sistema operativo para enrutar los "Bakeos" (horneados) a la carpeta `./models/<nombre_modelo>/spatial/` de forma autónoma.
 
 > **💡 Sugerencia Visual para la Memoria del TFG:** > *Incluir un Diagrama de Venn o un gráfico de capas técnicas donde el usuario está arriba interactuando con Matplotlib, y Matplotlib se comunica por debajo con Numpy y Shapely.*
 
@@ -123,4 +123,4 @@ Esto exime al usuario de tener que definir relaciones verticales a mano, garanti
 La función `verificar_visual_y_exportar` detiene el hilo de ejecución principal de Python (`plt.show()`) antes de grabar en el disco. Renderiza la malla CSG final, superpone el NavMesh multicapa y proyecta los radios de colisión (`RADIO_AGENTE`) a escala real. Esta auditoría visual garantiza que el usuario pueda detectar anomalías (como un *raycast* o un recoveco inaccesible) antes de alimentar el motor de simulaciones.
 
 #### 4.4. Automatización del Sistema de Archivos
-Utilizando la librería `os`, el motor desacopla la ubicación de ejecución del script del destino de los datos (`os.makedirs("escenarios", exist_ok=True)`). Esto asegura que los *assets* generados pueblen automáticamente las carpetas correctas de la arquitectura del repositorio de GitHub, sin importar en qué terminal o sistema operativo se ejecute la herramienta.
+Utilizando la librería `os`, el motor desacopla la ubicación de ejecución del script del destino de los datos (`models/<nombre_modelo>/...`). Esto asegura que los *assets* generados pueblen automáticamente las carpetas correctas de la arquitectura del repositorio de GitHub, sin importar en qué terminal o sistema operativo se ejecute la herramienta.

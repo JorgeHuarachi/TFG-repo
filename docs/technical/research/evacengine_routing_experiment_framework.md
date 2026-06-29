@@ -44,10 +44,12 @@ Esta separacion evita mezclar un algoritmo de busqueda con una politica de recom
 Sea una arista dirigida \(e=(u,v)\). El coste base de EvacEngine es siempre tiempo de recorrido estimado, medido en segundos. Esto es importante porque una escalera, una rampa o un ascensor pueden tener una proyeccion 2D similar a un tramo llano, pero no tienen el mismo tiempo de cruce.
 
 ```text
-t(e) = lengthM(e) / (v_p * phi_c)
+t(e) = lengthM(e) / (v_p * phi_c) + delta_m(e)
 ```
 
 Donde `v_p` es la velocidad base del perfil de movilidad y `phi_c` es el factor de velocidad del conector: por defecto `1.0` en espacios horizontales, `0.55` en escaleras, `0.7` en rampas y `0.5` en ascensores. Si el escenario define `stairSpeedFactor`, `rampSpeedFactor` o `elevatorSpeedFactor`, esos valores se usan en la simulacion.
+
+El termino `delta_m(e)` es un overhead temporal de maniobra, tambien en segundos. Sirve para que el coste ideal del grafo no sea demasiado optimista frente a la fisica visual: aceleracion limitada, entrada perpendicular a puertas, virtual boundaries y cruce de escaleras/rampas. Actualmente se parametriza con `edgeAccelerationDelayS`, `doorTraversalPenaltyS`, `transferTraversalPenaltyS`, `linearTransferTraversalPenaltyS`, `virtualBoundaryTraversalPenaltyS` y `elevatorTraversalPenaltyS`.
 
 El riesgo se mantiene normalizado:
 
@@ -192,10 +194,10 @@ recalcular = route is None
 Con la configuracion por defecto:
 
 - `replanPolicy = on_blocked_or_interval`;
-- `replanIntervalSteps = 10`;
-- `noRouteRetryIntervalSteps = 10` si no se define otro valor.
+- `replanIntervalSteps = 2`;
+- `noRouteRetryIntervalSteps = 2` si no se define otro valor.
 
-Por tanto, cada agente activo planifica al inicio y vuelve a planificar cada 10 pasos, ademas de hacerlo inmediatamente si una celda restante de su ruta queda bloqueada por hazards o balizas. Los agentes en `no_route` reintentan segun `noRouteRetryIntervalSteps`.
+Con `timeStepS = 0.5`, esto equivale a recalcular aproximadamente cada 1 segundo simulado. Cada agente activo planifica al inicio y vuelve a planificar cada intervalo, ademas de hacerlo inmediatamente si una celda restante de su ruta queda bloqueada por hazards o balizas. Los agentes en `no_route` reintentan segun `noRouteRetryIntervalSteps`.
 
 Las metricas de salida incluyen:
 

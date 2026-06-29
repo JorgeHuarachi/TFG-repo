@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from shapely.geometry import GeometryCollection, LineString, MultiLineString, MultiPolygon, Polygon
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, MultiPolygon, Polygon, box
 from shapely.ops import triangulate, unary_union
 
 
@@ -20,17 +20,25 @@ class DecompositionResult:
     report: dict[str, object]
 
 
-def decompose_space(polygon: Polygon) -> DecompositionResult:
+DEFAULT_DECOMPOSITION_STRATEGY = "triangulation"
+DECOMPOSITION_STRATEGIES = {"triangulation", "rectilinear", "none"}
+
+
+def decompose_space(polygon: Polygon, strategy: str = DEFAULT_DECOMPOSITION_STRATEGY) -> DecompositionResult:
     poly = _clean_polygon(polygon)
     if poly is None:
         return DecompositionResult([], [], {"status": "invalid_input"})
 
-    if _is_simple_convex(poly):
-        return DecompositionResult([poly], [], {"status": "already_simple", "partCount": 1})
+    strategy = _normalize_strategy(strategy)
+    if strategy == "none":
+        return DecompositionResult([poly], [], {"status": "original_space", "partCount": 1, "strategy": strategy})
 
-    pieces = _triangulated_parts(poly)
+    if _is_simple_convex(poly):
+        return DecompositionResult([poly], [], {"status": "already_simple", "partCount": 1, "strategy": strategy})
+
+    pieces = _parts_for_strategy(poly, strategy)
     if not pieces:
-        return DecompositionResult([poly], [], {"status": "fallback_original", "partCount": 1})
+        return DecompositionResult([poly], [], {"status": "fallback_original", "partCount": 1, "strategy": strategy})
 
     merged = _merge_greedily(pieces)
     boundaries = _shared_boundaries(merged)
@@ -39,6 +47,7 @@ def decompose_space(polygon: Polygon) -> DecompositionResult:
     if union_area_error > AREA_TOLERANCE:
         # Preserve correctness over pretty decomposition.
         pieces = _triangulated_parts(poly)
+        strategy = "triangulation"
         merged = pieces or [poly]
         boundaries = _shared_boundaries(merged)
         union_area_error = _symmetric_difference_area(poly, unary_union(merged))
@@ -49,12 +58,35 @@ def decompose_space(polygon: Polygon) -> DecompositionResult:
         virtual_boundaries=boundaries,
         report={
             "status": "decomposed",
+            "strategy": strategy,
             "generationReason": reason,
             "partCount": len(merged),
             "virtualBoundaryCount": len(boundaries),
             "unionAreaError": round(float(union_area_error), 9),
         },
     )
+
+
+def _normalize_strategy(strategy: str) -> str:
+    normalized = str(strategy or DEFAULT_DECOMPOSITION_STRATEGY).strip().lower().replace("-", "_")
+    aliases = {
+        "triangles": "triangulation",
+        "triangular": "triangulation",
+        "rectangular": "rectilinear",
+        "rectangles": "rectilinear",
+        "orthogonal": "rectilinear",
+        "original": "none",
+        "off": "none",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in DECOMPOSITION_STRATEGIES else DEFAULT_DECOMPOSITION_STRATEGY
+
+
+def _parts_for_strategy(poly: Polygon, strategy: str) -> list[Polygon]:
+    if strategy == "rectilinear":
+        rects = _rectilinear_grid_parts(poly)
+        return rects or _triangulated_parts(poly)
+    return _triangulated_parts(poly)
 
 
 def _clean_polygon(geom) -> Polygon | None:
@@ -100,6 +132,42 @@ def _triangulated_parts(poly: Polygon) -> list[Polygon]:
                 continue
             pieces.append(part)
     return pieces
+
+
+def _rectilinear_grid_parts(poly: Polygon) -> list[Polygon]:
+    xs, ys = _rectilinear_cuts(poly)
+    if len(xs) < 2 or len(ys) < 2:
+        return []
+    parts: list[Polygon] = []
+    for left, right in zip(xs, xs[1:]):
+        if right - left <= MIN_BOUNDARY_LENGTH:
+            continue
+        for bottom, top in zip(ys, ys[1:]):
+            if top - bottom <= MIN_BOUNDARY_LENGTH:
+                continue
+            candidate = box(left, bottom, right, top)
+            probe = candidate.representative_point()
+            if not poly.buffer(AREA_TOLERANCE).covers(probe):
+                continue
+            try:
+                clipped = candidate.intersection(poly)
+            except Exception:
+                continue
+            for part in _iter_polygons(clipped):
+                if part.area > MIN_PART_AREA:
+                    parts.append(part)
+    return parts
+
+
+def _rectilinear_cuts(poly: Polygon) -> tuple[list[float], list[float]]:
+    xs: set[float] = set()
+    ys: set[float] = set()
+    rings = [poly.exterior, *poly.interiors]
+    for ring in rings:
+        for x, y in ring.coords:
+            xs.add(round(float(x), 6))
+            ys.add(round(float(y), 6))
+    return sorted(xs), sorted(ys)
 
 
 def _merge_greedily(parts: list[Polygon]) -> list[Polygon]:

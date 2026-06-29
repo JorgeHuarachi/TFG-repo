@@ -1,15 +1,16 @@
 {
-  "scenarioId": "SCENARIO_SINGLE_FLOOR_001",
-  "scenarioName": "single_floor_evacuation_demo",
+  "scenarioId": "SCENARIO_UNAPLANTA_CONCONEXIONESVERTICALES_BASELINE",
+  "scenarioName": "UnaPlanta_ConConexionesVerticales_baseline",
   "metadata": {
-    "name": "single_floor_evacuation_demo",
-    "description": "Single-floor scenario for the generated indoor data model example.",
-    "createdAt": "2026-06-22T00:00:00Z",
-    "generator": "codex_evacengine_refactor"
+    "name": "UnaPlanta_ConConexionesVerticales_baseline",
+    "description": "Baseline editable generado desde un indoor_model.json para abrir EvacEngine.",
+    "createdAt": "2026-06-26T08:49:20Z",
+    "modifiedAt": "2026-06-26T08:49:20Z",
+    "generator": "evac_engine.model_workspace.ensure_baseline_for_indoor"
   },
   "indoorModelRef": {
-    "path": "una_sola_planta_indoor_model.json",
-    "schemaRef": "../../schemas/indoor/indoor_model.schema.json"
+    "path": "../../spatial/indoor_model.json",
+    "schemaRef": "../../../../schemas/indoor/indoor_model.schema.json"
   },
   "catalogs": {},
   "population": {
@@ -69,27 +70,27 @@
     ],
     "agentGroups": [
       {
-        "groupId": "AG_SINGLE_L00",
+        "groupId": "AG_BASELINE_001",
         "count": 8,
         "mobilityProfileRef": "MP_WALKING",
-        "spawnRef": "SPAWN_SINGLE_L00_ROOM_001",
+        "spawnRef": "SPAWN_BASELINE_001",
         "distribution": "random_within_space"
       }
     ],
     "agentSpawns": [
       {
-        "spawnId": "SPAWN_SINGLE_L00_ROOM_001",
+        "spawnId": "SPAWN_BASELINE_001",
         "levelRef": "LEVEL_00",
-        "cellSpaceRef": "CS_L00_ROOM_001",
+        "cellSpaceRef": "CS_L00_ROOM_024",
         "position": {
           "type": "Point",
           "coordinates": [
-            1.0,
-            1.0
+            17.438,
+            3.563
           ]
         },
-        "capacity": 20,
-        "description": "Demo spawn in the first generated room."
+        "capacity": 50,
+        "description": "Spawn inicial editable creado automaticamente."
       }
     ],
     "agents": []
@@ -179,7 +180,7 @@
   "scheduledEvents": [],
   "simulationConfig": {
     "timeStepS": 0.5,
-    "maxSteps": 160,
+    "maxSteps": 220,
     "randomSeed": 22,
     "enabledOverlays": [
       "population"
@@ -190,7 +191,7 @@
     "parameterSweep": []
   },
   "outputs": {
-    "outputFolder": "outputs/single_floor_scenario",
+    "outputFolder": "models/UnaPlanta_ConConexionesVerticales/outputs/baseline",
     "saveRoutes": true,
     "saveMetrics": true,
     "saveTimeSeries": false,

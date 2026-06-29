@@ -7,6 +7,8 @@ import time
 from typing import Any, Callable
 
 import networkx as nx
+from shapely.geometry import LineString, Point
+from shapely.ops import unary_union
 
 from .domain import Diagnostic, MobilityProfile, Route, WeightedSnapshot
 from .overlays import BeaconState, HazardState
@@ -23,6 +25,7 @@ class WeightSnapshotCompiler:
 
     def __init__(self, topology: EvacTopology) -> None:
         self.topology = topology
+        self._mobility_edge_cache: dict[tuple[Any, ...], list[tuple[str, str, str, dict[str, Any]]]] = {}
 
     def compile(
         self,
@@ -55,13 +58,11 @@ class WeightSnapshotCompiler:
             if node_id not in blocked_cells:
                 graph.add_node(node_id, **data)
 
-        for source, target, key, data in self.topology.graph.edges(keys=True, data=True):
+        for source, target, key, data in self._mobility_edges(mobility_profile):
             if source not in graph or target not in graph:
                 continue
             resource_ref = str(data.get("resourceRef") or key)
             if resource_ref in hazard_state.blocked_resources:
-                continue
-            if not _profile_allows(data, mobility_profile):
                 continue
             breakdown = self._weight_breakdown(data, source, target, cost_policy, mobility_profile, hazard_state, beacon_state, congestion, routing_config)
             existing = graph.get_edge_data(source, target)
@@ -77,6 +78,19 @@ class WeightSnapshotCompiler:
             active_hazards=list(hazard_state.active_hazards),
         )
 
+    def _mobility_edges(self, mobility_profile: MobilityProfile | None) -> list[tuple[str, str, str, dict[str, Any]]]:
+        key = _mobility_cache_key(mobility_profile)
+        cached = self._mobility_edge_cache.get(key)
+        if cached is not None:
+            return cached
+        allowed = [
+            (source, target, key, data)
+            for source, target, key, data in self.topology.graph.edges(keys=True, data=True)
+            if _profile_allows(data, mobility_profile)
+        ]
+        self._mobility_edge_cache[key] = allowed
+        return allowed
+
     @staticmethod
     def _weight_breakdown(
         edge_data: dict[str, Any],
@@ -90,7 +104,7 @@ class WeightSnapshotCompiler:
         routing_config: dict[str, Any],
     ) -> dict[str, Any]:
         length_m = _non_negative_float(edge_data.get("lengthM"), 1.0)
-        base = _profile_traversal_time(edge_data, mobility_profile, routing_config)
+        base, movement_overhead = _profile_traversal_time(edge_data, source, target, mobility_profile, routing_config)
         resource_ref = str(edge_data.get("resourceRef") or "")
         endpoint_policy = str(routing_config.get("riskEndpointPolicy", "target"))
         edge_precedence = bool(routing_config.get("riskEdgePrecedence", True))
@@ -132,6 +146,7 @@ class WeightSnapshotCompiler:
             "baseUnit": "s",
             "costPolicy": cost_policy,
             "lengthM": round(length_m, 6),
+            "movementOverhead": round(movement_overhead, 6),
             "riskCostModel": risk_model,
             "riskEndpointPolicy": endpoint_policy,
             "hazardRisk": round(hazard, 6),
@@ -166,17 +181,20 @@ class RoutingEngine:
         routing_config: dict[str, Any] | None = None,
         step: int = 0,
         time_s: float = 0.0,
+        origin_position: tuple[float, float] | None = None,
+        origin_level: str | None = None,
     ) -> Route:
         origin_id = self.topology.indoor.resolve_cell_ref(origin) or origin
-        targets = self._targets(target_refs)
-        if origin_id not in self.topology.graph:
-            return self._unreachable(origin_id, "", algorithm, cost_policy, "UNKNOWN_ORIGIN")
-        if not targets:
-            return self._unreachable(origin_id, "", algorithm, cost_policy, "NO_TARGETS")
+        raw_targets = self._target_refs(target_refs)
         if algorithm not in SUPPORTED_ROUTE_ALGORITHMS:
-            return self._unreachable(origin_id, targets[0], algorithm, cost_policy, "UNSUPPORTED_ALGORITHM")
+            destination = raw_targets[0] if raw_targets else ""
+            return self._unreachable(origin_id, destination, algorithm, cost_policy, "UNSUPPORTED_ALGORITHM")
 
         compile_start = time.perf_counter()
+        hazard_state = hazard_state or HazardState()
+        beacon_state = beacon_state or BeaconState()
+        congestion = congestion or {}
+        routing_config = routing_config or {}
         snapshot = self.compiler.compile(
             step=step,
             time_s=time_s,
@@ -188,6 +206,51 @@ class RoutingEngine:
             routing_config=routing_config,
         )
         snapshot_compile_ms = (time.perf_counter() - compile_start) * 1000.0
+        self._attach_cell_endpoint(
+            snapshot.graph,
+            origin_id,
+            origin_position,
+            origin_level,
+            mobility_profile,
+            cost_policy,
+            hazard_state,
+            beacon_state,
+            congestion,
+            routing_config,
+            direction="out",
+        )
+        if origin_position is not None and origin_id in self.topology.graph:
+            self._adjust_origin_edges_from_position(
+                snapshot.graph,
+                origin_id,
+                origin_position,
+                mobility_profile,
+                cost_policy,
+                hazard_state,
+                beacon_state,
+                congestion,
+                routing_config,
+            )
+        for target_id in raw_targets:
+            if target_id not in snapshot.graph:
+                self._attach_cell_endpoint(
+                    snapshot.graph,
+                    target_id,
+                    None,
+                    None,
+                    mobility_profile,
+                    cost_policy,
+                    hazard_state,
+                    beacon_state,
+                    congestion,
+                    routing_config,
+                    direction="in",
+                )
+        targets = [target for target in raw_targets if target in snapshot.graph]
+        if origin_id not in snapshot.graph:
+            return self._unreachable(origin_id, targets[0] if targets else "", algorithm, cost_policy, "UNKNOWN_ORIGIN")
+        if not targets:
+            return self._unreachable(origin_id, "", algorithm, cost_policy, "NO_TARGETS")
         planning_start = time.perf_counter()
         candidate = self.recommendations.recommend(
             snapshot.graph,
@@ -201,22 +264,170 @@ class RoutingEngine:
             route = self._route_from_path(candidate.node_sequence, snapshot, origin_id, candidate.destination, algorithm, cost_policy)
             route.weight_breakdown["snapshotCompileMs"] = round(snapshot_compile_ms, 6)
             route.weight_breakdown["planningMs"] = round(planning_ms, 6)
+            route.weight_breakdown["originCandidates"] = self._origin_candidates(snapshot.graph, origin_id, targets)
             if candidate.metrics:
                 route.weight_breakdown["routeMetrics"] = dict(candidate.metrics)
             return route
         route = self._unreachable(origin_id, targets[0], algorithm, cost_policy, "NO_ROUTE")
         route.weight_breakdown["snapshotCompileMs"] = round(snapshot_compile_ms, 6)
         route.weight_breakdown["planningMs"] = round(planning_ms, 6)
+        route.weight_breakdown["originCandidates"] = self._origin_candidates(snapshot.graph, origin_id, targets)
         return route
 
-    def _targets(self, target_refs: list[str] | None) -> list[str]:
+    def _target_refs(self, target_refs: list[str] | None) -> list[str]:
         raw_targets = target_refs or self.topology.exit_candidates()
         targets = []
         for target in raw_targets:
             resolved = self.topology.indoor.resolve_cell_ref(target) or target
-            if resolved in self.topology.graph and resolved not in targets:
+            if resolved not in targets:
                 targets.append(resolved)
         return targets
+
+    def _attach_cell_endpoint(
+        self,
+        graph: nx.DiGraph,
+        cell_id: str,
+        position: tuple[float, float] | None,
+        level: str | None,
+        mobility_profile: MobilityProfile | None,
+        cost_policy: str,
+        hazard_state: HazardState,
+        beacon_state: BeaconState,
+        congestion: dict[str, int],
+        routing_config: dict[str, Any],
+        *,
+        direction: str,
+    ) -> None:
+        if cell_id in graph:
+            if position is not None:
+                graph.nodes[cell_id]["position"] = position
+            return
+        cell = self.topology.indoor.cells_by_id.get(cell_id)
+        if not cell or not cell.is_navigable:
+            return
+        point = position or cell.representative_point
+        if point is None:
+            return
+        graph.add_node(
+            cell_id,
+            level=level or cell.level,
+            category=cell.category,
+            function=cell.function,
+            navigationType=cell.navigation_type,
+            isExit=cell.is_exit,
+            position=point,
+            raw={"syntheticEndpoint": True, "cellSpaceRef": cell_id},
+        )
+        transfer_nodes = [node_id for node_id in self.topology.transfer_nodes_for_space(cell_id) if node_id in graph]
+        for transfer_id in transfer_nodes:
+            transfer_cell = self.topology.indoor.cells_by_id.get(transfer_id)
+            if transfer_cell and not _profile_allows_cell(transfer_cell, mobility_profile):
+                continue
+            transfer_position = self.topology.node_position(transfer_id)
+            if transfer_position is None:
+                continue
+            corridor_geometries = [geom for geom in (self.topology.cell_geometry(cell_id), self.topology.cell_geometry(transfer_id)) if geom is not None and not geom.is_empty]
+            corridor_geometry = unary_union(corridor_geometries) if corridor_geometries else None
+            length = _distance_within_cell(point, transfer_position, corridor_geometry)
+            via_space_refs = [cell_id] + ([] if transfer_id == cell_id else [transfer_id])
+            edge_data = {
+                "resourceRef": f"SYN_{cell_id}_{transfer_id}",
+                "lengthM": length,
+                "baseTraversalTimeS": max(length / 1.2, 0.01),
+                "locomotionTypes": list((transfer_cell.locomotion_types if transfer_cell else cell.locomotion_types) or ["Walking", "Rolling"]),
+                "connectorType": transfer_cell.category if transfer_cell and transfer_cell.category in {"Stair", "Ramp", "Elevator"} else "horizontal",
+                "viaSpaceRef": cell_id,
+                "viaSpaceRefs": via_space_refs,
+            }
+            if not _profile_allows(edge_data, mobility_profile):
+                continue
+            if direction == "out":
+                self._add_synthetic_edge(graph, cell_id, transfer_id, edge_data, cost_policy, mobility_profile, hazard_state, beacon_state, congestion, routing_config)
+            elif direction == "in":
+                self._add_synthetic_edge(graph, transfer_id, cell_id, edge_data, cost_policy, mobility_profile, hazard_state, beacon_state, congestion, routing_config)
+            else:
+                self._add_synthetic_edge(graph, cell_id, transfer_id, edge_data, cost_policy, mobility_profile, hazard_state, beacon_state, congestion, routing_config)
+                self._add_synthetic_edge(graph, transfer_id, cell_id, edge_data, cost_policy, mobility_profile, hazard_state, beacon_state, congestion, routing_config)
+
+    def _adjust_origin_edges_from_position(
+        self,
+        graph: nx.DiGraph,
+        origin_id: str,
+        origin_position: tuple[float, float],
+        mobility_profile: MobilityProfile | None,
+        cost_policy: str,
+        hazard_state: HazardState,
+        beacon_state: BeaconState,
+        congestion: dict[str, int],
+        routing_config: dict[str, Any],
+    ) -> None:
+        for _, target, data in list(graph.out_edges(origin_id, data=True)):
+            target_position = graph.nodes.get(target, {}).get("position") or self.topology.node_position(target)
+            if target_position is None:
+                continue
+            edge_data = _edge_data_for_remainder(data)
+            edge_data["lengthM"] = self._remaining_edge_length(origin_id, target, origin_position, target_position, edge_data)
+            edge_data["baseTraversalTimeS"] = max(float(edge_data["lengthM"]) / 1.2, 0.01)
+            if not _profile_allows(edge_data, mobility_profile):
+                continue
+            breakdown = WeightSnapshotCompiler._weight_breakdown(
+                edge_data,
+                origin_id,
+                target,
+                cost_policy,
+                mobility_profile,
+                hazard_state,
+                beacon_state,
+                congestion,
+                routing_config,
+            )
+            arc_id = str(data.get("arcId") or data.get("resourceRef") or "ARC")
+            graph[origin_id][target].update(weight=breakdown["total"], arcId=arc_id, breakdown=breakdown, raw=edge_data)
+
+    def _remaining_edge_length(
+        self,
+        source: str,
+        target: str,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        edge_data: dict[str, Any],
+    ) -> float:
+        geometries = []
+        refs = [source, target, edge_data.get("viaSpaceRef"), edge_data.get("transferSpaceRef"), *(edge_data.get("viaSpaceRefs") or [])]
+        for ref in refs:
+            geom = self.topology.cell_geometry(str(ref)) if ref else None
+            if geom is not None and not geom.is_empty:
+                geometries.append(geom)
+        if not geometries:
+            return max(math.dist(start, end), 0.01)
+        return _distance_within_cell(start, end, unary_union(geometries))
+
+    @staticmethod
+    def _add_synthetic_edge(
+        graph: nx.DiGraph,
+        source: str,
+        target: str,
+        edge_data: dict[str, Any],
+        cost_policy: str,
+        mobility_profile: MobilityProfile | None,
+        hazard_state: HazardState,
+        beacon_state: BeaconState,
+        congestion: dict[str, int],
+        routing_config: dict[str, Any],
+    ) -> None:
+        breakdown = WeightSnapshotCompiler._weight_breakdown(
+            edge_data,
+            source,
+            target,
+            cost_policy,
+            mobility_profile,
+            hazard_state,
+            beacon_state,
+            congestion,
+            routing_config,
+        )
+        arc_id = f"{edge_data['resourceRef']}_{source}_{target}"
+        graph.add_edge(source, target, weight=breakdown["total"], arcId=arc_id, resourceRef=edge_data["resourceRef"], breakdown=breakdown, raw=edge_data)
 
     def _time_heuristic(self, mobility_profile: MobilityProfile | None) -> Callable[[str, str], float]:
         speed = float(mobility_profile.base_speed_mps if mobility_profile else 1.2)
@@ -239,16 +450,38 @@ class RoutingEngine:
     def _route_from_path(path: list[str], snapshot: WeightedSnapshot, origin: str, target: str, algorithm: str, cost_policy: str) -> Route:
         arc_sequence = []
         total = 0.0
-        breakdown = {"base": 0.0, "lengthM": 0.0, "hazardPenalty": 0.0, "beaconPenalty": 0.0, "congestionPenalty": 0.0}
+        breakdown = {
+            "base": 0.0,
+            "lengthM": 0.0,
+            "movementOverhead": 0.0,
+            "hazardPenalty": 0.0,
+            "beaconPenalty": 0.0,
+            "congestionPenalty": 0.0,
+        }
+        first_step = None
         for source, dest in zip(path, path[1:]):
             data = snapshot.graph[source][dest]
             arc_sequence.append(str(data.get("arcId")))
             total += float(data.get("weight", 0.0))
             for key in breakdown:
                 breakdown[key] += float((data.get("breakdown") or {}).get(key, 0.0))
+            if first_step is None:
+                raw = data.get("raw") or {}
+                first_step = {
+                    "from": source,
+                    "to": dest,
+                    "weight": round(float(data.get("weight", 0.0)), 6),
+                    "arcId": str(data.get("arcId") or ""),
+                    "connectorType": raw.get("connectorType") or data.get("connectorType"),
+                    "viaSpaceRef": raw.get("viaSpaceRef") or data.get("viaSpaceRef"),
+                    "viaSpaceRefs": list(raw.get("viaSpaceRefs") or data.get("viaSpaceRefs") or []),
+                    "breakdown": dict(data.get("breakdown") or {}),
+                }
         breakdown = {key: round(value, 6) for key, value in breakdown.items()}
         breakdown["baseUnit"] = "s"
         breakdown["total"] = round(total, 6)
+        if first_step:
+            breakdown["firstStep"] = first_step
         return Route(
             origin=origin,
             destination=target,
@@ -274,6 +507,33 @@ class RoutingEngine:
             diagnostics=[Diagnostic("warning", code, "No reachable evacuation route was found.", [origin, destination])],
         )
 
+    @staticmethod
+    def _origin_candidates(graph: nx.DiGraph, origin_id: str, targets: list[str] | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        if origin_id not in graph:
+            return []
+        candidates = []
+        for _, target, data in graph.out_edges(origin_id, data=True):
+            raw = data.get("raw") or {}
+            breakdown = data.get("breakdown") or {}
+            route_total, suffix_target, suffix_path = _best_suffix_from_candidate(graph, target, targets or [])
+            candidates.append(
+                {
+                    "to": target,
+                    "weight": round(float(data.get("weight", 0.0)), 6),
+                    "routeTotal": round(float(data.get("weight", 0.0)) + route_total, 6) if math.isfinite(route_total) else math.inf,
+                    "suffixTarget": suffix_target,
+                    "suffixPath": suffix_path,
+                    "arcId": str(data.get("arcId") or ""),
+                    "connectorType": raw.get("connectorType") or data.get("connectorType"),
+                    "viaSpaceRef": raw.get("viaSpaceRef") or data.get("viaSpaceRef"),
+                    "viaSpaceRefs": list(raw.get("viaSpaceRefs") or data.get("viaSpaceRefs") or []),
+                    "lengthM": breakdown.get("lengthM"),
+                    "base": breakdown.get("base"),
+                    "total": breakdown.get("total"),
+                }
+            )
+        return sorted(candidates, key=lambda item: float(item.get("routeTotal") or math.inf))[:limit]
+
 
 def _profile_allows(edge_data: dict[str, Any], profile: MobilityProfile | None) -> bool:
     if profile is None:
@@ -291,19 +551,140 @@ def _profile_allows(edge_data: dict[str, Any], profile: MobilityProfile | None) 
     return True
 
 
+def _edge_data_for_remainder(data: dict[str, Any]) -> dict[str, Any]:
+    raw = dict(data.get("raw") or {})
+    edge_data = dict(raw)
+    for key in (
+        "resourceRef",
+        "locomotionTypes",
+        "connectorType",
+        "viaBoundaryRef",
+        "viaSpaceRef",
+        "viaSpaceRefs",
+        "viaRoomRef",
+        "transferSpaceRef",
+    ):
+        if key not in edge_data and data.get(key) is not None:
+            value = data.get(key)
+            edge_data[key] = list(value) if isinstance(value, list) else value
+    edge_data["resourceRef"] = str(edge_data.get("resourceRef") or data.get("resourceRef") or "ORIGIN_REMAINING")
+    edge_data["locomotionTypes"] = list(edge_data.get("locomotionTypes") or data.get("locomotionTypes") or ["Walking", "Rolling"])
+    edge_data["connectorType"] = str(edge_data.get("connectorType") or data.get("connectorType") or "horizontal")
+    edge_data["viaSpaceRefs"] = list(edge_data.get("viaSpaceRefs") or [])
+    return edge_data
+
+
+def _best_suffix_from_candidate(graph: nx.DiGraph, candidate: str, targets: list[str]) -> tuple[float, str | None, list[str]]:
+    if not targets or candidate not in graph:
+        return math.inf, None, []
+    best_cost = math.inf
+    best_target: str | None = None
+    best_path: list[str] = []
+    for target in targets:
+        if target not in graph:
+            continue
+        try:
+            cost = float(nx.shortest_path_length(graph, candidate, target, weight="weight"))
+            path = [str(node) for node in nx.shortest_path(graph, candidate, target, weight="weight")]
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            continue
+        if cost < best_cost:
+            best_cost = cost
+            best_target = target
+            best_path = path
+    return best_cost, best_target, best_path[:12]
+
+
+def _profile_allows_cell(cell: Any, profile: MobilityProfile | None) -> bool:
+    if profile is None:
+        return True
+    locomotion = set(cell.locomotion_types or ["Walking", "Rolling"])
+    if locomotion and not locomotion.intersection(profile.locomotion_types):
+        return False
+    if cell.category == "Stair" and not profile.can_use_stairs:
+        return False
+    if cell.category == "Ramp" and not profile.can_use_ramps:
+        return False
+    if cell.category == "Elevator" and not profile.can_use_elevators:
+        return False
+    return True
+
+
+def _mobility_cache_key(profile: MobilityProfile | None) -> tuple[Any, ...]:
+    if profile is None:
+        return ("__none__",)
+    return (
+        profile.id,
+        tuple(sorted(profile.locomotion_types)),
+        bool(profile.can_use_stairs),
+        bool(profile.can_use_ramps),
+        bool(profile.can_use_elevators),
+    )
+
+
+def _distance_within_cell(start: tuple[float, float], end: tuple[float, float], geom: Any | None) -> float:
+    direct = max(math.dist(start, end), 0.01)
+    if geom is None or getattr(geom, "is_empty", True):
+        return direct
+    segment = LineString([start, end])
+    try:
+        if geom.buffer(1e-6).covers(segment):
+            return direct
+        representative = geom.representative_point()
+        via = (float(representative.x), float(representative.y))
+        return max(math.dist(start, via) + math.dist(via, end), direct, 0.01)
+    except Exception:
+        return direct
+
+
 def _profile_traversal_time(
     edge_data: dict[str, Any],
+    source: str,
+    target: str,
     profile: MobilityProfile | None,
     routing_config: dict[str, Any],
-) -> float:
+) -> tuple[float, float]:
     length_m = max(_non_negative_float(edge_data.get("lengthM"), 1.0), 0.01)
     fallback_time = max(_non_negative_float(edge_data.get("baseTraversalTimeS"), length_m / 1.2), 0.01)
     speed = float(profile.base_speed_mps if profile else 1.2)
     if speed <= 0.0:
-        return fallback_time
+        return fallback_time, 0.0
     connector_type = str(edge_data.get("connectorType") or "")
     factor = _connector_speed_factor(connector_type, profile, routing_config)
-    return max(length_m / max(speed * factor, 0.01), 0.01)
+    travel_time = max(length_m / max(speed * factor, 0.01), 0.01)
+    overhead = _edge_time_overhead(edge_data, source, target, routing_config)
+    return travel_time + overhead, overhead
+
+
+def _edge_time_overhead(
+    edge_data: dict[str, Any],
+    source: str,
+    target: str,
+    routing_config: dict[str, Any],
+) -> float:
+    refs = [
+        source,
+        target,
+        edge_data.get("resourceRef"),
+        edge_data.get("viaBoundaryRef"),
+        edge_data.get("viaSpaceRef"),
+        edge_data.get("transferSpaceRef"),
+        *(edge_data.get("viaSpaceRefs") or []),
+    ]
+    text = " ".join(str(ref).upper() for ref in refs if ref)
+    connector_type = str(edge_data.get("connectorType") or "")
+    overhead = _non_negative_float(routing_config.get("edgeAccelerationDelayS"), 0.12)
+    if "_DOOR_" in text:
+        overhead += _non_negative_float(routing_config.get("doorTraversalPenaltyS"), 0.35)
+    if "VTN_" in text or "VIRTUAL" in text:
+        overhead += _non_negative_float(routing_config.get("virtualBoundaryTraversalPenaltyS"), 0.10)
+    if connector_type in {"Stair", "Ramp"}:
+        overhead += _non_negative_float(routing_config.get("linearTransferTraversalPenaltyS"), 0.35)
+    elif connector_type == "Elevator":
+        overhead += _non_negative_float(routing_config.get("elevatorTraversalPenaltyS"), 1.0)
+    elif "_EP_VC_" in text:
+        overhead += _non_negative_float(routing_config.get("transferTraversalPenaltyS"), 0.12)
+    return max(overhead, 0.0)
 
 
 def _connector_speed_factor(

@@ -33,7 +33,7 @@ EvacEngine
 2. Se utilizará **un único `scenario_model.json` y un único `scenario_model.schema.json`**. El schema será internamente modular mediante `$defs` y secciones bien delimitadas.
 3. El Indoor Data Model es inmutable durante una ejecución. Los cambios de puertas, hazards o aperturas creadas por rescatistas viven en un overlay runtime.
 4. La ruta principal deja de ser el JSON legacy. El legacy solo puede mantenerse mediante un adaptador explícito y temporal.
-5. El backbone topológico será `space_connectivity`, enriquecido con `vertical_connectivity` normalizada.
+5. El backbone topológico operativo será `multilevel_transfer_to_transfer`, derivado de `transfer_to_transfer` y `vertical_connectivity` normalizada. `space_connectivity` queda como vista de auditoría/compatibilidad, no como grafo principal de evacuación.
 6. El grafo canónico de routing en NetworkX será un `MultiDiGraph`.
 7. Una conexión física bidireccional se representa en runtime mediante dos arcos dirigidos que comparten un mismo recurso físico.
 8. La ruta topológica y la trayectoria física se modelan por separado.
@@ -313,9 +313,10 @@ La UI, los tests y una futura API web deben usar estas fronteras, no acceder dir
 - `transfer_to_transfer`;
 - `door_to_door`;
 - `vertical_connectivity`;
-- `multilevel_space_connectivity`.
+- `multilevel_space_connectivity`;
+- `multilevel_transfer_to_transfer`.
 
-Estas vistas no son intercambiables: representan distintos niveles de abstracción. `space_connectivity` será el backbone principal porque mantiene `GeneralSpace`, `TransferSpace` y nodos virtuales de conexión.
+Estas vistas no son intercambiables: representan distintos niveles de abstracción. La reforma actual usa `multilevel_transfer_to_transfer` como backbone principal para reducir el grafo a transfers y conectores relevantes. Los `GeneralSpace` se usan como corredores geométricos mediante `viaSpaceRefs` y como nodos sintéticos temporales cuando una ruta debe arrancar desde la coordenada exacta de un agente.
 
 ### 5.2. Corrección de identidad vertical ya realizada
 
@@ -340,7 +341,7 @@ No es necesario reexportar `indoor_model.json` por esta corrección: la normaliz
 ```text
 indoor_model.json + índices primal/dual
   → derive_graph_views(...)
-  → multilevel_space_connectivity como backbone
+  → multilevel_transfer_to_transfer como backbone
   → CanonicalTopologyBuilder consulta también el modelo original
   → CanonicalTopologyGraph
   → RuntimeTopologyState
@@ -355,7 +356,7 @@ La selección del grafo se expresará mediante una receta, no mediante un único
 
 ```text
 graphRecipe
-├── backboneView = multilevel_space_connectivity
+├── backboneView = multilevel_transfer_to_transfer
 ├── augmentations
 ├── projection
 ├── topologyOverrides

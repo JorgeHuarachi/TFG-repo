@@ -1,15 +1,16 @@
 {
-  "scenarioId": "SCENARIO_SINGLE_FLOOR_001",
-  "scenarioName": "single_floor_evacuation_demo",
+  "scenarioId": "SCENARIO_UNAPLANTA_INTENTO_1_BASELINE",
+  "scenarioName": "UnaPlanta_Intento_1_baseline",
   "metadata": {
-    "name": "single_floor_evacuation_demo",
-    "description": "Single-floor scenario for the generated indoor data model example.",
-    "createdAt": "2026-06-22T00:00:00Z",
-    "generator": "codex_evacengine_refactor"
+    "name": "UnaPlanta_Intento_1_baseline",
+    "description": "Baseline editable generado desde un indoor_model.json para abrir EvacEngine.",
+    "createdAt": "2026-06-26T02:26:10Z",
+    "modifiedAt": "2026-06-26T02:26:10Z",
+    "generator": "evac_engine.model_workspace.ensure_baseline_for_indoor"
   },
   "indoorModelRef": {
-    "path": "una_sola_planta_indoor_model.json",
-    "schemaRef": "../../schemas/indoor/indoor_model.schema.json"
+    "path": "../../spatial/indoor_model.json",
+    "schemaRef": "../../../../schemas/indoor/indoor_model.schema.json"
   },
   "catalogs": {},
   "population": {
@@ -21,7 +22,7 @@
           "Walking"
         ],
         "baseSpeedMps": 1.25,
-        "bodyRadiusM": 0.24,
+        "bodyRadiusM": 0.25,
         "personalRadiusM": 0.5,
         "canUseStairs": true,
         "canUseRamps": true,
@@ -34,8 +35,8 @@
           "Walking"
         ],
         "baseSpeedMps": 0.75,
-        "bodyRadiusM": 0.26,
-        "personalRadiusM": 0.6,
+        "bodyRadiusM": 0.27,
+        "personalRadiusM": 0.62,
         "canUseStairs": true,
         "canUseRamps": true,
         "canUseElevators": true
@@ -69,27 +70,27 @@
     ],
     "agentGroups": [
       {
-        "groupId": "AG_SINGLE_L00",
+        "groupId": "AG_BASELINE_001",
         "count": 8,
         "mobilityProfileRef": "MP_WALKING",
-        "spawnRef": "SPAWN_SINGLE_L00_ROOM_001",
+        "spawnRef": "SPAWN_BASELINE_001",
         "distribution": "random_within_space"
       }
     ],
     "agentSpawns": [
       {
-        "spawnId": "SPAWN_SINGLE_L00_ROOM_001",
+        "spawnId": "SPAWN_BASELINE_001",
         "levelRef": "LEVEL_00",
         "cellSpaceRef": "CS_L00_ROOM_001",
         "position": {
           "type": "Point",
           "coordinates": [
-            1.0,
-            1.0
+            11.0,
+            1.29
           ]
         },
-        "capacity": 20,
-        "description": "Demo spawn in the first generated room."
+        "capacity": 50,
+        "description": "Spawn inicial editable creado automaticamente."
       }
     ],
     "agents": []
@@ -127,7 +128,7 @@
     "noRouteRetryIntervalSteps": 2
   },
   "physics": {
-    "bodyRadiusM": 0.24,
+    "bodyRadiusM": 0.25,
     "personalRadiusM": 0.5,
     "wallRepulsion": 4.0,
     "socialRepulsion": 2.4,
@@ -137,30 +138,20 @@
     "doorQueueClearanceM": 0.08,
     "doorQueueCorrectionMaxM": 0.32,
     "transferQueueActivationM": 1.25,
-    "queueCorrectionSpeedScale": 0.78,
-    "transferCenterPull": 0.35,
-    "linearTransferCenterPull": 0.55,
+    "queueCorrectionSpeedScale": 0.55,
     "stairSpeedFactor": 0.55,
     "rampSpeedFactor": 0.7,
     "elevatorSpeedFactor": 0.5,
-    "edgeAccelerationDelayS": 0.12,
-    "doorTraversalPenaltyS": 0.35,
-    "transferTraversalPenaltyS": 0.12,
-    "linearTransferTraversalPenaltyS": 0.35,
-    "virtualBoundaryTraversalPenaltyS": 0.1,
-    "elevatorTraversalPenaltyS": 1.0,
-    "linearTransferFlowMode": "single_file",
-    "linearTransferQueueSpacingM": 0.72,
     "stairCapacity": 1,
     "rampCapacity": 1,
-    "maxAccelerationMps2": 2.0,
-    "velocityInertia": 0.36,
-    "maxTurnRateRadS": 2.6,
+    "maxAccelerationMps2": 6.0,
+    "velocityInertia": 0.2,
+    "maxTurnRateRadS": 3.8,
     "lineOfSightDistanceM": 18.0,
     "lineOfSightMaxNodes": 6,
     "lineOfSightBlend": 0.45,
     "nearLineOfSightBlend": 0.6,
-    "doorCenterBias": 0.65,
+    "doorCenterBias": 0.0,
     "doorEntryInsetM": 0.035,
     "doorExitInsetM": 0.32,
     "virtualBoundaryExitInsetM": 0.28,
@@ -179,7 +170,7 @@
   "scheduledEvents": [],
   "simulationConfig": {
     "timeStepS": 0.5,
-    "maxSteps": 160,
+    "maxSteps": 220,
     "randomSeed": 22,
     "enabledOverlays": [
       "population"
@@ -190,7 +181,7 @@
     "parameterSweep": []
   },
   "outputs": {
-    "outputFolder": "outputs/single_floor_scenario",
+    "outputFolder": "models/UnaPlanta_Intento_1/outputs/baseline",
     "saveRoutes": true,
     "saveMetrics": true,
     "saveTimeSeries": false,

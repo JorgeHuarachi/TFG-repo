@@ -49,7 +49,14 @@ class ApplicationService:
             "topology": topology.to_summary(),
         }
 
-    def plan_route(self, origin: str, target_refs: list[str] | None = None, profile_id: str | None = None) -> dict[str, Any]:
+    def plan_route(
+        self,
+        origin: str,
+        target_refs: list[str] | None = None,
+        profile_id: str | None = None,
+        origin_position: tuple[float, float] | None = None,
+        origin_level: str | None = None,
+    ) -> dict[str, Any]:
         self._require_loaded()
         assert self.indoor is not None and self.scenario is not None
         topology = EvacTopology.from_indoor_model(self.indoor)
@@ -62,6 +69,8 @@ class ApplicationService:
             algorithm=str(self.scenario.routing.get("algorithm", "dijkstra")),
             cost_policy=str(self.scenario.routing.get("costPolicy", "minimum_travel_time")),
             routing_config={**self.scenario.physics, **self.scenario.routing},
+            origin_position=origin_position,
+            origin_level=origin_level,
         )
         return route.to_dict()
 

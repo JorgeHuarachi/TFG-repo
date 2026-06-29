@@ -94,7 +94,8 @@ def detect_spaces(state: BuildingAuthoringState, level_id: str | None = None) ->
         for free_poly in _iter_polygon_geoms(free_geom):
             if free_poly.area <= MIN_SPACE_AREA or not free_poly.is_valid:
                 continue
-            decomp = decompose_space(free_poly)
+            decomposition_strategy = str(state.config.get("decompositionStrategy") or "triangulation")
+            decomp = decompose_space(free_poly, strategy=decomposition_strategy)
             decomp_reports.append({"faceIndex": face_index, **decomp.report})
             for part in decomp.parts:
                 if part.area <= MIN_SPACE_AREA:

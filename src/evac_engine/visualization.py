@@ -58,6 +58,17 @@ PROFILE_COLORS = {
 }
 
 
+def _connector_edge_style(connector_type: str | None, source_category: str | None, target_category: str | None) -> tuple[str, str, float]:
+    categories = {connector_type, source_category, target_category}
+    if "Stair" in categories:
+        return "#7c3aed", "-", 0.48
+    if "Ramp" in categories:
+        return "#2563eb", "-", 0.48
+    if "Elevator" in categories:
+        return "#0891b2", "-", 0.48
+    return "#64748b", "-", 0.35
+
+
 class EvacuationRenderer:
     def __init__(self, topology: EvacTopology) -> None:
         self.topology = topology
@@ -152,11 +163,17 @@ class EvacuationRenderer:
             p2 = self.topology.node_position(target)
             if not p1 or not p2:
                 continue
+            source_category = self.topology.graph.nodes.get(source, {}).get("category")
+            target_category = self.topology.graph.nodes.get(target, {}).get("category")
+            connector_access = source_category in {"Stair", "Ramp", "Elevator"} or target_category in {"Stair", "Ramp", "Elevator"}
             is_virtual = str(data.get("viaBoundaryRef") or "").upper().find("VIRTUAL") >= 0 or source.startswith("VTN_") or target.startswith("VTN_")
             if is_virtual:
-                continue
+                if not connector_access:
+                    continue
+                color, linestyle, alpha = _connector_edge_style(data.get("connectorType"), source_category, target_category)
+                linestyle = "--"
             elif data.get("connectorType") in {"Stair", "Ramp", "Elevator"}:
-                color, linestyle, alpha = "#d97706", "-", 0.35
+                color, linestyle, alpha = _connector_edge_style(data.get("connectorType"), source_category, target_category)
             else:
                 color, linestyle, alpha = "#64748b", "-", 0.35
             ax.plot([p1[0], p2[0]], [p1[1], p2[1]], color=color, linestyle=linestyle, alpha=alpha, linewidth=0.8, zorder=5)
@@ -240,9 +257,46 @@ def build_visualization_payload(topology: EvacTopology, result: SimulationResult
         "levels": sorted(topology.indoor.levels_by_id),
         "spaces": _space_payload(topology),
         "edges": _edge_payload(topology),
+        "virtualBoundaries": virtual_boundary_payload(topology),
+        "routes": result.routes,
+        "events": result.events,
         "trajectories": result.trajectories,
         "qa": qa,
     }
+
+
+def graph_edge_payload(topology: EvacTopology) -> list[dict[str, Any]]:
+    return _edge_payload(topology)
+
+
+def virtual_boundary_payload(topology: EvacTopology) -> list[dict[str, Any]]:
+    boundaries = []
+    for boundary in topology.indoor.boundaries_by_id.values():
+        if not boundary.get("isVirtual"):
+            continue
+        geometry = ((boundary.get("cellBoundaryGeom") or {}).get("geometry2D") or {})
+        if geometry.get("type") != "LineString":
+            continue
+        coords = geometry.get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        levels = sorted(
+            {
+                cell.level
+                for ref in boundary.get("cellRefs") or []
+                for cell in [topology.indoor.cells_by_id.get(str(ref))]
+                if cell and cell.level
+            }
+        )
+        boundaries.append(
+            {
+                "id": boundary.get("id"),
+                "level": levels[0] if len(levels) == 1 else None,
+                "levels": levels,
+                "points": [[float(point[0]), float(point[1])] for point in coords if len(point) >= 2],
+            }
+        )
+    return boundaries
 
 
 def _rows_for_step(trajectories: list[dict[str, Any]], step: float) -> list[dict[str, Any]]:
@@ -328,7 +382,7 @@ def trajectory_quality_metrics(trajectories: list[dict[str, Any]]) -> dict[str, 
                 dy = float(right["y"]) - float(left["y"])
                 distance = (dx * dx + dy * dy) ** 0.5
                 min_distance = float(left.get("bodyRadiusM") or 0.25) + float(right.get("bodyRadiusM") or 0.25)
-                if distance < min_distance * 0.85:
+                if distance < min_distance - 1e-4:
                     overlaps += 1
     return {
         "agentCount": len(by_agent),
@@ -415,13 +469,24 @@ def _edge_payload(topology: EvacTopology) -> list[dict[str, Any]]:
         p2 = topology.node_position(target)
         if not p1 or not p2:
             continue
+        source_level = topology.node_level(source)
+        target_level = topology.node_level(target)
+        levels = _edge_levels(topology, source, target, data)
+        if not source_level and len(levels) == 1:
+            source_level = levels[0]
+        if not target_level and len(levels) == 1:
+            target_level = levels[0]
         edges.append(
             {
                 "source": source,
                 "target": target,
-                "sourceLevel": topology.node_level(source),
-                "targetLevel": topology.node_level(target),
+                "sourceLevel": source_level,
+                "targetLevel": target_level,
+                "levels": levels,
+                "sourceCategory": topology.graph.nodes.get(source, {}).get("category"),
+                "targetCategory": topology.graph.nodes.get(target, {}).get("category"),
                 "connectorType": data.get("connectorType"),
+                "locomotionTypes": list(data.get("locomotionTypes") or []),
                 "viaBoundaryRef": data.get("viaBoundaryRef"),
                 "sourceRef": data.get("sourceRef"),
                 "relationshipType": (data.get("raw") or {}).get("relationshipType"),
@@ -429,6 +494,36 @@ def _edge_payload(topology: EvacTopology) -> list[dict[str, Any]]:
             }
         )
     return edges
+
+
+def _edge_levels(topology: EvacTopology, source: str, target: str, data: dict[str, Any]) -> list[str]:
+    levels = set()
+    for level in (topology.node_level(source), topology.node_level(target)):
+        if level:
+            levels.add(str(level))
+    raw = data.get("raw") if isinstance(data.get("raw"), dict) else {}
+    refs = []
+    for field in ("viaSpaceRef", "transferSpaceRef"):
+        for value in (data.get(field), raw.get(field)):
+            if value:
+                refs.append(value)
+    for field in ("viaSpaceRefs", "spaceRefs"):
+        for value in data.get(field) or []:
+            refs.append(value)
+        for value in raw.get(field) or []:
+            refs.append(value)
+    for node_id in (source, target):
+        node_raw = topology.graph.nodes.get(node_id, {}).get("raw") or {}
+        for value in node_raw.get("spaceRefs") or []:
+            refs.append(value)
+        cell_ref = node_raw.get("cellSpaceRef")
+        if cell_ref:
+            refs.append(cell_ref)
+    for ref in refs:
+        cell = topology.indoor.cells_by_id.get(str(ref))
+        if cell and cell.level:
+            levels.add(cell.level)
+    return sorted(levels)
 
 
 HTML_TEMPLATE = """<!doctype html>
@@ -551,15 +646,18 @@ HTML_TEMPLATE = """<!doctype html>
         if (space.category === "Stair" || space.category === "Ramp") drawSpaceLabel(space, project);
       }
       ctx.globalAlpha = 1;
-      for (const edge of payload.edges) if (edge.sourceLevel === level || edge.targetLevel === level) {
-        if (isVirtualEdge(edge)) continue;
+      for (const edge of payload.edges) if (edgeVisibleOnLevel(edge, level)) {
         const a = project(edge.points[0]), b = project(edge.points[1]);
         ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
-        ctx.globalAlpha = 0.35;
-        ctx.strokeStyle = ["Stair", "Ramp", "Elevator"].includes(edge.connectorType) ? "#d97706" : "#64748b";
+        const connectorAccess = isConnectorAccessEdge(edge);
+        const virtualEdge = isVirtualEdge(edge);
+        ctx.globalAlpha = virtualEdge ? 0.32 : connectorAccess ? 0.34 : 0.28;
+        ctx.strokeStyle = graphEdgeColor(edge);
+        ctx.lineWidth = (connectorAccess ? 0.95 : virtualEdge ? 0.9 : 0.75) * devicePixelRatio;
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
+      drawVirtualBoundaries(level, project);
       drawTraces(level, project);
       for (const row of rowsForStep(currentStep)) if (row.levelRef === level) {
         const [x, y] = project([row.x, row.y]);
@@ -576,6 +674,40 @@ HTML_TEMPLATE = """<!doctype html>
     }
     function isVirtualEdge(edge) {
       return String(edge.viaBoundaryRef || "").includes("VIRTUAL") || String(edge.source || "").startsWith("VTN_") || String(edge.target || "").startsWith("VTN_");
+    }
+    function edgeVisibleOnLevel(edge, level) {
+      if (edge.sourceLevel === level || edge.targetLevel === level) return true;
+      return Array.isArray(edge.levels) && edge.levels.includes(level);
+    }
+    function boundaryVisibleOnLevel(boundary, level) {
+      if (boundary.level === level) return true;
+      return Array.isArray(boundary.levels) && boundary.levels.includes(level);
+    }
+    function isConnectorAccessEdge(edge) {
+      return ["Stair", "Ramp", "Elevator"].includes(edge.sourceCategory) || ["Stair", "Ramp", "Elevator"].includes(edge.targetCategory);
+    }
+    function graphEdgeColor(edge) {
+      return "#94a3b8";
+    }
+    function drawVirtualBoundaries(level, project) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = "#64748b";
+      ctx.lineWidth = 1.05 * devicePixelRatio;
+      ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+      for (const boundary of payload.virtualBoundaries || []) {
+        if (!boundaryVisibleOnLevel(boundary, level) || !boundary.points || boundary.points.length < 2) continue;
+        ctx.beginPath();
+        boundary.points.forEach((point, index) => {
+          const p = project(point);
+          if (index) ctx.lineTo(p[0], p[1]);
+          else ctx.moveTo(p[0], p[1]);
+        });
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
     }
     function drawSpaceLabel(space, project) {
       const ring = space.rings[0] || [];

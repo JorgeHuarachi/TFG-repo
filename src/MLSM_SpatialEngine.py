@@ -18,18 +18,23 @@ Características principales:
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.path import Path
+from matplotlib.widgets import CheckButtons
 import numpy as np
 import json
 import datetime
+import argparse
 import os
+import re
 import subprocess
 import sys
+import time
 from shapely.geometry import Polygon as ShapelyPolygon, Point as ShapelyPoint, LineString as ShapelyLineString, box as ShapelyBox
 from shapely.geometry.polygon import orient as orient_polygon
 from shapely.ops import unary_union
 from indoor_data_model import build_indoor_model, derive_wall_mass_from_snapshot
 from indoor_authoring import BuildingAuthoringState, SnapshotHistory, detect_spaces
 from indoor_authoring.connectors import create_elevator_connector, create_tile_chain_connector
+from indoor_authoring.space_decomposition import DECOMPOSITION_STRATEGIES
 
 # --- CONFIGURACIÓN ---
 ANCHO = 30
@@ -61,6 +66,8 @@ class DiseñadorConectado:
             project_id=nombre_archivo,
             building_id=f"BUILDING_{nombre_archivo}",
         )
+        self.decomposition_strategy = "triangulation"
+        self.authoring_state.config["decompositionStrategy"] = self.decomposition_strategy
         self.history = SnapshotHistory(self.authoring_state)
         # Aclaracion conceptual: self.muros contiene elementos de autoria lineal
         # (muros, puertas, salidas y fronteras virtuales), no solo muros solidos.
@@ -111,14 +118,35 @@ class DiseñadorConectado:
             "yes",
             "si",
         }
+        self.ui_layers = {
+            "detected_spaces": True,
+            "manual_spaces": True,
+            "walls": True,
+            "openings": True,
+            "connectors": True,
+            "agents": True,
+        }
+        self.layer_labels = [
+            ("Auto spaces", "detected_spaces"),
+            ("Manual spaces", "manual_spaces"),
+            ("Walls", "walls"),
+            ("Openings", "openings"),
+            ("Connectors", "connectors"),
+            ("Agents", "agents"),
+        ]
+        self.selected_feature = None
+        self.status_message = "Ready. Draw, inspect with right click, or toggle layers."
+        self.render_detail = "fast"
+        self._wall_mass_cache = {"signature": None, "geometry": None}
+        self._last_motion_draw_time = 0.0
 
         # --- MEMORIA SEMÁNTICA (IndoorGML) ---
         self.propiedades_zonas = {}                     # Diccionario: Nombre -> {Atributos IndoorGML}
         self.locomotion_actual = ["Walking", "Rolling"] # Atributo asignado por defecto al dibujar
 
         # Visual
-        self.fig, self.ax = plt.subplots(figsize=(12, 8))
-        plt.subplots_adjust(bottom=0.22, top=0.90)
+        self.fig, self.ax = plt.subplots(figsize=(14, 8))
+        plt.subplots_adjust(left=0.06, right=0.74, bottom=0.22, top=0.90)
         self.texto_instrucciones = self.fig.text(
             0.03,
             0.03,
@@ -134,6 +162,7 @@ class DiseñadorConectado:
         self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         self.fig.canvas.mpl_connect('key_press_event', self.on_key)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_move)
+        self.fig.canvas.mpl_connect('scroll_event', self.on_scroll)
         # Sombra para hitos (Rectángulo)
         self.rect_temp = patches.Rectangle((0,0), 0, 0, alpha=0.5, color='magenta')
         self.ax.add_patch(self.rect_temp)
@@ -143,7 +172,145 @@ class DiseñadorConectado:
         self.poly_temp.set_visible(False)
         # Línea roja directriz
         self.linea_temp, = self.ax.plot([], [], color='red', linestyle='-', linewidth=1.5, alpha=0.9, zorder=4)
+        self._init_classic_ui_widgets()
         self.dibujar_interfaz()
+
+    def _init_classic_ui_widgets(self):
+        self.panel_ax = self.fig.add_axes([0.755, 0.68, 0.225, 0.26])
+        self.panel_ax.set_facecolor("#ffffff")
+        self.panel_ax.set_xticks([])
+        self.panel_ax.set_yticks([])
+        for spine in self.panel_ax.spines.values():
+            spine.set_edgecolor("#9aa0a6")
+        self.panel_text = self.panel_ax.text(
+            0.04,
+            0.96,
+            "",
+            transform=self.panel_ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=8.1,
+            color="#17202a",
+            clip_on=True,
+        )
+
+        self.layer_ax = self.fig.add_axes([0.765, 0.39, 0.21, 0.24])
+        self.layer_ax.set_facecolor("#f8fafc")
+        labels = [label for label, _ in self.layer_labels]
+        actives = [self.ui_layers[key] for _, key in self.layer_labels]
+        self.layer_checks = CheckButtons(self.layer_ax, labels, actives)
+        self.layer_ax.set_title("Layers", fontsize=9, loc="left")
+        self.layer_checks.on_clicked(self._on_layer_checkbox)
+
+        self.detail_ax = self.fig.add_axes([0.755, 0.08, 0.225, 0.27])
+        self.detail_ax.set_facecolor("#ffffff")
+        self.detail_ax.set_xticks([])
+        self.detail_ax.set_yticks([])
+        for spine in self.detail_ax.spines.values():
+            spine.set_edgecolor("#9aa0a6")
+        self.detail_text = self.detail_ax.text(
+            0.04,
+            0.96,
+            "",
+            transform=self.detail_ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=8.0,
+            color="#17202a",
+            clip_on=True,
+        )
+
+    def _on_layer_checkbox(self, label):
+        for item_label, key in self.layer_labels:
+            if item_label == label:
+                self.ui_layers[key] = not self.ui_layers[key]
+                self.status_message = f"Layer {item_label}: {'on' if self.ui_layers[key] else 'off'}."
+                self.dibujar_interfaz()
+                return
+
+    def _toggle_layer_by_key(self, index):
+        if index < 0 or index >= len(self.layer_labels):
+            return
+        self.layer_checks.set_active(index)
+
+    def set_status(self, message):
+        self.status_message = str(message)
+
+    def _tool_hint(self):
+        if self.modo in self.LINEAR_AUTHORING_TYPES:
+            if self.puntos_temp is None:
+                if self.is_transfer_authoring_type(self.modo):
+                    return "Click near a wall axis to start the opening."
+                return "Click start point, then click end point."
+            return "Move mouse to preview, click to confirm end point."
+        if self.modo == "hitos":
+            return "Click polygon vertices; repeat the last point to close."
+        if self.modo == "columna":
+            return "Click opposite rectangle corners for the column."
+        if self.modo == "agentes":
+            return "Click navigable positions to add spawn points."
+        if self.modo in {"escalera", "rampa"}:
+            return "Click adjacent tiles; arrows choose entry/exit; Enter closes."
+        if self.modo == "ascensor":
+            return "Click opposite corners for the elevator footprint."
+        if self.modo == "inspeccion":
+            return "Click any feature to inspect it."
+        return "Choose a tool and draw on the canvas."
+
+    def _selection_text(self):
+        feature = self.selected_feature
+        if not feature:
+            return "none"
+        details = [
+            f"{feature.get('kind', 'feature')}: {feature.get('id', '-')}",
+            f"type: {feature.get('type', '-')}",
+            f"level: {feature.get('level', '-')}",
+        ]
+        extra = feature.get("extra")
+        if extra:
+            details.append(str(extra))
+        return "\n".join(details)
+
+    def _counts_text(self):
+        level = self.authoring_state.active_level
+        return (
+            f"walls {len(level.wall_centerlines)} | openings {len(level.doors) + len(level.exits) + len(level.windows)}\n"
+            f"auto spaces {len(level.detected_spaces)} | columns {len(level.columns)}\n"
+            f"connectors {len(self.authoring_state.vertical_connectors)} | agents {len(self.agentes)}"
+        )
+
+    def _update_side_panel(self, error=None):
+        if not hasattr(self, "panel_text"):
+            return
+        active_layers = [
+            str(index + 4)
+            for index, (_, key) in enumerate(self.layer_labels)
+            if self.ui_layers.get(key)
+        ]
+        message = error or self.status_message
+        if len(message) > 96:
+            message = message[:93] + "..."
+        summary_text = (
+            "SpatialEngine authoring\n"
+            f"Tool: {self.modo}\n"
+            f"Next: {self._tool_hint()}\n"
+            f"Level: {self.authoring_state.active_level_id}\n"
+            f"Canvas: {self.ancho:g} x {self.alto:g} m\n"
+            f"Decomposition: {self.decomposition_strategy}\n"
+            f"Render: {self.render_detail}\n"
+            f"Locomotion: {', '.join(self.locomotion_actual)}"
+        )
+        detail_text = (
+            f"Visible layer keys: {', '.join(active_layers) or 'none'}\n"
+            f"{self._counts_text()}\n"
+            f"Selected:\n{self._selection_text()}\n\n"
+            f"Status: {message}\n"
+            "Right click: inspect\n"
+            "Wheel: zoom | g: decomp | 0: render\n"
+            "4-9: toggle layers"
+        )
+        self.panel_text.set_text(summary_text)
+        self.detail_text.set_text(detail_text)
 
     def get_authoring_elements(self):
         return self.muros
@@ -232,6 +399,7 @@ class DiseñadorConectado:
     def cambiar_modo(self, nuevo_modo):
         self.modo = nuevo_modo
         self.limpiar_temporales_autoria(limpiar_poligono=True)
+        self.set_status(f"Tool changed to {nuevo_modo}.")
         if nuevo_modo in {"escalera", "rampa", "ascensor"}:
             self.connector_entry_side = None
             self.connector_exit_side = None
@@ -247,6 +415,22 @@ class DiseñadorConectado:
         self.ax.grid(which='minor', color='lightgray', linestyle='-', linewidth=0.5, alpha=0.5)
         self.ax.grid(which='major', color='gray', linestyle='-', linewidth=1, alpha=0.8)
         self.ax.invert_yaxis()
+
+    def on_scroll(self, event):
+        if event.xdata is None or event.ydata is None:
+            return
+        current_xlim = self.ax.get_xlim()
+        current_ylim = self.ax.get_ylim()
+        xdata = float(event.xdata)
+        ydata = float(event.ydata)
+        scale_factor = 0.82 if event.button == "up" else 1.22
+        width = (current_xlim[1] - current_xlim[0]) * scale_factor
+        height = (current_ylim[1] - current_ylim[0]) * scale_factor
+        relx = (current_xlim[1] - xdata) / (current_xlim[1] - current_xlim[0])
+        rely = (current_ylim[1] - ydata) / (current_ylim[1] - current_ylim[0])
+        self.ax.set_xlim([xdata - width * (1 - relx), xdata + width * relx])
+        self.ax.set_ylim([ydata - height * (1 - rely), ydata + height * rely])
+        self.fig.canvas.draw_idle()
 
     def actualizar_titulo(self, error=None):
         color = 'black'
@@ -270,16 +454,40 @@ class DiseñadorConectado:
         level = self.authoring_state.active_level
         detectado = "detected" if level.detected_spaces and not level.geometry_dirty else "dirty"
         estado_nivel = f"Nivel: {level.id} ({detectado})"
+        estado_decomp = f"Decomp: {self.decomposition_strategy}"
         estado_connector = f"Scope: {self.connector_scope} lado:{self.connector_side_focus} entry:{self.connector_entry_side or '-'} exit:{self.connector_exit_side or '-'}"
-        self.ax.set_title(f"{tit} | {estado_nivel} | {estado_cad} | {estado_indoor} | {estado_connector}", color=color, fontweight='bold', fontsize=10)
+        self.ax.set_title(f"{tit} | {estado_nivel} | {estado_decomp} | {estado_cad} | {estado_indoor} | {estado_connector}", color=color, fontweight='bold', fontsize=10)
         self.texto_instrucciones.set_text(self.texto_ayuda_teclas())
 
     def texto_ayuda_teclas(self):
         return (
             "m exterior | n interior | p puerta | d doble | s salida | w ventana | v virtual | h espacio | c columna\n"
-            "f detectar | t escalera | r rampa | l ascensor | b same/inter | tab entry/exit | flechas lado | backspace tile\n"
-            "[ ] nivel | + nivel | 1 walk/roll | 2 walk | z undo | y redo | e export | x all adjacency | esc cancelar | ?/f1 ayuda"
+            "q inspeccion | click derecho inspecciona | f detectar | g decomp | 0 render | 4-9 capas | rueda zoom\n"
+            "t escalera | r rampa | l ascensor | [ ] nivel | + nivel | z/y undo-redo | e export | esc cancelar"
         )
+
+    def set_decomposition_strategy(self, strategy):
+        normalized = str(strategy or "triangulation").strip().lower().replace("-", "_")
+        if normalized not in DECOMPOSITION_STRATEGIES:
+            normalized = "triangulation"
+        self.decomposition_strategy = normalized
+        self.authoring_state.config["decompositionStrategy"] = normalized
+
+    def cycle_decomposition_strategy(self):
+        order = ["triangulation", "rectilinear", "none"]
+        index = order.index(self.decomposition_strategy) if self.decomposition_strategy in order else 0
+        self.set_decomposition_strategy(order[(index + 1) % len(order)])
+        self.set_status(f"Decomposition strategy: {self.decomposition_strategy}.")
+        print(f"Estrategia de descomposicion: {self.decomposition_strategy}")
+
+    def set_render_detail(self, detail):
+        normalized = str(detail or "fast").strip().lower()
+        self.render_detail = normalized if normalized in {"fast", "full"} else "fast"
+
+    def toggle_render_detail(self):
+        self.set_render_detail("full" if self.render_detail == "fast" else "fast")
+        self.set_status(f"Render mode: {self.render_detail}.")
+        print(f"Modo de visualizacion SpatialEngine: {self.render_detail}")
 
     def dibujar_ayuda_teclas(self):
         self.texto_instrucciones.set_text(self.texto_ayuda_teclas())
@@ -337,12 +545,13 @@ class DiseñadorConectado:
         if not coords or len(coords) < 3:
             return
         color, etiqueta, estilo = self._opening_style(nombre, attrs)
+        is_selected = self._feature_selected(nombre)
         poly = patches.Polygon(
             coords,
             closed=True,
             facecolor=color,
-            edgecolor="black",
-            linewidth=1.2,
+            edgecolor="#e11d48" if is_selected else "black",
+            linewidth=2.4 if is_selected else 1.2,
             linestyle=estilo,
             alpha=0.82,
             zorder=7,
@@ -537,6 +746,7 @@ class DiseñadorConectado:
             else:
                 color = "#2e86c1"
                 short_label = "ELEV"
+            selected = self._feature_selected(connector.id)
             for index, origin in enumerate(tile_origins, start=1):
                 tx, ty = float(origin[0]), float(origin[1])
                 self.ax.add_patch(
@@ -545,9 +755,9 @@ class DiseñadorConectado:
                         tile_size,
                         tile_size,
                         facecolor=color,
-                        edgecolor=color,
-                        alpha=0.22,
-                        linewidth=1.0,
+                        edgecolor="#e11d48" if selected else color,
+                        alpha=0.30 if selected else 0.22,
+                        linewidth=2.3 if selected else 1.0,
                         zorder=5,
                     )
                 )
@@ -577,9 +787,9 @@ class DiseñadorConectado:
                         endpoint.footprint,
                         closed=True,
                         facecolor=color,
-                        edgecolor=color,
-                        alpha=0.18,
-                        linewidth=1.8,
+                        edgecolor="#e11d48" if selected else color,
+                        alpha=0.28 if selected else 0.18,
+                        linewidth=2.6 if selected else 1.8,
                         zorder=5,
                     )
                 )
@@ -633,10 +843,14 @@ class DiseñadorConectado:
             self.ax.add_patch(patches.PathPatch(Path(vertices, codes), **style))
 
     def _visual_wall_mass(self):
+        signature = self._wall_mass_signature()
+        if self._wall_mass_cache.get("signature") == signature:
+            return self._wall_mass_cache.get("geometry")
         try:
             result = derive_wall_mass_from_snapshot(self.build_authoring_snapshot(), self.authoring_state.active_level_id)
             wall_union = result.get("wallUnion")
             if wall_union is not None and not wall_union.is_empty:
+                self._wall_mass_cache = {"signature": signature, "geometry": wall_union}
                 return wall_union
         except Exception:
             pass
@@ -664,14 +878,17 @@ class DiseñadorConectado:
                     opening_polys.append(ShapelyPolygon(esquinas))
 
         if not wall_polys:
+            self._wall_mass_cache = {"signature": signature, "geometry": None}
             return None
         try:
             wall_mass = unary_union(wall_polys)
             if opening_polys:
                 wall_mass = wall_mass.difference(unary_union(opening_polys))
-            return wall_mass.buffer(0)
+            wall_mass = wall_mass.buffer(0)
         except Exception:
-            return unary_union(wall_polys)
+            wall_mass = unary_union(wall_polys)
+        self._wall_mass_cache = {"signature": signature, "geometry": wall_mass}
+        return wall_mass
 
     def _draw_visual_wall_mass(self):
         wall_mass = self._visual_wall_mass()
@@ -685,6 +902,139 @@ class DiseñadorConectado:
                 zorder=2,
             )
 
+    def _wall_mass_signature(self):
+        return (
+            self.authoring_state.active_level_id,
+            tuple((str(item[0]), str(item[1]), round(float(item[2]), 6), round(float(item[3]), 6), round(float(item[4]), 6), round(float(item[5]), 6)) for item in self.muros),
+        )
+
+    def _draw_simple_wall_authoring(self):
+        for id_muro, tipo, x1, y1, x2, y2 in self.muros:
+            if not self.is_solid_wall_type(tipo):
+                continue
+            coords = self.calcular_esquinas_muro(x1, y1, x2, y2, self.GROSORES.get(tipo, 0.15))
+            if not coords:
+                continue
+            selected = self._feature_selected(id_muro)
+            self.ax.add_patch(
+                patches.Polygon(
+                    coords,
+                    closed=True,
+                    facecolor="#9aa0a6",
+                    edgecolor="#e11d48" if selected else "black",
+                    linewidth=2.2 if selected else 0.9,
+                    alpha=0.82,
+                    zorder=2,
+                )
+            )
+
+    def _feature_selected(self, feature_id):
+        return bool(self.selected_feature and self.selected_feature.get("id") == feature_id)
+
+    def _add_inspection_candidate(self, candidates, priority, kind, feature_id, feature_type, level_id, extra=None, distance=0.0):
+        candidates.append(
+            {
+                "priority": priority,
+                "distance": float(distance),
+                "kind": kind,
+                "id": feature_id,
+                "type": feature_type,
+                "level": level_id,
+                "extra": extra,
+            }
+        )
+
+    def inspect_feature_at(self, x, y):
+        if x is None or y is None:
+            return
+        point = ShapelyPoint(float(x), float(y))
+        level = self.authoring_state.active_level
+        candidates = []
+
+        for index, (agent_x, agent_y) in enumerate(self.agentes, start=1):
+            distance = point.distance(ShapelyPoint(float(agent_x), float(agent_y)))
+            if distance <= max(self.RADIO_AGENTE * 1.8, 0.4):
+                self._add_inspection_candidate(candidates, 0, "Agent spawn", f"Agent_{index:03d}", "spawn", level.id, f"x={agent_x:.2f}, y={agent_y:.2f}", distance)
+
+        for item in self.hitos_bounds:
+            if len(item) != 2:
+                continue
+            nombre, coords = item[0], item[1]
+            try:
+                poly = ShapelyPolygon(coords)
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+            except Exception:
+                continue
+            if poly.is_empty:
+                continue
+            prop = getattr(self, 'propiedades_zonas', {}).get(nombre, {})
+            if poly.buffer(1e-6).covers(point):
+                if self._is_opening_marker(nombre, prop):
+                    self._add_inspection_candidate(candidates, 1, "Opening", nombre, prop.get("category") or prop.get("categoria") or "opening", level.id)
+                else:
+                    self._add_inspection_candidate(candidates, 4, "Manual space", nombre, prop.get("category") or prop.get("categoria") or "space", level.id, f"area={poly.area:.2f} m2")
+
+        for connector in self.authoring_state.vertical_connectors:
+            for endpoint in connector.endpoints:
+                if endpoint.level_id != level.id:
+                    continue
+                try:
+                    poly = ShapelyPolygon(endpoint.footprint)
+                    if not poly.is_valid:
+                        poly = poly.buffer(0)
+                except Exception:
+                    continue
+                if poly.buffer(1e-6).covers(point):
+                    self._add_inspection_candidate(
+                        candidates,
+                        2,
+                        "Connector",
+                        connector.id,
+                        connector.connector_type,
+                        endpoint.level_id,
+                        f"scope={connector.scope}, endpoint={endpoint.id}",
+                    )
+
+        for id_muro, tipo, x1, y1, x2, y2 in self.muros:
+            if not str(tipo).startswith("muro"):
+                continue
+            try:
+                line = ShapelyLineString([(x1, y1), (x2, y2)])
+            except Exception:
+                continue
+            distance = line.distance(point)
+            if distance <= 0.35:
+                self._add_inspection_candidate(candidates, 3, "Wall", id_muro, tipo, level.id, f"distance={distance:.2f} m", distance)
+
+        for space in level.detected_spaces:
+            if not space.polygon:
+                continue
+            try:
+                poly = ShapelyPolygon(space.polygon[0], space.polygon[1:])
+                if not poly.is_valid:
+                    poly = poly.buffer(0)
+            except Exception:
+                continue
+            if poly.buffer(1e-6).covers(point):
+                attrs = space.attributes or {}
+                self._add_inspection_candidate(candidates, 5, "Detected space", space.id, attrs.get("category") or "GeneralSpace", space.level_id, f"area={poly.area:.2f} m2")
+
+        if not candidates:
+            self.selected_feature = None
+            self.set_status(f"No feature at x={x:.2f}, y={y:.2f}.")
+            self.dibujar_interfaz()
+            return
+
+        candidates.sort(key=lambda item: (item["distance"], item["priority"]))
+        selected = candidates[0]
+        selected.pop("priority", None)
+        selected.pop("distance", None)
+        self.selected_feature = selected
+        self.set_status(f"Selected {selected['kind']} {selected['id']}.")
+        print(f"Seleccionado: {selected['kind']} {selected['id']} ({selected['type']})")
+        self.dibujar_interfaz()
+
     def dibujar_interfaz(self, error=None):
         self.ax.clear()
         self.configurar_lienzo()
@@ -695,65 +1045,78 @@ class DiseñadorConectado:
         self.ax.add_patch(plt.Rectangle((-0.5, -0.5), self.ancho, self.alto, fill=False, edgecolor='black', linewidth=2))
 
         level = self.authoring_state.active_level
-        for space in level.detected_spaces:
-            if space.polygon:
-                exterior = space.polygon[0]
-                poly = patches.Polygon(exterior, closed=True, facecolor='#7fb3d5', edgecolor='#2874a6', alpha=0.18, zorder=1)
-                self.ax.add_patch(poly)
-                try:
-                    shp = ShapelyPolygon(exterior)
-                    self.ax.text(shp.representative_point().x, shp.representative_point().y, space.id, ha='center', va='center', fontsize=5, color='#1b4f72')
-                except Exception:
-                    pass
+        if self.ui_layers.get("detected_spaces", True):
+            for space in level.detected_spaces:
+                if space.polygon:
+                    exterior = space.polygon[0]
+                    is_selected = self._feature_selected(space.id)
+                    poly = patches.Polygon(
+                        exterior,
+                        closed=True,
+                        facecolor='#7fb3d5',
+                        edgecolor='#e11d48' if is_selected else '#2874a6',
+                        alpha=0.24 if is_selected else 0.18,
+                        linewidth=2.4 if is_selected else 1.0,
+                        zorder=1,
+                    )
+                    self.ax.add_patch(poly)
+                    try:
+                        shp = ShapelyPolygon(exterior)
+                        self.ax.text(shp.representative_point().x, shp.representative_point().y, space.id, ha='center', va='center', fontsize=5, color='#1b4f72')
+                    except Exception:
+                        pass
 
-        self._draw_connector_draft_coverage()
+        if self.ui_layers.get("connectors", True):
+            self._draw_connector_draft_coverage()
 
-        for idx, (tile_x, tile_y) in enumerate(self.connector_tiles_temp, start=1):
-            self.ax.add_patch(
-                patches.Rectangle(
-                    (tile_x, tile_y),
-                    self.connector_tile_size,
-                    self.connector_tile_size,
-                    facecolor='#a3e4d7',
-                    edgecolor='#117a65',
-                    alpha=0.45,
-                    zorder=3,
+            for idx, (tile_x, tile_y) in enumerate(self.connector_tiles_temp, start=1):
+                self.ax.add_patch(
+                    patches.Rectangle(
+                        (tile_x, tile_y),
+                        self.connector_tile_size,
+                        self.connector_tile_size,
+                        facecolor='#a3e4d7',
+                        edgecolor='#117a65',
+                        alpha=0.45,
+                        zorder=3,
+                    )
                 )
-            )
-            self.ax.text(
-                tile_x + self.connector_tile_size / 2,
-                tile_y + self.connector_tile_size / 2,
-                str(idx),
-                ha="center",
-                va="center",
-                fontsize=7,
-                fontweight="bold",
-                color="#0b5345",
-                zorder=4,
-            )
-        if self.connector_tiles_temp:
-            self._draw_connector_side_marker(self.connector_tiles_temp[0], self.connector_entry_side, "ENTRY", "#1e8449")
-            self._draw_connector_side_marker(self.connector_tiles_temp[-1], self.connector_exit_side, "EXIT", "#922b21")
-        if self.modo in {"escalera", "rampa"} and self.connector_candidate_tile is not None:
-            valid_candidate = self._connector_candidate_is_valid(self.connector_candidate_tile)
-            color = "#27ae60" if valid_candidate else "#c0392b"
-            self.ax.add_patch(
-                patches.Rectangle(
-                    self.connector_candidate_tile,
-                    self.connector_tile_size,
-                    self.connector_tile_size,
-                    facecolor=color,
-                    edgecolor=color,
-                    linestyle="--",
-                    linewidth=1.6,
-                    alpha=0.18 if valid_candidate else 0.28,
-                    zorder=3,
+                self.ax.text(
+                    tile_x + self.connector_tile_size / 2,
+                    tile_y + self.connector_tile_size / 2,
+                    str(idx),
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="#0b5345",
+                    zorder=4,
                 )
-            )
+            if self.connector_tiles_temp:
+                self._draw_connector_side_marker(self.connector_tiles_temp[0], self.connector_entry_side, "ENTRY", "#1e8449")
+                self._draw_connector_side_marker(self.connector_tiles_temp[-1], self.connector_exit_side, "EXIT", "#922b21")
+            if self.modo in {"escalera", "rampa"} and self.connector_candidate_tile is not None:
+                valid_candidate = self._connector_candidate_is_valid(self.connector_candidate_tile)
+                color = "#27ae60" if valid_candidate else "#c0392b"
+                self.ax.add_patch(
+                    patches.Rectangle(
+                        self.connector_candidate_tile,
+                        self.connector_tile_size,
+                        self.connector_tile_size,
+                        facecolor=color,
+                        edgecolor=color,
+                        linestyle="--",
+                        linewidth=1.6,
+                        alpha=0.18 if valid_candidate else 0.28,
+                        zorder=3,
+                    )
+                )
 
         # Hitos
         # Hitos (Ahora Poligonales)
         for item in self.hitos_bounds:
+            if not self.ui_layers.get("manual_spaces", True):
+                continue
             if len(item) == 2: # Nos aseguramos de que sea el nuevo formato (nombre, esquinas)
                 nombre, coords = item[0], item[1]
                 prop = getattr(self, 'propiedades_zonas', {}).get(nombre, {})
@@ -765,7 +1128,15 @@ class DiseñadorConectado:
                 elif "Puerta" in nombre: c = 'orange'
                 else: c = 'green'
                 
-                poly = patches.Polygon(coords, closed=True, facecolor=c, edgecolor=c, alpha=0.3)
+                is_selected = self._feature_selected(nombre)
+                poly = patches.Polygon(
+                    coords,
+                    closed=True,
+                    facecolor=c,
+                    edgecolor='#e11d48' if is_selected else c,
+                    alpha=0.36 if is_selected else 0.3,
+                    linewidth=2.3 if is_selected else 1.0,
+                )
                 self.ax.add_patch(poly)
                 
                 cx, cy = self.hitos[nombre]
@@ -778,28 +1149,58 @@ class DiseñadorConectado:
                 self.ax.text(cx, cy, nombre, ha='center', va='center', fontsize=6, fontweight='bold', bbox=dict(facecolor='white', alpha=0.5, pad=0.1))
 
         # Dibujar muros como una masa visual unificada para evitar picos falsos en junctions.
-        self._draw_visual_wall_mass()
+        if self.ui_layers.get("walls", True):
+            if self.render_detail == "full":
+                self._draw_visual_wall_mass()
+            else:
+                self._draw_simple_wall_authoring()
         for muro in self.muros:
+            if not self.ui_layers.get("walls", True):
+                continue
             id_muro, tipo, x1, y1, x2, y2 = muro
             
             if tipo in ['muro_exterior', 'muro_interior']:
-                self.ax.plot([x1, x2], [y1, y2], color='red', linestyle='-', linewidth=1.0, zorder=3)
+                is_selected = self._feature_selected(id_muro)
+                self.ax.plot(
+                    [x1, x2],
+                    [y1, y2],
+                    color='#e11d48' if is_selected else 'red',
+                    linestyle='-',
+                    linewidth=2.3 if is_selected else 1.0,
+                    zorder=3,
+                )
 
         for item in self.hitos_bounds:
+            if not self.ui_layers.get("openings", True):
+                continue
             if len(item) == 2:
                 nombre, coords = item[0], item[1]
                 prop = getattr(self, 'propiedades_zonas', {}).get(nombre, {})
                 if self._is_opening_marker(nombre, prop):
                     self._draw_opening_marker(nombre, coords, prop)
 
-        self._draw_committed_connectors(level.id)
+        if self.ui_layers.get("connectors", True):
+            self._draw_committed_connectors(level.id)
 
         # Agentes
-        if self.agentes:
+        if self.ui_layers.get("agents", True) and self.agentes:
             ags = np.array(self.agentes)
             self.ax.scatter(ags[:,0], ags[:,1], c='blue', s=60, zorder=10, edgecolors='white')
+            for index, (agent_x, agent_y) in enumerate(self.agentes, start=1):
+                if self._feature_selected(f"Agent_{index:03d}"):
+                    self.ax.add_patch(
+                        patches.Circle(
+                            (agent_x, agent_y),
+                            self.RADIO_AGENTE * 1.8,
+                            fill=False,
+                            edgecolor="#e11d48",
+                            linewidth=2.4,
+                            zorder=11,
+                        )
+                    )
         
         self.dibujar_ayuda_teclas()
+        self._update_side_panel(error)
         self.fig.canvas.draw()
 
     def es_punto_valido_inicio(self, x, y):
@@ -874,6 +1275,9 @@ class DiseñadorConectado:
         EVENT LOOP (Cierre): Consolida las matemáticas temporales en estructuras de datos permanentes.
         """
         if event.inaxes != self.ax: return
+        if event.button == 3 or self.modo == "inspeccion":
+            self.inspect_feature_at(event.xdata, event.ydata)
+            return
         
         # Snap a 0.5 metros para mayor precisión en CAD y evitar huecos
         x = round(event.xdata * 2) / 2
@@ -1176,13 +1580,21 @@ class DiseñadorConectado:
             self.linea_temp.set_data([], [])
             
         # Pide a Matplotlib que redibuje el frame lo antes posible
+        now = time.monotonic()
+        if now - self._last_motion_draw_time < 1.0 / 30.0:
+            return
+        self._last_motion_draw_time = now
         self.fig.canvas.draw_idle()
 
     def on_key(self, event):
         key = (event.key or "").lower().strip()
 
         # --- NUEVOS MODOS DE MUROS ---
-        if key == 'm': self.cambiar_modo('muro_exterior')
+        if key == '0':
+            self.toggle_render_detail()
+        elif key in {'4', '5', '6', '7', '8', '9'}:
+            self._toggle_layer_by_key(int(key) - 4)
+        elif key == 'm': self.cambiar_modo('muro_exterior')
         elif key == 'n': self.cambiar_modo('muro_interior')
         elif key == 'p': self.cambiar_modo('puerta_simple')
         elif key == 'd': self.cambiar_modo('puerta_doble')
@@ -1197,6 +1609,9 @@ class DiseñadorConectado:
         elif key == 't': self.cambiar_modo('escalera')
         elif key == 'r': self.cambiar_modo('rampa')
         elif key == 'l': self.cambiar_modo('ascensor')
+        elif key == 'q': self.cambiar_modo('inspeccion')
+        elif key == 'g':
+            self.cycle_decomposition_strategy()
         elif key == 'b':
             self.connector_scope = "inter_level" if self.connector_scope == "same_level" else "same_level"
             print(f"Scope de conector: {self.connector_scope}")
@@ -1249,9 +1664,13 @@ class DiseñadorConectado:
             result = detect_spaces(self.authoring_state, self.authoring_state.active_level_id)
             self._sync_legacy_from_authoring_state()
             if result.ok:
-                print(f"{result.report.get('detectedSpaces', 0)} espacios detectados en {result.level_id}; autoria manual preservada.")
+                message = f"{result.report.get('detectedSpaces', 0)} espacios detectados en {result.level_id}; autoria manual preservada."
+                self.set_status(message)
+                print(message)
             else:
-                print(f"ERROR deteccion {result.level_id}: {result.report.get('message')}")
+                message = f"ERROR deteccion {result.level_id}: {result.report.get('message')}"
+                self.set_status(message)
+                print(message)
 
         elif key in {'enter', 'return'} and self.modo in {'escalera', 'rampa'}:
             if not self.connector_entry_side or not self.connector_exit_side:
@@ -1301,15 +1720,21 @@ class DiseñadorConectado:
 
         # --- SECCIÓN PARA EXPORTAR ---
         elif key == 'e':
-            self.exportar_indoor_model(edge_mode="navigation")
-            print("Guardado rapido Indoor Data Model completado.")
+            exported_path = self.exportar_indoor_model(edge_mode="navigation")
+            if exported_path:
+                self.set_status("Indoor Data Model exported with navigation graph.")
+                print("Guardado rapido Indoor Data Model completado.")
 
         elif key == 'x':
-            self.exportar_indoor_model(edge_mode="all_adjacency")
-            print("Guardado debug Indoor Data Model all_adjacency completado.")
+            exported_path = self.exportar_indoor_model(edge_mode="all_adjacency")
+            if exported_path:
+                self.set_status("Indoor Data Model exported with all_adjacency debug graph.")
+                print("Guardado debug Indoor Data Model all_adjacency completado.")
         
         elif key == 'escape':
             self.limpiar_temporales_autoria(limpiar_poligono=True)
+            self.selected_feature = None
+            self.set_status("Current operation cancelled.")
             print("Operacion actual cancelada.")
 
         elif key in {'?', 'f1'}:
@@ -2046,8 +2471,8 @@ class DiseñadorConectado:
         return graphs
 
     def _v2_write_json(self, datos, nombre_archivo):
-        directorio_script = os.path.dirname(os.path.abspath(__file__))
-        carpeta_destino = os.path.join(directorio_script, "escenarios")
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        carpeta_destino = os.path.join(repo_root, "outputs", "legacy_spatialengine")
         os.makedirs(carpeta_destino, exist_ok=True)
         ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
 
@@ -2320,11 +2745,33 @@ class DiseñadorConectado:
         print(f"Visual check indoor_model generado en: '{png_path}'")
         return png_path
 
+    def has_meaningful_authoring_content(self):
+        """Return True when the editor contains real building authoring data."""
+        for level in self.authoring_state.sorted_levels():
+            if (
+                level.wall_centerlines
+                or level.doors
+                or level.exits
+                or level.windows
+                or level.manual_virtual_boundaries
+                or level.columns
+                or level.manual_spaces
+                or level.detected_spaces
+            ):
+                return True
+        return bool(self.authoring_state.vertical_connectors)
+
     def exportar_indoor_model(self, nombre_archivo=None, edge_mode="navigation"):
         """
         Nuevo flujo principal: exporta indoor_model.json basado en indoor_data_model.
         No incluye agentes, spawns, beacons, hazards ni configuracion de simulacion.
         """
+        if not self.has_meaningful_authoring_content():
+            message = "IndoorModel no exportado: no hay geometria de edificio dibujada."
+            self.set_status(message)
+            print(message)
+            return None
+
         for level in self.authoring_state.sorted_levels():
             if level.geometry_dirty or not level.detected_spaces:
                 result = detect_spaces(self.authoring_state, level.id)
@@ -2348,9 +2795,17 @@ class DiseñadorConectado:
         with open(ruta_completa, "w", encoding="utf-8") as f:
             json.dump(datos, f, indent=2, ensure_ascii=False)
 
+        workspace_path = self._write_workspace_indoor_model(repo_root, datos, edge_mode=edge_mode)
+
         schema_path = os.path.join(repo_root, "schemas", "indoor", "indoor_model.schema.json")
         self._validar_indoor_model_si_posible(datos, schema_path)
-        print(f"\nINDOOR DATA MODEL EXPORTADO A: '{ruta_completa}' (edge_mode={edge_mode})")
+        print(f"\nINDOOR DATA MODEL EXPORTADO A BACKUP: '{ruta_completa}' (edge_mode={edge_mode})")
+        print(f"INDOOR DATA MODEL ACTIVO: '{workspace_path}'")
+        if edge_mode == "navigation":
+            baseline_path = self._ensure_workspace_baseline_scenario(repo_root)
+            if baseline_path:
+                print(f"SCENARIO BASELINE LISTO: '{baseline_path}'")
+                print(f"ABRIR EVACENGINE: python -m src.evac_engine workbench --model {self._workspace_slug()}")
         if self.auto_visual_checks_on_export:
             try:
                 self.generar_visual_check_indoor_model(ruta_completa, preset="basic")
@@ -2371,7 +2826,67 @@ class DiseñadorConectado:
                 print(f"WARNING: No se pudo generar visual check de indoor_model.json: {exc}")
         else:
             print("Visual checks no generados automaticamente. Usa tools/visualize_indoor_model.py para las vistas que necesites.")
-        return ruta_completa
+        return workspace_path
+
+    def _ensure_workspace_baseline_scenario(self, repo_root):
+        try:
+            from pathlib import Path as FsPath
+
+            if repo_root not in sys.path:
+                sys.path.insert(0, repo_root)
+            from src.evac_engine.model_workspace import ensure_model_baseline_scenario
+
+            return ensure_model_baseline_scenario(self._workspace_slug(), base_dir=FsPath(repo_root).resolve())
+        except Exception as exc:
+            print(f"WARNING: No se pudo crear baseline.json para EvacEngine: {exc}")
+            return None
+
+    def _workspace_slug(self):
+        cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(self.nombre_archivo_base).strip())
+        cleaned = re.sub(r"_+", "_", cleaned).strip("._-")
+        return cleaned or "SpatialEngine_Model"
+
+    def _write_workspace_indoor_model(self, repo_root, datos, edge_mode="navigation"):
+        slug = self._workspace_slug()
+        workspace_dir = os.path.join(repo_root, "models", slug)
+        spatial_dir = os.path.join(workspace_dir, "spatial")
+        scenarios_dir = os.path.join(workspace_dir, "evacuation", "scenarios")
+        experiments_dir = os.path.join(workspace_dir, "evacuation", "experiments")
+        outputs_dir = os.path.join(workspace_dir, "outputs")
+        os.makedirs(spatial_dir, exist_ok=True)
+        os.makedirs(scenarios_dir, exist_ok=True)
+        os.makedirs(experiments_dir, exist_ok=True)
+        os.makedirs(outputs_dir, exist_ok=True)
+
+        filename = "indoor_model_all_adjacency.json" if edge_mode == "all_adjacency" else "indoor_model.json"
+        workspace_path = os.path.join(spatial_dir, filename)
+        with open(workspace_path, "w", encoding="utf-8") as f:
+            json.dump(datos, f, indent=2, ensure_ascii=False)
+
+        readme_path = os.path.join(workspace_dir, "README.md")
+        if not os.path.exists(readme_path):
+            with open(readme_path, "w", encoding="utf-8") as f:
+                f.write(self._workspace_readme(slug))
+        return workspace_path
+
+    def _workspace_readme(self, slug):
+        return (
+            f"# {slug}\n\n"
+            "Workspace creado desde SpatialEngine.\n\n"
+            "- `spatial/indoor_model.json`: modelo espacial/topologico activo del edificio.\n"
+            "- `spatial/indoor_model_all_adjacency.json`: export debug si usas `x`.\n"
+            "- `evacuation/scenarios/`: configuraciones de EvacEngine asociadas a este modelo.\n"
+            "- `evacuation/experiments/`: pruebas comparativas de routing.\n"
+            "- `outputs/`: resultados generados por simulaciones de este modelo.\n\n"
+            "Comandos utiles:\n\n"
+            "```powershell\n"
+            f"python -m src.spatial_engine.web_app --model models\\{slug}\\spatial\\indoor_model.json\n"
+            f"python -m src.evac_engine workbench --model {slug}\n"
+            f"python -m src.evac_engine validate --scenario models\\{slug}\\evacuation\\scenarios\\baseline.json\n"
+            f"python -m src.evac_engine render --scenario models\\{slug}\\evacuation\\scenarios\\baseline.json --gif models\\{slug}\\outputs\\baseline\\simulation.gif --html models\\{slug}\\outputs\\baseline\\simulation.html\n"
+            f"python -m src.evac_engine compare-routing --scenario models\\{slug}\\evacuation\\scenarios\\baseline.json --presets dijkstra_time,astar_time,floyd_warshall_time,robust_agility --output-dir models\\{slug}\\outputs\\baseline_routing_compare\n"
+            "```\n"
+        )
 
     def verificar_visual_y_exportar(self):
         """
@@ -2379,6 +2894,10 @@ class DiseñadorConectado:
         Renderiza el resultado exacto de las operaciones CSG y topológicas antes 
         de empaquetarlas, permitiendo al usuario auditar el modelo matemáticamente.
         """
+        if not self.has_meaningful_authoring_content():
+            print("SpatialEngine cerrado sin geometria de edificio; no se genera indoor_model.json.")
+            return None
+
         conexiones_detectadas = self.calcular_conexiones()
         muros_recortados, datos_puertas = self.procesar_geometria_booleana()
 
@@ -2513,8 +3032,8 @@ class DiseñadorConectado:
 
         # 3. Enrutamiento del File System Absoluto
         # __file__ obtiene la ruta exacta de este script (MLSM_SpatialEngine.py)
-        directorio_script = os.path.dirname(os.path.abspath(__file__))
-        carpeta_destino = os.path.join(directorio_script, "escenarios")
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        carpeta_destino = os.path.join(repo_root, "outputs", "legacy_spatialengine")
         
         os.makedirs(carpeta_destino, exist_ok=True) 
         ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
@@ -2531,21 +3050,50 @@ class DiseñadorConectado:
             "layers": [] # Aquí construiremos el estándar en el futuro
         }
         
-        carpeta_destino = "escenarios"
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        carpeta_destino = os.path.join(repo_root, "outputs", "legacy_spatialengine")
         os.makedirs(carpeta_destino, exist_ok=True)
         ruta_completa = os.path.join(carpeta_destino, nombre_archivo)
         
         with open(ruta_completa, 'w', encoding='utf-8') as f:
             json.dump(datos_indoorgml, f, indent=4)
 
-if __name__ == "__main__":
-    print("=== CONFIGURACIÓN INICIAL ===")
+def build_arg_parser():
+    parser = argparse.ArgumentParser(description="SpatialEngine authoring UI.")
+    parser.add_argument("--name", "-n", help="Base name for the authored model.")
+    parser.add_argument("--width", type=float, default=float(os.environ.get("MLSM_CANVAS_WIDTH", ANCHO)))
+    parser.add_argument("--height", type=float, default=float(os.environ.get("MLSM_CANVAS_HEIGHT", ALTO)))
+    parser.add_argument(
+        "--decomposition",
+        choices=sorted(DECOMPOSITION_STRATEGIES),
+        default=os.environ.get("MLSM_DECOMPOSITION", "triangulation"),
+        help="GeneralSpace decomposition strategy used by automatic detection.",
+    )
+    parser.add_argument(
+        "--render-detail",
+        choices=("fast", "full"),
+        default=os.environ.get("MLSM_RENDER_DETAIL", "fast"),
+        help="fast draws authoring geometry; full draws detailed derived wall mass.",
+    )
+    parser.add_argument("--no-prompt", action="store_true")
+    return parser
+
+
+def initial_model_name(args):
+    if args.name:
+        return args.name
+    if args.no_prompt:
+        return "escenario_custom"
+    print("=== CONFIGURACION INICIAL ===")
     nombre_base = input("Introduce el nombre base para tu escenario (ej. 'nivel_1'): ")
-    # Si el usuario pulsa Enter sin escribir nada, le damos un nombre por defecto
-    if not nombre_base.strip(): 
-        nombre_base = "escenario_custom"
-        
-    # Necesitamos pasarle este nombre a la clase
-    app = DiseñadorConectado(ANCHO, ALTO, nombre_base) 
+    return nombre_base.strip() or "escenario_custom"
+
+
+if __name__ == "__main__":
+    args = build_arg_parser().parse_args()
+    nombre_base = initial_model_name(args)
+    app = DiseñadorConectado(args.width, args.height, nombre_base)
+    app.set_decomposition_strategy(args.decomposition)
+    app.set_render_detail(args.render_detail)
     plt.show()
     app.verificar_visual_y_exportar()

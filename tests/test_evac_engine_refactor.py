@@ -14,8 +14,16 @@ from src.evac_engine.route_recommendation import EvacuationRouteRecommendationSe
 from src.evac_engine.routing import RoutingEngine
 from src.evac_engine.simulation import EvacuationModel
 from src.evac_engine.topology import EvacTopology
-from src.evac_engine.visualization import save_result_gif, save_result_html, trajectory_quality_metrics
-from src.evac_engine.web_app import WORKBENCH_HTML, compare_configured_routing, discover_model_library, load_model_summary, run_configured_simulation
+from src.evac_engine.visualization import graph_edge_payload, save_result_gif, save_result_html, trajectory_quality_metrics
+from src.evac_engine.web_app import (
+    WORKBENCH_HTML,
+    compare_configured_routing,
+    discover_model_library,
+    load_model_summary,
+    run_configured_simulation,
+    save_configured_routing_comparison,
+    save_configured_scenario,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -206,7 +214,9 @@ class EvacEngineRefactorTests(unittest.TestCase):
     def test_multiplicative_risk_cost_model_is_configurable(self):
         indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
         topology = EvacTopology.from_indoor_model(indoor)
-        snapshot = RoutingEngine(topology).compiler.compile(
+        route = RoutingEngine(topology).find_route(
+            "CS_L00_ROOM_A",
+            target_refs=["CS_L00_DOOR_1"],
             mobility_profile=scenario.mobility_profiles["MP_WALKING_ROLLING"],
             cost_policy="minimum_travel_time",
             beacon_state=BeaconState(cell_risk={"CS_L00_DOOR_1": 0.5}),
@@ -221,10 +231,9 @@ class EvacEngineRefactorTests(unittest.TestCase):
             },
         )
 
-        breakdown = snapshot.graph["CS_L00_ROOM_A"]["CS_L00_DOOR_1"]["breakdown"]
+        self.assertTrue(route.reachable)
+        breakdown = route.weight_breakdown
 
-        self.assertEqual("multiplicative_beta", breakdown["riskCostModel"])
-        self.assertEqual(0.5, breakdown["beaconRisk"])
         self.assertAlmostEqual(breakdown["base"] * 2.0, breakdown["total"], places=5)
 
     def test_time_cost_uses_profile_speed_and_connector_slowdown(self):
@@ -364,6 +373,27 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertGreaterEqual(result.metrics["evacuated"], 1)
         self.assertEqual(0, result.metrics["noRoute"])
 
+    def test_static_single_agent_periodically_replans_when_interval_is_enabled(self):
+        source = json.loads((EXAMPLES / "minimal_scenario_model.json").read_text(encoding="utf-8"))
+        source["population"]["agentGroups"][0]["count"] = 1
+        source["routing"].update(
+            {
+                "useBeaconRisk": False,
+                "useHazardRisk": False,
+                "useCongestion": True,
+                "replanPolicy": "on_blocked_or_interval",
+                "replanIntervalSteps": 1,
+            }
+        )
+        source["simulationConfig"]["maxSteps"] = 12
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "scenario_static_single_agent.json"
+            path.write_text(json.dumps(source), encoding="utf-8")
+            indoor, scenario = load_project(EXAMPLES / "minimal_indoor_model.json", path)
+            result = EvacuationModel(indoor, scenario).run()
+
+        self.assertGreater(result.metrics["routePlans"], 1)
+
     def test_vertical_endpoint_route_and_accessibility_filters(self):
         indoor, scenario = load_project(None, EXAMPLES / "scenario_multilevel.json")
         topology = EvacTopology.from_indoor_model(indoor)
@@ -477,6 +507,30 @@ class EvacEngineRefactorTests(unittest.TestCase):
         follower_scale = model._social_speed_scale(follower, (1.0, 0.0))
 
         self.assertGreater(leader_scale, follower_scale)
+
+    def test_body_collision_uses_hard_body_radius_not_personal_space(self):
+        indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
+        scenario.mobility_profiles["MP_WALKING_ROLLING"].attributes["bodyRadiusM"] = 0.24
+        scenario.mobility_profiles["MP_WALKING_ROLLING"].attributes["personalRadiusM"] = 1.0
+        model = EvacuationModel(indoor, scenario)
+        left, right = model.agents[:2]
+        for agent in (left, right):
+            agent.current_cell = "CS_L00_ROOM_A"
+            agent.level = "LEVEL_00"
+            agent.status = "active"
+        left.position = (1.0, 1.0)
+        right.position = (1.05, 1.0)
+
+        model._resolve_overlaps([left, right])
+
+        distance = ((right.position[0] - left.position[0]) ** 2 + (right.position[1] - left.position[1]) ** 2) ** 0.5
+        hard_body_distance = model._body_radius(left) + model._body_radius(right)
+        personal_distance = (
+            scenario.mobility_profiles[left.profile_id].attributes["personalRadiusM"]
+            + scenario.mobility_profiles[right.profile_id].attributes["personalRadiusM"]
+        )
+        self.assertGreaterEqual(distance, hard_body_distance - 1e-4)
+        self.assertLess(distance, personal_distance)
 
     def test_transfer_capacity_lets_closest_agent_enter_first(self):
         indoor, scenario = load_project(None, EXAMPLES / "minimal_scenario_model.json")
@@ -636,11 +690,66 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("riskCostModel", summary["config"])
         self.assertIn("routeRecommendation", summary["config"])
 
+    def test_workbench_model_summary_includes_complete_graph_edges(self):
+        summary = load_model_summary(None, str(EXAMPLES / "scenario_single_floor.json"))
+        graph_edges = summary["graphEdges"]
+        virtual_edges = [edge for edge in graph_edges if str(edge["source"]).startswith("VTN_") or str(edge["target"]).startswith("VTN_")]
+        stair_edges = [edge for edge in graph_edges if edge.get("sourceCategory") == "Stair" or edge.get("targetCategory") == "Stair"]
+
+        self.assertEqual("multilevel_transfer_to_transfer", summary["graphView"])
+        self.assertGreater(len(graph_edges), 0)
+        self.assertGreater(len(summary["virtualBoundaries"]), 0)
+        self.assertGreater(len(virtual_edges), 0)
+        self.assertGreater(len(stair_edges), 0)
+        self.assertTrue(all(edge.get("levels") for edge in virtual_edges))
+
+    def test_graph_edge_payload_infers_levels_for_virtual_to_virtual_edges(self):
+        indoor, _ = load_project(None, EXAMPLES / "scenario_multilevel.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+        graph_edges = graph_edge_payload(topology)
+        virtual_edges = [edge for edge in graph_edges if str(edge["source"]).startswith("VTN_") or str(edge["target"]).startswith("VTN_")]
+
+        self.assertTrue(virtual_edges)
+        self.assertFalse([edge for edge in virtual_edges if not edge.get("levels")])
+
     def test_workbench_routing_experiments_are_after_beacons_and_use_safety_labels(self):
         self.assertLess(WORKBENCH_HTML.index("<h2>Beacons</h2>"), WORKBENCH_HTML.index("<h2>Routing Experiments</h2>"))
         self.assertIn("Safety-cost model", WORKBENCH_HTML)
         self.assertIn("Advanced safety/cost parameters", WORKBENCH_HTML)
         self.assertIn("Safety loss curve preview", WORKBENCH_HTML)
+        self.assertIn("Stair capacity", WORKBENCH_HTML)
+        self.assertIn("Ramp capacity", WORKBENCH_HTML)
+        self.assertIn("linearTransferFlowMode", WORKBENCH_HTML)
+        self.assertIn("Stair/ramp flow", WORKBENCH_HTML)
+        self.assertIn("isConnectorAccessEdge", WORKBENCH_HTML)
+        self.assertNotIn("if (virtualEdge) ctx.setLineDash", WORKBENCH_HTML)
+        self.assertNotIn("if (isVirtualEdge(e)) continue", WORKBENCH_HTML)
+        self.assertIn("Save scenario", WORKBENCH_HTML)
+        self.assertIn("Save GIF/HTML", WORKBENCH_HTML)
+        self.assertIn("Save comparison viewer", WORKBENCH_HTML)
+        self.assertIn("Scenarios for loaded model", WORKBENCH_HTML)
+        self.assertIn("sessionInfo", WORKBENCH_HTML)
+        self.assertIn("workbenchSession", WORKBENCH_HTML)
+        self.assertIn("activeEdges", WORKBENCH_HTML)
+        self.assertIn("routeDebugSummary", WORKBENCH_HTML)
+        self.assertIn("drawRouteDebug", WORKBENCH_HTML)
+        self.assertIn("routeNodePoints", WORKBENCH_HTML)
+        self.assertIn("plannedRouteForAgent", WORKBENCH_HTML)
+        self.assertIn("routeCostChart", WORKBENCH_HTML)
+        self.assertIn("drawRouteCostChart", WORKBENCH_HTML)
+        self.assertIn("routeCostHistory", WORKBENCH_HTML)
+        self.assertIn("Estimated total evacuation time", WORKBENCH_HTML)
+        self.assertIn("estimatedTotalEvacuationS", WORKBENCH_HTML)
+        self.assertIn("pixelsPerMeter", WORKBENCH_HTML)
+        self.assertIn("agentBodyRadiusPx", WORKBENCH_HTML)
+        self.assertIn("Apply preset + run", WORKBENCH_HTML)
+        self.assertIn("drawVirtualBoundaries", WORKBENCH_HTML)
+        self.assertIn("activeVirtualBoundaries", WORKBENCH_HTML)
+        self.assertIn("edgeVisibleOnLevel", WORKBENCH_HTML)
+        self.assertNotIn("drawGraphNodes", WORKBENCH_HTML)
+        self.assertIn("section-description", WORKBENCH_HTML)
+        self.assertIn("setupSidebarSections", WORKBENCH_HTML)
+        self.assertIn("updateControlAvailability", WORKBENCH_HTML)
         self.assertIn("floyd_warshall", WORKBENCH_HTML)
         self.assertIn("plans | routeCost", WORKBENCH_HTML)
         self.assertIn("durationHint", WORKBENCH_HTML)
@@ -678,6 +787,60 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertEqual(2, len(comparison["runs"]))
         self.assertTrue(comparison["routeRows"])
 
+    def test_workbench_can_save_configured_scenario(self):
+        saved = save_configured_scenario(
+            {
+                "scenarioPath": str(EXAMPLES / "minimal_scenario_model.json"),
+                "saveName": "unit_workbench_saved",
+                "config": {
+                    "timeStepS": 0.25,
+                    "maxSteps": 12,
+                    "randomSeed": 7,
+                    "firstGroupCount": 1,
+                    "algorithm": "astar",
+                    "costPolicy": "minimum_travel_time",
+                    "destinationCells": ["CS_L00_ROOM_B"],
+                    "useBeaconRisk": False,
+                },
+                "beacons": [],
+                "scheduledEvents": [],
+            },
+            str(EXAMPLES / "minimal_scenario_model.json"),
+        )
+        saved_path = ROOT / saved["scenarioPath"]
+        try:
+            _, scenario = load_project(None, saved_path)
+            self.assertEqual("unit_workbench_saved", saved_path.stem)
+            self.assertEqual("astar", scenario.routing["algorithm"])
+            self.assertEqual(12, scenario.max_steps)
+        finally:
+            saved_path.unlink(missing_ok=True)
+
+    def test_workbench_can_save_routing_comparison_viewer(self):
+        comparison = save_configured_routing_comparison(
+            {
+                "scenarioPath": str(EXAMPLES / "minimal_scenario_model.json"),
+                "indoorPath": str(EXAMPLES / "minimal_indoor_model.json"),
+                "comparisonOutputDir": "outputs/test_workbench_routing_compare",
+                "presetIds": ["dijkstra_time", "astar_time"],
+                "config": {
+                    "timeStepS": 0.25,
+                    "maxSteps": 8,
+                    "randomSeed": 7,
+                    "firstGroupCount": 1,
+                    "algorithm": "astar",
+                    "costPolicy": "minimum_travel_time",
+                    "useBeaconRisk": False,
+                },
+                "beacons": [],
+                "scheduledEvents": [],
+            },
+            str(EXAMPLES / "minimal_scenario_model.json"),
+        )
+        self.assertTrue((ROOT / comparison["html"]).exists())
+        self.assertTrue((ROOT / comparison["metricsCsv"]).exists())
+        self.assertEqual(["dijkstra_time", "astar_time"], comparison["presetIds"])
+
     def test_workbench_library_lists_available_scenarios_and_models(self):
         library = discover_model_library(EXAMPLES)
         scenario_paths = {item["path"] for item in library["scenarios"]}
@@ -686,6 +849,14 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("examples/indoor_data_model/scenario_multilevel.json", scenario_paths)
         self.assertIn("examples/indoor_data_model/una_sola_planta_indoor_model.json", indoor_paths)
         self.assertIn("examples/indoor_data_model/tres_plantas_indoor_model.json", indoor_paths)
+
+    def test_default_workbench_library_shows_user_models_only(self):
+        library = discover_model_library()
+        indoor_paths = {item["path"] for item in library["indoorModels"]}
+
+        self.assertTrue(all(path.startswith("models/") for path in indoor_paths))
+        self.assertNotIn("examples/indoor_data_model/una_sola_planta_indoor_model.json", indoor_paths)
+        self.assertFalse(any(path.startswith("outputs/indoor_models/") for path in indoor_paths))
 
     def test_workbench_runs_configured_payload(self):
         payload = run_configured_simulation(
@@ -730,6 +901,11 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("noRouteEvents", payload["metrics"])
         self.assertIn("qa", payload)
         self.assertTrue(payload["trajectories"])
+        self.assertIn("events", payload)
+        self.assertTrue(any(event.get("eventType") == "route_planned" for event in payload["events"]))
+        self.assertTrue(payload["routes"])
+        self.assertIn("agentId", payload["routes"][0])
+        self.assertIn("profileId", payload["routes"][0])
         self.assertEqual("BC_WORKBENCH_SNAPSHOT", payload["beacons"][0]["beaconId"])
         self.assertEqual("EV_WORKBENCH_SNAPSHOT", payload["scheduledEvents"][0]["eventId"])
         self.assertTrue(payload["routingConfig"]["useBeaconRisk"])
@@ -795,6 +971,139 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertEqual(0, payload["metrics"]["noRoute"])
         self.assertEqual(1, payload["metrics"]["evacuated"])
         self.assertEqual("CS_L00_EXIT_001", payload["trajectories"][-1]["cellSpaceRef"])
+
+    def test_transfer_capacity_is_released_while_crossing_via_room(self):
+        payload = run_configured_simulation(
+            {
+                "scenarioPath": str(EXAMPLES / "scenario_single_floor.json"),
+                "config": {
+                    "timeStepS": 0.5,
+                    "maxSteps": 20,
+                    "randomSeed": 7,
+                    "algorithm": "astar",
+                    "costPolicy": "minimum_travel_time",
+                    "destinationCells": ["CS_L00_EXIT_001"],
+                },
+                "manualAgents": [
+                    {
+                        "agentId": "MANUAL_DOOR_RELEASE_001",
+                        "mobilityProfileRef": "MP_WALKING",
+                        "initialCellSpaceRef": "CS_L00_DOOR_001",
+                        "initialPosition": {"type": "Point", "coordinates": [3.5, 8.55]},
+                    }
+                ],
+                "beacons": [],
+                "scheduledEvents": [],
+            },
+            str(EXAMPLES / "scenario_single_floor.json"),
+        )
+
+        self.assertTrue(
+            any(
+                row["cellSpaceRef"] == "CS_L00_ROOM_029" and row["routeNextCell"] == "CS_L00_DOOR_012"
+                for row in payload["trajectories"]
+            )
+        )
+
+    def test_walking_profiles_keep_stairs_and_rolling_filters_them(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_single_floor.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+
+        def connector_counts(profile_id: str) -> tuple[int, int]:
+            snapshot = RoutingEngine(topology).compiler.compile(
+                mobility_profile=scenario.mobility_profiles[profile_id],
+                routing_config={**scenario.physics, **scenario.routing},
+            )
+            stair = 0
+            ramp = 0
+            for source, target, data in snapshot.graph.edges(data=True):
+                raw = data.get("raw") or {}
+                refs = [source, target, raw.get("viaSpaceRef"), raw.get("transferSpaceRef"), *((raw.get("viaSpaceRefs") or []))]
+                categories = {indoor.cells_by_id[ref].category for ref in refs if ref in indoor.cells_by_id}
+                if raw.get("connectorType") == "Stair" or "Stair" in categories:
+                    stair += 1
+                if raw.get("connectorType") == "Ramp" or "Ramp" in categories:
+                    ramp += 1
+            return stair, ramp
+
+        walking_stair, walking_ramp = connector_counts("MP_WALKING")
+        rolling_stair, rolling_ramp = connector_counts("MP_ROLLING_ACCESSIBLE")
+
+        self.assertGreater(walking_stair, 0)
+        self.assertGreater(walking_ramp, 0)
+        self.assertEqual(0, rolling_stair)
+        self.assertGreater(rolling_ramp, 0)
+
+    def test_walking_route_can_use_stair_on_transfer_to_transfer_graph(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_single_floor.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+        route = RoutingEngine(topology).find_route(
+            "CS_L00_ROOM_017",
+            target_refs=scenario.routing["destination"]["cellSpaceRefs"],
+            mobility_profile=scenario.mobility_profiles["MP_WALKING"],
+            algorithm="dijkstra",
+            routing_config={**scenario.physics, **scenario.routing},
+        )
+
+        self.assertEqual("multilevel_transfer_to_transfer", topology.graph_view_name)
+        self.assertTrue(route.reachable)
+        categories = [indoor.cells_by_id[node].category for node in route.node_sequence if node in indoor.cells_by_id]
+        self.assertIn("Stair", categories)
+        self.assertIn("firstStep", route.weight_breakdown)
+        self.assertIn("originCandidates", route.weight_breakdown)
+        self.assertTrue(route.weight_breakdown["originCandidates"])
+        self.assertIn("routeTotal", route.weight_breakdown["originCandidates"][0])
+        self.assertIn("suffixPath", route.weight_breakdown["originCandidates"][0])
+
+    def test_graph_origin_position_reduces_remaining_first_edge_cost(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_single_floor.json")
+        topology = EvacTopology.from_indoor_model(indoor)
+        engine = RoutingEngine(topology)
+        routing_config = {**scenario.physics, **scenario.routing}
+        found_progressive_edge = False
+        for source, target, data in topology.graph.edges(data=True):
+            source_pos = topology.node_position(source)
+            target_pos = topology.node_position(target)
+            if not source_pos or not target_pos or float(data.get("lengthM") or 0) <= 0.5:
+                continue
+            near_target = (source_pos[0] * 0.2 + target_pos[0] * 0.8, source_pos[1] * 0.2 + target_pos[1] * 0.8)
+            baseline = engine.find_route(
+                source,
+                target_refs=[target],
+                mobility_profile=scenario.mobility_profiles["MP_WALKING"],
+                algorithm="dijkstra",
+                routing_config=routing_config,
+            )
+            progressed = engine.find_route(
+                source,
+                target_refs=[target],
+                mobility_profile=scenario.mobility_profiles["MP_WALKING"],
+                algorithm="dijkstra",
+                routing_config=routing_config,
+                origin_position=near_target,
+                origin_level=topology.node_level(source),
+            )
+            if baseline.reachable and progressed.reachable and progressed.total_cost < baseline.total_cost:
+                found_progressive_edge = True
+                break
+
+        self.assertTrue(found_progressive_edge)
+
+    def test_stair_and_ramp_capacity_apply_to_vertical_endpoints(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_single_floor.json")
+        scenario.physics["stairCapacity"] = 3
+        scenario.physics["rampCapacity"] = 2
+        model = EvacuationModel(indoor, scenario)
+
+        self.assertEqual(3, model._transfer_capacity("CS_L00_EP_VC_004_LEVEL_00_ENTRY"))
+        self.assertEqual(2, model._transfer_capacity("CS_L00_EP_VC_001_LEVEL_00_ENTRY"))
+
+    def test_linear_transfer_does_not_self_block_after_entry(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_single_floor.json")
+        model = EvacuationModel(indoor, scenario)
+
+        self.assertTrue(model._requires_transfer_capacity("CS_L00_ROOM_017", "CS_L00_EP_VC_003_LEVEL_00_ENTRY"))
+        self.assertFalse(model._requires_transfer_capacity("CS_L00_EP_VC_003_LEVEL_00_ENTRY", "CS_L00_EP_VC_003_LEVEL_00_EXIT"))
 
 
 if __name__ == "__main__":

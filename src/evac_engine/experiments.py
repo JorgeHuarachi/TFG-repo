@@ -465,13 +465,16 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def _write_plot(output_root: Path, rows: list[dict[str, Any]]) -> Path | None:
     try:
-        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
     except Exception:
         return None
     if not rows:
         return None
     labels = [str(row["presetId"]) for row in rows]
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8))
+    fig = Figure(figsize=(13, 8))
+    FigureCanvasAgg(fig)
+    axes = fig.subplots(2, 2)
     panels = [
         ("meanEvacuationTimeS", "Tiempo medio evacuacion (s)"),
         ("meanRouteCost", "Coste medio de ruta"),
@@ -487,5 +490,4 @@ def _write_plot(output_root: Path, rows: list[dict[str, Any]]) -> Path | None:
     fig.tight_layout()
     plot_path = output_root / "comparison_plot.png"
     fig.savefig(plot_path, dpi=150)
-    plt.close(fig)
     return plot_path

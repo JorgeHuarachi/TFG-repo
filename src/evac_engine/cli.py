@@ -28,6 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument("--origin", required=True)
     route.add_argument("--target", action="append", default=[])
     route.add_argument("--profile")
+    route.add_argument("--origin-x", type=float)
+    route.add_argument("--origin-y", type=float)
+    route.add_argument("--origin-level")
 
     run = sub.add_parser("run", help="Run the simulation and write outputs")
     _add_project_args(run)
@@ -51,7 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     workbench = sub.add_parser("workbench", help="Start the browser-based local workbench")
     workbench.add_argument("--host", default="127.0.0.1")
     workbench.add_argument("--port", type=int, default=8765)
-    workbench.add_argument("--scenario", default="examples/indoor_data_model/scenario_single_floor.json")
+    workbench.add_argument("--scenario")
+    workbench.add_argument("--indoor", help="IndoorModel path; creates/uses a baseline scenario when --scenario is omitted")
+    workbench.add_argument("--model", help="Model workspace name or path under models/; creates/uses evacuation/scenarios/baseline.json")
+    workbench.add_argument("--library-root", help="Root scanned by the workbench library selectors")
 
     render = sub.add_parser("render", help="Run the simulation and render a GIF")
     _add_project_args(render)
@@ -102,9 +108,13 @@ def main(argv: list[str] | None = None) -> int:
         run_desktop_app(args.indoor, args.scenario)
         return 0
     if args.command == "workbench":
+        if args.model and args.scenario:
+            parser.error("workbench accepts --model or --scenario, not both")
+        if args.model and args.indoor:
+            parser.error("workbench accepts --model or --indoor, not both")
         from .web_app import run_workbench
 
-        run_workbench(args.host, args.port, args.scenario)
+        run_workbench(args.host, args.port, args.scenario, indoor_path=args.indoor, model_name=args.model, library_root=args.library_root)
         return 0
     if args.command == "validate":
         service = ApplicationService()
@@ -113,7 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "route":
         service = ApplicationService()
         service.load(args.indoor, args.scenario)
-        print_json(service.plan_route(args.origin, args.target or None, args.profile))
+        origin_position = None
+        if args.origin_x is not None and args.origin_y is not None:
+            origin_position = (args.origin_x, args.origin_y)
+        print_json(service.plan_route(args.origin, args.target or None, args.profile, origin_position, args.origin_level))
         return 0
     if args.command == "run":
         service = ApplicationService()

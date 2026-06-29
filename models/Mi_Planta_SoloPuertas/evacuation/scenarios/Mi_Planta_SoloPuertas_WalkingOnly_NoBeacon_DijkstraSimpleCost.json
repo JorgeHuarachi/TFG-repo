@@ -1,0 +1,438 @@
+{
+  "scenarioId": "SCENARIO_MI_PLANTA_SOLOPUERTAS_MI_PLANTA_SOLOPUERTAS_WALKINGONLY_NOBEACON_DIJKSTRASIMPLECOST",
+  "scenarioName": "Mi_Planta_SoloPuertas_Mi_Planta_SoloPuertas_WalkingOnly_NoBeacon_DijkstraSimpleCost",
+  "metadata": {
+    "name": "Mi_Planta_SoloPuertas_Mi_Planta_SoloPuertas_WalkingOnly_NoBeacon_DijkstraSimpleCost",
+    "description": "Baseline editable generado desde un indoor_model.json para abrir EvacEngine.",
+    "createdAt": "2026-06-26T04:12:29Z",
+    "modifiedAt": "2026-06-26T11:08:44Z",
+    "generator": "evac_engine.workbench.save_configured_scenario"
+  },
+  "indoorModelRef": {
+    "path": "../../spatial/indoor_model.json",
+    "schemaRef": "../../../../schemas/indoor/indoor_model.schema.json"
+  },
+  "catalogs": {},
+  "population": {
+    "mobilityProfiles": [
+      {
+        "profileId": "MP_WALKING",
+        "label": "Walking adults",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.25,
+        "bodyRadiusM": 0.25,
+        "personalRadiusM": 0.5,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ELDERLY",
+        "label": "Slower elderly pedestrians",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 0.75,
+        "bodyRadiusM": 0.27,
+        "personalRadiusM": 0.62,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_CHILD",
+        "label": "Smaller faster pedestrian",
+        "locomotionTypes": [
+          "Walking"
+        ],
+        "baseSpeedMps": 1.45,
+        "bodyRadiusM": 0.18,
+        "personalRadiusM": 0.42,
+        "canUseStairs": true,
+        "canUseRamps": true,
+        "canUseElevators": true
+      },
+      {
+        "profileId": "MP_ROLLING_ACCESSIBLE",
+        "label": "Rolling accessible profile",
+        "locomotionTypes": [
+          "Rolling"
+        ],
+        "baseSpeedMps": 0.9,
+        "bodyRadiusM": 0.3,
+        "personalRadiusM": 0.58,
+        "canUseStairs": false,
+        "canUseRamps": true,
+        "canUseElevators": true
+      }
+    ],
+    "agentGroups": [],
+    "agentSpawns": [
+      {
+        "spawnId": "SPAWN_BASELINE_001",
+        "levelRef": "LEVEL_00",
+        "cellSpaceRef": "CS_L00_ROOM_001",
+        "position": {
+          "type": "Point",
+          "coordinates": [
+            1.491,
+            4.315
+          ]
+        },
+        "capacity": 50,
+        "description": "Spawn inicial editable creado automaticamente."
+      }
+    ],
+    "agents": [
+      {
+        "agentId": "MANUAL_001",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.778,
+            1.676
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_002",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.673,
+            2.943
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_003",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.541,
+            4.051
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_004",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.593,
+            5.345
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_005",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.646,
+            7.06
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_006",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_001",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            0.461,
+            8.38
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_007",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_002",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            2.758,
+            0.778
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_008",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_002",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            4.447,
+            0.488
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_009",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_002",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            5.952,
+            0.303
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_010",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_002",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            7.034,
+            0.541
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_011",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_006",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            6.612,
+            6.269
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_012",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_006",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            6.427,
+            3.154
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_013",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_007",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            9.806,
+            1.201
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_014",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_009",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            9.964,
+            6.216
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_015",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_004",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            7.404,
+            8.486
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_016",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_012",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            13.422,
+            0.884
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_017",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_013",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            12.894,
+            3.286
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_018",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_005",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            14.451,
+            6.796
+          ]
+        }
+      },
+      {
+        "agentId": "MANUAL_019",
+        "mobilityProfileRef": "MP_WALKING",
+        "initialCellSpaceRef": "CS_L00_ROOM_014",
+        "initialPosition": {
+          "type": "Point",
+          "coordinates": [
+            15.718,
+            1.517
+          ]
+        }
+      }
+    ]
+  },
+  "beaconSystem": {
+    "enabled": true,
+    "fusion": {
+      "method": "conservative_min",
+      "defaultRadiusM": 6.0
+    },
+    "beacons": []
+  },
+  "hazards": {
+    "enabled": false,
+    "sources": []
+  },
+  "environmentOverrides": {},
+  "routing": {
+    "algorithm": "astar",
+    "costPolicy": "minimum_travel_time",
+    "destination": {
+      "mode": "explicit_cells",
+      "cellSpaceRefs": [
+        "CS_L00_EXIT_001"
+      ]
+    },
+    "deriveConnectivityFromEdges": true,
+    "useDynamicWeights": true,
+    "useBeaconRisk": false,
+    "beaconBlockThreshold": 0.85,
+    "useHazardRisk": true,
+    "useCongestion": true,
+    "replanPolicy": "on_blocked_or_interval",
+    "replanIntervalSteps": 2,
+    "noRouteRetryIntervalSteps": 2,
+    "riskCostModel": "legacy_additive",
+    "riskEndpointPolicy": "target",
+    "riskAggregation": "sum",
+    "riskEdgePrecedence": true,
+    "riskAlpha": 1.0,
+    "hazardBeta": 20.0,
+    "beaconBeta": 5.0,
+    "riskUnitCost": 1.0,
+    "routeRecommendation": {
+      "routeSelection": "lowest_cost",
+      "kShortestPaths": 6,
+      "candidateCostTolerance": 0.35,
+      "robustnessTolerance": 0.2,
+      "centralityTolerance": 0.35,
+      "centralityMaxPaths": 8,
+      "centralityMaxOverlap": 0.8,
+      "costWeight": 1,
+      "robustnessWeight": 0.35,
+      "agilityWeight": 0.35,
+      "agilityAggregation": "mean"
+    }
+  },
+  "physics": {
+    "bodyRadiusM": 0.25,
+    "personalRadiusM": 0.5,
+    "wallRepulsion": 4.0,
+    "socialRepulsion": 2.4,
+    "proximitySlowdownMemoryS": 0.22,
+    "spawnMinSpacingM": 0.6,
+    "bodySeparationSlackM": 0.04,
+    "doorQueueClearanceM": 0.08,
+    "doorQueueCorrectionMaxM": 0.32,
+    "transferQueueActivationM": 1.25,
+    "queueCorrectionSpeedScale": 0.55,
+    "stairSpeedFactor": 0.55,
+    "rampSpeedFactor": 0.7,
+    "elevatorSpeedFactor": 0.5,
+    "stairCapacity": 1,
+    "rampCapacity": 1,
+    "maxAccelerationMps2": 6.0,
+    "velocityInertia": 0.2,
+    "maxTurnRateRadS": 3.8,
+    "lineOfSightDistanceM": 18.0,
+    "lineOfSightMaxNodes": 6,
+    "lineOfSightBlend": 0.45,
+    "nearLineOfSightBlend": 0.6,
+    "doorCenterBias": 0.0,
+    "doorEntryInsetM": 0.035,
+    "doorExitInsetM": 0.32,
+    "virtualBoundaryExitInsetM": 0.28,
+    "virtualBoundaryEntryInsetM": 0.08,
+    "virtualBoundaryArrivalRadiusM": 0.35,
+    "linearTransferExitInsetM": 0.45,
+    "doorApproachLookaheadM": 0.55,
+    "linearTransferLookaheadM": 0.9,
+    "doorPreEntryDistanceM": 0.36,
+    "linearTransferPreEntryDistanceM": 0.65,
+    "doorApproachLateralToleranceM": 0.18,
+    "wallRepulsionDistanceM": 0.8,
+    "wallClearanceM": 0.24,
+    "transferWallClearanceM": 0.14
+  },
+  "scheduledEvents": [],
+  "simulationConfig": {
+    "timeStepS": 0.5,
+    "maxSteps": 220,
+    "randomSeed": 22,
+    "enabledOverlays": [
+      "population"
+    ]
+  },
+  "experiments": {
+    "replications": 1,
+    "parameterSweep": []
+  },
+  "outputs": {
+    "outputFolder": "models/Mi_Planta_SoloPuertas/outputs/Mi_Planta_SoloPuertas_WalkingOnly_NoBeacon_DijkstraSimpleCost",
+    "saveRoutes": true,
+    "saveMetrics": true,
+    "saveTimeSeries": false,
+    "saveEvents": true,
+    "saveTrajectories": true
+  },
+  "scenarioDataModel": {
+    "modelName": "indoor_data_model",
+    "modelVersion": "0.2-draft",
+    "profile": "EvacEngine scenario overlay referencing indoor_model.json"
+  }
+}

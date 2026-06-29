@@ -14,3 +14,4 @@ __pycache__/
 # Archivos especificos
 BORRAR*.md
 outputs/
+models/**/outputs/
