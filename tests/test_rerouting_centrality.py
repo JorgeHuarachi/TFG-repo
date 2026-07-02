@@ -1,7 +1,10 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import networkx as nx
 
+from src.evac_engine.loaders import load_project
 from src.evac_engine.rerouting_centrality import (
     cer_node_scores,
     failure_units_for_path,
@@ -9,6 +12,11 @@ from src.evac_engine.rerouting_centrality import (
     rerouting_evacuation_centrality,
 )
 from src.evac_engine.route_recommendation import EvacuationRouteRecommendationService, RouteRecommendationConfig
+from src.evac_engine.routing_policy_explainer import export_routing_policy_explainer
+
+
+ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES = ROOT / "examples" / "indoor_data_model"
 
 
 def edge(graph: nx.DiGraph, source: str, target: str, weight: float, resource: str) -> None:
@@ -180,6 +188,52 @@ class ReroutingCentralityTests(unittest.TestCase):
         scores = cer_node_scores(result)
 
         self.assertEqual(1.0, scores["S"])
+
+    def test_node_scores_support_profile_weights(self):
+        graph = nx.DiGraph()
+        edge(graph, "S", "A", 1.0, "R_SA")
+        edge(graph, "A", "T", 1.0, "R_AT")
+        edge(graph, "S", "B", 1.0, "R_SB")
+        edge(graph, "B", "T", 1.0, "R_BT")
+        edge(graph, "S", "C", 1.1, "R_SC")
+        edge(graph, "C", "T", 1.1, "R_CT")
+
+        result = rerouting_evacuation_centrality(
+            graph,
+            ["T"],
+            sources=["S"],
+            failure_profiles=[(1,), (1, 1)],
+            cost_tolerance=0.2,
+            max_runtime_ms=500,
+        )
+        raw = cer_node_scores(result)
+        weighted = cer_node_scores(result, profile_weights={"(1)": 1.0, "(1,1)": 0.25})
+
+        self.assertGreater(raw["S"], weighted["S"])
+        self.assertGreater(weighted["S"], 0.0)
+
+    def test_policy_explainer_exports_html_and_json(self):
+        indoor, scenario = load_project(None, EXAMPLES / "scenario_single_floor.json")
+        with TemporaryDirectory() as tmp:
+            payload = export_routing_policy_explainer(
+                indoor,
+                scenario,
+                origin="CS_L00_DOOR_001",
+                target="CS_L00_EXIT_001",
+                profile_id="MP_WALKING",
+                output_dir=tmp,
+                failure_profiles=[(1,)],
+                max_runtime_ms=500,
+            )
+
+            self.assertTrue(Path(payload["outputs"]["html"]).exists())
+            self.assertTrue(Path(payload["outputs"]["json"]).exists())
+            self.assertTrue(Path(payload["outputs"]["cerCostHtml"]).exists())
+            self.assertTrue(Path(payload["outputs"]["cerAgilityHtml"]).exists())
+            self.assertTrue(Path(payload["outputs"]["cerAllNodesJson"]).exists())
+            self.assertEqual("CER-Cost", payload["result"]["policies"]["policyLabels"]["cer_weighted"])
+            self.assertEqual("CER-Agility", payload["result"]["policies"]["policyLabels"]["cer_agility_yen"])
+            self.assertTrue(payload["result"]["cer"]["allNodes"])
 
 
 if __name__ == "__main__":

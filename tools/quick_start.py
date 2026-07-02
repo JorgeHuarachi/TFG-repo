@@ -33,9 +33,10 @@ def main() -> int:
             "  3) Abrir EvacEngine Workbench por modelo\n"
             "  4) Listar mis modelos de trabajo\n"
             "  5) Listar todo lo detectable\n"
-            "  6) Salir\n"
+            "  6) CER-tree playground\n"
+            "  7) Salir\n"
         )
-        choice = input("Opcion [1-6]: ").strip()
+        choice = input("Opcion [1-7]: ").strip()
         if choice == "1":
             launch_spatial_authoring()
         elif choice == "2":
@@ -46,7 +47,9 @@ def main() -> int:
             list_models(source="models")
         elif choice == "5":
             list_models(source=None)
-        elif choice in {"6", "q", "Q", "salir"}:
+        elif choice == "6":
+            launch_cer_tree_playground()
+        elif choice in {"7", "q", "Q", "salir"}:
             return 0
         else:
             print("Opcion no reconocida.")
@@ -130,6 +133,13 @@ def launch_evac_workbench() -> None:
     print(f"Sesion: {session}")
     print("En la UI: Save scenario guarda JSON; Save GIF/HTML graba la simulacion.")
     webbrowser.open_new_tab(url)
+
+
+def launch_cer_tree_playground() -> None:
+    cmd = [PYTHON, "tools/cer_tree_playground.py"]
+    print("\nAbriendo CER-tree playground interactivo.")
+    print_command(cmd)
+    subprocess.run(cmd, cwd=REPO_ROOT, check=False)
 
 
 def list_models(source: str | None = "models") -> None:

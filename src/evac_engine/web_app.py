@@ -1110,7 +1110,7 @@ WORKBENCH_HTML = """<!doctype html>
       </div>
       <div class="row">
         <div><label title="Safety-loss to cost conversion used by linear_time_risk.">safety unit cost</label><input id="riskUnitCost" type="number" min="0" step="0.05" value="1"></div>
-        <div><label title="Policy that selects a candidate route after the search algorithm generates candidates.">Route selection</label><select id="routeSelection"><option>lowest_cost</option><option>highest_robustness</option><option>highest_agility</option><option>robust_agility</option><option>cer_weighted</option><option>cer_agility_yen</option></select></div>
+        <div><label title="Policy that selects a candidate route after the search algorithm generates candidates.">Route selection</label><select id="routeSelection"><option value="lowest_cost">lowest_cost</option><option value="highest_robustness">highest_robustness</option><option value="highest_agility">highest_agility</option><option value="robust_agility">robust_agility</option><option value="cer_weighted">CER-Cost (cer_weighted)</option><option value="cer_agility_yen">CER-Agility (cer_agility_yen)</option></select></div>
       </div>
       <div class="row three">
         <div><label title="Number of candidate routes for Yen/advanced policies.">k routes</label><input id="kShortestPaths" type="number" min="1" step="1" value="6"></div>
@@ -1133,14 +1133,14 @@ WORKBENCH_HTML = """<!doctype html>
         <label><input id="reroutingUseStructuralPrecompute" type="checkbox" style="width:auto" checked> structural CER precompute</label>
       </div>
       <div class="row three">
-        <div><label title="Failure profiles separated by semicolon, e.g. 1;1,1;2.">CER profiles</label><input id="reroutingFailureProfiles" type="text" value="1;1,1"></div>
-        <div><label title="CER tolerance: Cmax = (1 + tau) * C0.">CER tolerance</label><input id="reroutingCostTolerance" type="number" min="0" step="0.05" value="0.35"></div>
+        <div><label title="Failure profiles separated by semicolon, e.g. 1;1,1;1,1,1;1,2.">CER profiles</label><input id="reroutingFailureProfiles" type="text" value="1;1,1;1,1,1;1,2"></div>
+        <div><label title="CER tolerance: Cmax = (1 + tau) * C0.">CER tolerance</label><input id="reroutingCostTolerance" type="number" min="0" step="0.05" value="0.2"></div>
         <div><label title="Physical unit removed during CER failures.">failure unit</label><select id="reroutingFailureUnit"><option>resource</option><option>arc</option><option>undirected_pair</option><option>cell</option></select></div>
       </div>
       <div class="row three">
         <div><label title="Distinctness policy for alternative routes.">distinctness</label><select id="reroutingDistinctnessPolicy"><option>exact</option><option>overlap</option></select></div>
         <div><label title="Maximum CER failure combinations per computation.">CER max cases</label><input id="reroutingMaxCombinations" type="number" min="1" step="1" value="500"></div>
-        <div><label title="Maximum CER computation time in milliseconds.">CER max ms</label><input id="reroutingMaxRuntimeMs" type="number" min="1" step="50" value="1000"></div>
+        <div><label title="Maximum CER computation time in milliseconds.">CER max ms</label><input id="reroutingMaxRuntimeMs" type="number" min="1" step="50" value="10000"></div>
       </div>
     </details>
     <details>
@@ -1618,11 +1618,11 @@ function routingConfigFromControls() {
       centralityType: $("centralityType").value,
       reroutingEnabled: $("centralityType").value === "rerouting" || $("routeSelection").value.startsWith("cer_"),
       reroutingFailureProfiles: parseReroutingProfiles($("reroutingFailureProfiles").value),
-      reroutingCostTolerance: numberFromInput("reroutingCostTolerance", 0.35),
+      reroutingCostTolerance: numberFromInput("reroutingCostTolerance", 0.2),
       reroutingFailureUnit: $("reroutingFailureUnit").value,
       reroutingDistinctnessPolicy: $("reroutingDistinctnessPolicy").value,
       reroutingMaxCombinations: Math.max(1, Math.round(numberFromInput("reroutingMaxCombinations", 500))),
-      reroutingMaxRuntimeMs: Math.max(1, Math.round(numberFromInput("reroutingMaxRuntimeMs", 1000))),
+      reroutingMaxRuntimeMs: Math.max(1, Math.round(numberFromInput("reroutingMaxRuntimeMs", 10000))),
       reroutingUseStructuralPrecompute: $("reroutingUseStructuralPrecompute").checked,
     }
   };

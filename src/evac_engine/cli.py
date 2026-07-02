@@ -9,9 +9,11 @@ from typing import Any
 
 from .application import ApplicationService
 from .cer_export import default_cer_output_dir, export_cer_analysis
+from .cer_tree import CERTreeConfig, default_cer_tree_output_dir, export_cer_tree_for_scenario
 from .experiments import available_routing_presets, compare_routing_presets
 from .loaders import load_project
 from .overlays import BeaconSimulator
+from .routing_policy_explainer import default_policy_output_dir, export_routing_policy_explainer
 from .simulation import EvacuationModel
 from .topology import EvacTopology
 from .visualization import build_visualization_payload, save_result_gif, save_result_html
@@ -58,10 +60,54 @@ def build_parser() -> argparse.ArgumentParser:
     cer.add_argument("--gif", action="store_true", help="Also export cer_explanation.gif")
     cer.add_argument("--level", help="Level to render in PNG/GIF")
     cer.add_argument("--fps", type=int, default=2)
-    cer.add_argument("--max-frames", type=int, default=120)
+    cer.add_argument("--max-frames", type=int, default=120, help="Maximum CER GIF frames; 0 means export every debug step")
+    cer.add_argument("--failure-profiles", help='Failure profiles separated by semicolon, e.g. "1;1,1;1,2"')
+    cer.add_argument("--cost-tolerance", type=float, help="CER tau tolerance; Cmax = C0 * (1 + tau)")
     cer.add_argument("--dynamic", action="store_true", help="Use dynamic snapshot with beacons/hazards at --step/--time-s")
     cer.add_argument("--step", type=int, default=0)
     cer.add_argument("--time-s", type=float, default=0.0)
+
+    cer_tree = sub.add_parser("cer-tree", help="Audit CER as a bounded rerouting failure tree on weighted snapshots")
+    _add_project_args(cer_tree)
+    cer_tree.add_argument("--origin", action="append", default=[], help="Origin CellSpace id/ref. Repeat for several origins")
+    cer_tree.add_argument("--all-origins", action="store_true", help="Evaluate every node in the weighted snapshot as origin")
+    cer_tree.add_argument("--target", action="append", default=[], help="Target exit CellSpace id/ref. Defaults to scenario destination/exits")
+    cer_tree.add_argument("--profile", action="append", default=[], help="Mobility profile id. Repeat for walking/rolling comparisons; defaults to all profiles")
+    cer_tree.add_argument("--output-dir", help="Output folder for cer_tree JSON/CSV/HTML")
+    cer_tree.add_argument("--formats", default="json,csv,html,visual-html", help="Comma-separated: json,csv,html,visual-html")
+    cer_tree.add_argument("--tau", type=float, default=0.3, help="Fixed CER tolerance; Cmax = C0 * (1 + tau)")
+    cer_tree.add_argument("--max-depth", type=int, default=2)
+    cer_tree.add_argument("--max-k", type=int, default=2)
+    cer_tree.add_argument("--max-total-failures", type=int, default=4)
+    cer_tree.add_argument("--max-combinations", type=int, default=1000, help="Maximum combinations evaluated per state and k")
+    cer_tree.add_argument("--max-runtime-ms", type=int, default=1000, help="Maximum runtime per mobility-profile run")
+    cer_tree.add_argument("--max-distinct-routes", type=int)
+    cer_tree.add_argument("--failure-profiles", help='Failure profiles separated by semicolon, e.g. "1;1,1;2;2,1"')
+    cer_tree.add_argument("--failure-unit", choices=["resource", "arc", "undirected_pair", "undirected_connection", "cell"], default="resource")
+    cer_tree.add_argument("--dynamic", action="store_true", help="Use dynamic hazards/beacons at --step/--time-s instead of structural snapshot")
+    cer_tree.add_argument("--level", help="Level to render in visual-html output")
+    cer_tree.add_argument("--visual-order", choices=["tree", "calculation"], default="tree", help="Order visual steps by CER branch tree or raw calculation order")
+    cer_tree.add_argument("--visual-layout", choices=["wide", "standard"], default="wide", help="Use wide graph-first layout or the original compact layout")
+    cer_tree.add_argument("--step", type=int, default=0)
+    cer_tree.add_argument("--time-s", type=float, default=0.0)
+
+    policy = sub.add_parser("explain-routing-policies", help="Export HTML/JSON explaining CER-Cost and CER-Agility policies")
+    _add_project_args(policy)
+    policy.add_argument("--origin", required=True, help="Origin CellSpace id/ref to explain")
+    policy.add_argument("--target", help="Target exit CellSpace id/ref; defaults to first scenario destination")
+    policy.add_argument("--profile", help="Mobility profile id; defaults to first group/agent profile")
+    policy.add_argument("--output-dir", help="Output folder for policy comparison and per-policy HTML explainers")
+    policy.add_argument("--formats", default="json,html", help="Comma-separated: json,html")
+    policy.add_argument("--level", help="Level to render in the HTML")
+    policy.add_argument("--failure-profiles", default="1;1,1;1,1,1", help='CER profiles separated by semicolon, e.g. "1;1,1;1,2"')
+    policy.add_argument("--cost-tolerance", type=float, default=0.2, help="CER tau tolerance; Cmax = C0 * (1 + tau)")
+    policy.add_argument("--profile-weights", default="(1)=1;(1,1)=0.6;(1,1,1)=0.3", help='Profile weights, e.g. "(1)=1;(1,1)=0.6"')
+    policy.add_argument("--k-routes", type=int, default=6)
+    policy.add_argument("--candidate-cost-tolerance", type=float, default=0.35)
+    policy.add_argument("--agility-weight", type=float, default=0.35)
+    policy.add_argument("--agility-aggregation", choices=["mean", "geometric"], default="mean")
+    policy.add_argument("--max-combinations", type=int, default=500)
+    policy.add_argument("--max-runtime-ms", type=int, default=30000)
 
     ui = sub.add_parser("ui", help="Open the desktop UI")
     ui.add_argument("--indoor")
@@ -238,7 +284,70 @@ def main(argv: list[str] | None = None) -> int:
             time_s=args.time_s,
             include_gif=bool(args.gif),
             fps=args.fps,
-            max_frames=args.max_frames,
+            max_frames=None if args.max_frames == 0 else args.max_frames,
+            failure_profiles=_parse_failure_profiles_arg(args.failure_profiles),
+            cost_tolerance=args.cost_tolerance,
+        )
+        print_json({key: value for key, value in payload.items() if key != "result"})
+        return 0
+    if args.command == "cer-tree":
+        if not args.origin and not args.all_origins:
+            parser.error("cer-tree requires at least one --origin or --all-origins")
+        indoor, scenario = load_project(args.indoor, args.scenario)
+        output_dir = args.output_dir or default_cer_tree_output_dir(scenario.path, indoor.path)
+        formats = [item.strip() for item in str(args.formats).split(",") if item.strip()]
+        config = CERTreeConfig(
+            tau=args.tau,
+            max_depth=args.max_depth,
+            max_k=args.max_k,
+            max_total_failures=args.max_total_failures,
+            max_combinations=args.max_combinations,
+            max_runtime_ms=args.max_runtime_ms,
+            max_distinct_routes=args.max_distinct_routes,
+            failure_profiles=_parse_failure_profiles_arg(args.failure_profiles),
+            failure_unit=args.failure_unit,
+        )
+        payload = export_cer_tree_for_scenario(
+            indoor,
+            scenario,
+            profile_ids=args.profile or None,
+            origins=None if args.all_origins else args.origin,
+            targets=args.target or None,
+            output_dir=output_dir,
+            formats=formats,
+            config=config,
+            structural=not bool(args.dynamic),
+            step=args.step,
+            time_s=args.time_s,
+            visual_level=args.level,
+            visual_order=args.visual_order,
+            visual_layout=args.visual_layout,
+        )
+        print_json({key: value for key, value in payload.items() if key != "runs"})
+        return 0
+    if args.command == "explain-routing-policies":
+        indoor, scenario = load_project(args.indoor, args.scenario)
+        target = args.target or _first_destination(scenario)
+        output_dir = args.output_dir or default_policy_output_dir(scenario.path, indoor.path, args.origin, target or "target")
+        formats = [item.strip() for item in str(args.formats).split(",") if item.strip()]
+        payload = export_routing_policy_explainer(
+            indoor,
+            scenario,
+            origin=args.origin,
+            target=target,
+            profile_id=args.profile,
+            output_dir=output_dir,
+            formats=formats,
+            level=args.level,
+            failure_profiles=_parse_failure_profiles_arg(args.failure_profiles),
+            cost_tolerance=args.cost_tolerance,
+            profile_weights=_parse_profile_weights_arg(args.profile_weights),
+            k_shortest_paths=args.k_routes,
+            candidate_cost_tolerance=args.candidate_cost_tolerance,
+            agility_weight=args.agility_weight,
+            agility_aggregation=args.agility_aggregation,
+            max_combinations=args.max_combinations,
+            max_runtime_ms=args.max_runtime_ms,
         )
         print_json({key: value for key, value in payload.items() if key != "result"})
         return 0
@@ -255,6 +364,40 @@ def main(argv: list[str] | None = None) -> int:
 
 def print_json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True))
+
+
+def _parse_failure_profiles_arg(value: str | None) -> list[list[int]] | None:
+    if not value:
+        return None
+    profiles: list[list[int]] = []
+    for raw_profile in str(value).split(";"):
+        items = [int(item.strip()) for item in raw_profile.split(",") if item.strip()]
+        if items:
+            profiles.append(items)
+    return profiles or None
+
+
+def _parse_profile_weights_arg(value: str | None) -> dict[str, float] | None:
+    if not value:
+        return None
+    weights: dict[str, float] = {}
+    for raw_item in str(value).split(";"):
+        if not raw_item.strip() or "=" not in raw_item:
+            continue
+        key, raw_weight = raw_item.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            weight = float(raw_weight.strip())
+        except ValueError:
+            continue
+        if weight < 0.0:
+            continue
+        if not key.startswith("("):
+            key = f"({key})"
+        weights[key] = weight
+    return weights or None
 
 
 def _apply_service_overrides(service: ApplicationService, args: argparse.Namespace) -> None:

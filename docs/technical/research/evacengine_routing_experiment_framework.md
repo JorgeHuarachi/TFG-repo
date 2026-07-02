@@ -182,11 +182,12 @@ Estos campos viven en `scenario.routing` o dentro de cada `experiments.routingPr
 | `routeRecommendation.robustnessWeight` | peso de robustez en la politica combinada |
 | `routeRecommendation.agilityWeight` | peso de agilidad en la politica combinada |
 | `routeRecommendation.agilityAggregation` | agregacion de agilidad de nodos intermedios: `mean` o `geometric` |
-| `routeRecommendation.reroutingFailureProfiles` | perfiles CER como `[ [1], [1,1] ]` |
+| `routeRecommendation.reroutingFailureProfiles` | perfiles CER como `[ [1], [1,1], [1,1,1], [1,2] ]` |
 | `routeRecommendation.reroutingCostTolerance` | tolerancia CER: `Cmax = (1 + tau) * C0` |
 | `routeRecommendation.reroutingFailureUnit` | unidad de fallo CER: `resource`, `arc`, `undirected_pair` o `cell` |
 | `routeRecommendation.reroutingDistinctnessPolicy` | `exact` compara `tuple(path)`; `overlap` queda preparado |
 | `routeRecommendation.reroutingUseStructuralPrecompute` | si `true`, calcula CER estructural una vez y la combina con pesos dinamicos |
+| `routeRecommendation.reroutingProfileWeights` | pesos opcionales por perfil CER, por ejemplo `{"(1)": 1.0, "(1,1)": 0.6}` |
 
 ## Cuando Se Recalcula La Ruta
 
@@ -296,8 +297,22 @@ El resumen por nodo es derivado y sirve para politicas de recomendacion. La unid
 
 Hay dos formas de usar CER:
 
-- `cer_weighted`: transforma CER en una penalizacion positiva por baja agilidad y permite usar Dijkstra/A* minimizando.
-- `cer_agility_yen`: genera candidatas con Yen y selecciona la que atraviesa nodos con mayor CER dentro de la tolerancia.
+- `CER-Cost` (`cer_weighted`): transforma CER en una penalizacion positiva por baja agilidad y permite usar Dijkstra/A* minimizando.
+- `CER-Agility` (`cer_agility_yen`): genera candidatas con Yen y selecciona la que atraviesa nodos con mayor CER dentro de la tolerancia.
+
+Por defecto el score de nodo puede ponderar perfiles de fallo para que los fallos inmediatos pesen mas que degradaciones profundas:
+
+```text
+CER_score(v) =
+    1.0 * CER_(1)(v)
+  + 0.7 * CER_(2)(v)
+  + 0.6 * CER_(1,1)(v)
+  + 0.5 * CER_(1,2)(v)
+  + 0.5 * CER_(2,1)(v)
+  + 0.3 * CER_(1,1,1)(v)
+```
+
+Si no se define `reroutingProfileWeights`, la agregacion sigue siendo una suma simple para mantener compatibilidad.
 
 La primera version operativa usa CER estructural precomputada (`reroutingUseStructuralPrecompute=true`) y la combina con pesos dinamicos de seguridad/balizas en el routing. La CER dinamica sobre cada snapshot queda preparada como opcion mas costosa.
 
@@ -313,8 +328,8 @@ La primera version operativa usa CER estructural precomputada (`reroutingUseStru
 | `yen_highest_robustness` | tiempo x riesgo | Yen | mayor robustez |
 | `yen_highest_agility` | tiempo x riesgo | Yen | mayor agilidad |
 | `robust_agility` | tiempo x riesgo | Yen/robust_agility | score combinado |
-| `cer_weighted` | tiempo x riesgo + CER | Dijkstra | penalizacion por baja CER |
-| `cer_agility_yen` | tiempo x riesgo + CER | Yen | mayor CER en candidatas |
+| `cer_weighted` / CER-Cost | tiempo x riesgo + CER | Dijkstra | penalizacion por baja CER |
+| `cer_agility_yen` / CER-Agility | tiempo x riesgo + CER | Yen | mayor CER en candidatas |
 | `astar_risk_congestion` | tiempo x riesgo + ocupacion | A* | menor coste dinamico |
 
 Los escenarios pueden declarar presets propios en:
@@ -359,6 +374,27 @@ Comparar tres politicas:
 .\.venv\Scripts\python.exe -B -m src.evac_engine compare-routing --scenario examples\indoor_data_model\scenario_single_floor.json --presets dijkstra_time,astar_risk_multiplicative,yen_highest_robustness --output-dir outputs\routing_compare_single
 ```
 
+Generar los HTML explicativos de aplicacion de CER al recomendador:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m src.evac_engine explain-routing-policies --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --failure-profiles "1;1,1;1,1,1" --cost-tolerance 0.2 --level LEVEL_00
+```
+
+Este comando no simula agentes. Es una visualizacion didactica y reproducible de:
+
+- CER ya calculada por nodo;
+- CER-Cost como penalizacion inversa sobre pesos;
+- CER-Agility como seleccion sobre candidatas de Yen;
+- tabla comparativa con coste, agilidad CER y rutas candidatas.
+
+La salida principal se guarda en `models/<modelo>/outputs/routing_policies/<scenario>__<origen>__<salida>/`:
+
+- `cer_cost_explainer.html`: animacion por frames de CER-Cost;
+- `cer_agility_explainer.html`: animacion por frames de CER-Agility;
+- `cer_all_nodes.json`: CER de todos los nodos del snapshot usado;
+- `policy_comparison.html`: comparador resumido;
+- `policy_comparison.json`: datos completos de la comparacion.
+
 Comparar Dijkstra, A* y Floyd-Warshall con el mismo coste temporal:
 
 ```powershell
@@ -400,7 +436,7 @@ Para explicar la CER de forma auditable se usa `CER visual debug`. A diferencia 
 Ejemplo CLI recomendado sobre un modelo de `models/`. Si no se indica `--output-dir`, EvacEngine guarda automaticamente dentro de `models\<modelo>\outputs\cer\...`:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m src.evac_engine cer --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --formats json,png,html --gif --level LEVEL_00
+.\.venv\Scripts\python.exe -B -m src.evac_engine cer --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --failure-profiles "1;1,1" --cost-tolerance 0.2 --formats json,png,html --gif --level LEVEL_00
 ```
 
 En la UI se usa la palabra `safety` porque es mas intuitiva: `safety = 1` significa espacio usable y `safety = 0` significa inseguro. Internamente, para mantener compatibilidad con el schema y los resultados existentes, EvacEngine guarda la perdida de seguridad como `riskPenalty = 1 - safety`.

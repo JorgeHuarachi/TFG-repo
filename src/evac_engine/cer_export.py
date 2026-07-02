@@ -14,6 +14,9 @@ from .routing import RoutingEngine
 from .topology import EvacTopology
 
 
+DEFAULT_CER_FAILURE_PROFILES = [[1], [1, 1], [1, 1, 1], [1, 2]]
+
+
 def export_cer_analysis(
     indoor: IndoorModelBundle,
     scenario: ScenarioDefinition,
@@ -30,6 +33,8 @@ def export_cer_analysis(
     include_gif: bool | None = None,
     fps: int = 2,
     max_frames: int | None = 120,
+    failure_profiles: Iterable[Iterable[int]] | None = None,
+    cost_tolerance: float | None = None,
 ) -> dict[str, Any]:
     topology = EvacTopology.from_indoor_model(indoor)
     engine = RoutingEngine(topology)
@@ -83,7 +88,7 @@ def export_cer_analysis(
             routing_config,
             direction="in",
         )
-    raw_profiles = recommendation.get("reroutingFailureProfiles") or [[1], [1, 1]]
+    raw_profiles = failure_profiles or recommendation.get("reroutingFailureProfiles") or DEFAULT_CER_FAILURE_PROFILES
     profiles = normalize_failure_profiles(
         raw_profiles,
         max_depth=int(recommendation.get("reroutingMaxDepth") or 3),
@@ -95,12 +100,16 @@ def export_cer_analysis(
         sources=[origin_id],
         failure_profiles=profiles,
         failure_unit=str(recommendation.get("reroutingFailureUnit") or "resource"),
-        cost_tolerance=float(recommendation.get("reroutingCostTolerance", recommendation.get("candidateCostTolerance", 0.35))),
+        cost_tolerance=float(
+            cost_tolerance
+            if cost_tolerance is not None
+            else recommendation.get("reroutingCostTolerance", recommendation.get("candidateCostTolerance", 0.35))
+        ),
         distinctness_policy=str(recommendation.get("reroutingDistinctnessPolicy") or "exact"),
         max_depth=int(recommendation.get("reroutingMaxDepth") or 3),
         max_k=int(recommendation.get("reroutingMaxK") or 3),
         max_combinations=int(recommendation.get("reroutingMaxCombinations") or 500),
-        max_runtime_ms=int(recommendation.get("reroutingMaxRuntimeMs") or 1000),
+        max_runtime_ms=int(recommendation.get("reroutingMaxRuntimeMs") or 10000),
         max_overlap=float(recommendation.get("reroutingMaxOverlap", recommendation.get("centralityMaxOverlap", 0.8))),
         graph_view=topology.graph_view_name,
         store_routes=bool(recommendation.get("reroutingStoreRoutes", True)),

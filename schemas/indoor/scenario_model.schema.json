@@ -719,6 +719,13 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "reroutingProfileWeights": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
         }
       }
     },

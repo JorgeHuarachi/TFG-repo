@@ -6,6 +6,7 @@ centrality metric; they only render the reasoning steps.
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from .visualization import EvacuationRenderer, _edge_levels
 def save_cer_debug_json(result: CERResult | dict[str, Any], output_path: str | Path) -> Path:
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    payload = result.to_dict() if isinstance(result, CERResult) else result
+    payload = _annotated_payload(result)
     output.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     return output
 
@@ -61,21 +62,26 @@ def save_cer_debug_gif(
 ) -> Path:
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    payload = result.to_dict() if isinstance(result, CERResult) else result
+    payload = _annotated_payload(result)
     steps = payload.get("debugSteps") or []
-    if max_frames and len(steps) > max_frames:
+    if max_frames and max_frames > 0 and len(steps) > max_frames:
         stride = max(len(steps) // max_frames, 1)
         steps = steps[::stride]
+        payload.setdefault("metadata", {})["gifFrameSampling"] = {"maxFrames": max_frames, "stride": stride}
     if not steps:
         steps = [{"reason": "no_debug_steps", "basePath": [], "candidatePath": []}]
-    fig = Figure(figsize=(10, 7), dpi=120)
+    fig = Figure(figsize=(13, 7), dpi=120)
     FigureCanvasAgg(fig)
-    ax = fig.add_subplot(111)
+    grid = fig.add_gridspec(1, 2, width_ratios=[3.3, 1.25], wspace=0.08)
+    ax = fig.add_subplot(grid[0, 0])
+    panel_ax = fig.add_subplot(grid[0, 1])
     renderer = EvacuationRenderer(topology)
 
     def update(step: dict[str, Any]):
+        ax.clear()
+        panel_ax.clear()
         renderer.draw_base(ax, level)
-        _draw_cer_step(ax, topology, step, level)
+        _draw_cer_step(ax, topology, step, level, panel_ax=panel_ax, metadata=payload.get("metadata") or {})
         return ax.patches + ax.lines + ax.collections
 
     animation = FuncAnimation(fig, update, frames=steps, blit=False, repeat=False)
@@ -92,7 +98,7 @@ def save_cer_debug_html(
 ) -> Path:
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    payload = result.to_dict() if isinstance(result, CERResult) else result
+    payload = _annotated_payload(result)
     html = CER_HTML_TEMPLATE.replace("__CER_PAYLOAD__", json.dumps(payload, ensure_ascii=True))
     html = html.replace("__CER_GRAPH__", json.dumps(_cer_graph_payload(topology), ensure_ascii=True))
     html = html.replace("__CER_LEVEL__", json.dumps(level, ensure_ascii=True))
@@ -138,7 +144,32 @@ def _cer_graph_payload(topology: EvacTopology) -> dict[str, Any]:
     return {"nodes": list(nodes.values()), "edges": edges, "levels": levels}
 
 
-def _draw_cer_step(ax: Axes, topology: EvacTopology, step: dict[str, Any], level: str | None) -> None:
+def _annotated_payload(result: CERResult | dict[str, Any]) -> dict[str, Any]:
+    payload = result.to_dict() if isinstance(result, CERResult) else result
+    payload = json.loads(json.dumps(payload, ensure_ascii=True))
+    steps = payload.get("debugSteps") or []
+    profile_counts = Counter(str(step.get("failureProfile") or "") for step in steps)
+    profile_seen: Counter[str] = Counter()
+    total = len(steps)
+    for index, step in enumerate(steps, start=1):
+        profile = str(step.get("failureProfile") or "")
+        profile_seen[profile] += 1
+        step["globalStepIndex"] = index
+        step["globalStepCount"] = total
+        step["profileStepIndex"] = profile_seen[profile]
+        step["profileStepCount"] = profile_counts[profile]
+    return payload
+
+
+def _draw_cer_step(
+    ax: Axes,
+    topology: EvacTopology,
+    step: dict[str, Any],
+    level: str | None,
+    *,
+    panel_ax: Axes | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
     origin = step.get("origin")
     target = step.get("target")
     _draw_path(ax, topology, step.get("basePath") or [], level, color="#2563eb", linewidth=3.0, alpha=0.75, label="P0")
@@ -149,31 +180,86 @@ def _draw_cer_step(ax: Axes, topology: EvacTopology, step: dict[str, Any], level
     reason = str(step.get("reason") or "")
     candidate_color = "#16a34a" if accepted else "#dc2626"
     _draw_path(ax, topology, step.get("candidatePath") or [], level, color=candidate_color, linewidth=3.0, alpha=0.82, label="candidate")
-    _draw_failed_units(ax, topology, step.get("failedResources") or [], level, color="#ef4444", linewidth=3.0, alpha=0.45)
-    _draw_failed_units(ax, topology, step.get("newlyFailedResources") or [], level, color="#991b1b", linewidth=4.4, alpha=0.95)
+    newly_failed = [str(item) for item in (step.get("newlyFailedResources") or [])]
+    previous_failed = [str(item) for item in (step.get("failedResources") or []) if str(item) not in set(newly_failed)]
+    _draw_failed_units(ax, topology, previous_failed, level, color="#ef4444", linewidth=3.8, alpha=0.82)
+    _draw_failed_units(ax, topology, newly_failed, level, color="#7f1d1d", linewidth=4.8, alpha=0.98)
     _draw_node_marker(ax, topology, origin, level, "#2563eb", "origen")
     _draw_node_marker(ax, topology, target, level, "#16a34a", "salida")
     title = "CER rerouting"
     if origin and target:
         title += f" | {origin} -> {target}"
     ax.set_title(title)
+    if panel_ax is not None:
+        _draw_cer_panel(panel_ax, step, metadata or {})
+    else:
+        status = "ACEPTADA" if accepted else "RECHAZADA"
+        info = (
+            f"perfil: {step.get('failureProfile')} | fallo depth: {step.get('failureDepth')}\n"
+            f"C0: {_fmt(step.get('baseCost'))} | Cmax: {_fmt(step.get('costLimit'))} | Calt: {_fmt(step.get('candidateCost'))}\n"
+            f"estado: {status} ({reason})"
+        )
+        ax.text(
+            0.02,
+            0.02,
+            info,
+            transform=ax.transAxes,
+            verticalalignment="bottom",
+            bbox={"facecolor": "#ffffff", "edgecolor": "#cbd5e1", "alpha": 0.88, "boxstyle": "round,pad=0.45"},
+            fontsize=8,
+            zorder=80,
+        )
+
+
+def _draw_cer_panel(ax: Axes, step: dict[str, Any], metadata: dict[str, Any]) -> None:
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+    accepted = bool(step.get("accepted"))
     status = "ACEPTADA" if accepted else "RECHAZADA"
-    info = (
-        f"perfil: {step.get('failureProfile')} | fallo depth: {step.get('failureDepth')}\n"
-        f"C0 inicial: {_fmt(step.get('baseCost'))} | Cmax tolerado: {_fmt(step.get('costLimit'))} | Calt candidata: {_fmt(step.get('candidateCost'))}\n"
-        f"estado: {status} ({reason})\n"
-        f"distintas acumuladas en este perfil: {step.get('distinctRouteCount')} | casos del perfil: {step.get('evaluatedFailureCases')}"
+    status_color = "#166534" if accepted else "#991b1b"
+    tau = metadata.get("costTolerance")
+    reason = str(step.get("reason") or "-")
+    header = (
+        f"Paso {step.get('globalStepIndex', '-')}/{step.get('globalStepCount', '-')}\n"
+        f"Perfil {step.get('failureProfile', '-')} | paso perfil {step.get('profileStepIndex', '-')}/{step.get('profileStepCount', '-')}\n"
+        f"Nivel secuencial {step.get('failureDepth', '-')}/{len(step.get('failureProfileRaw') or []) or '-'}"
     )
-    ax.text(
-        0.02,
-        0.02,
-        info,
-        transform=ax.transAxes,
-        verticalalignment="bottom",
-        bbox={"facecolor": "#ffffff", "edgecolor": "#cbd5e1", "alpha": 0.88, "boxstyle": "round,pad=0.45"},
-        fontsize=8,
-        zorder=80,
-    )
+    ax.text(0.02, 0.98, header, ha="left", va="top", fontsize=9.2, fontweight="bold", color="#111827")
+    ax.text(0.02, 0.83, f"{status} | {reason}", ha="left", va="top", fontsize=11, fontweight="bold", color=status_color)
+    values = [
+        ("tau tolerancia", _fmt(tau)),
+        ("C0 ruta inicial", _fmt(step.get("baseCost"))),
+        ("Cmax = C0*(1+tau)", _fmt(step.get("costLimit"))),
+        ("Calt candidata", _fmt(step.get("candidateCost"))),
+        ("casos evaluados", str(step.get("evaluatedFailureCases") or "-")),
+    ]
+    y = 0.76
+    for label, value in values:
+        ax.text(0.02, y, label, ha="left", va="top", fontsize=8.2, color="#475569")
+        ax.text(0.98, y, value, ha="right", va="top", fontsize=8.2, color="#111827", fontweight="bold")
+        y -= 0.055
+    routes_value = str(step.get("distinctRouteCount") or 0)
+    ax.text(0.02, y - 0.005, "RUTAS DISTINTAS", ha="left", va="top", fontsize=9.4, color="#7c2d12", fontweight="bold")
+    ax.text(0.98, y - 0.005, routes_value, ha="right", va="top", fontsize=15, color="#7c2d12", fontweight="bold")
+    y -= 0.075
+    failed = _format_failure_units(step)
+    ax.text(0.02, y - 0.01, "recurso eliminado ahora", ha="left", va="top", fontsize=8.2, color="#475569")
+    ax.text(0.02, y - 0.048, failed, ha="left", va="top", fontsize=7.0, color="#111827", fontweight="bold", wrap=True)
+    ax.text(0.02, y - 0.092, "cambia porque cada frame prueba un fallo distinto", ha="left", va="top", fontsize=6.7, color="#64748b")
+    legend_y = 0.235
+    ax.text(0.02, legend_y + 0.05, "Leyenda", ha="left", va="top", fontsize=9, fontweight="bold", color="#111827")
+    _panel_legend_line(ax, legend_y, "#94a3b8", "grafo base", linestyle="-")
+    _panel_legend_line(ax, legend_y - 0.045, "#2563eb", "P0 inicial", linestyle="-")
+    _panel_legend_line(ax, legend_y - 0.09, "#f59e0b", "ruta fuente", linestyle="-")
+    _panel_legend_line(ax, legend_y - 0.135, "#16a34a", "candidata aceptada", linestyle="-")
+    _panel_legend_line(ax, legend_y - 0.18, "#dc2626", "candidata rechazada", linestyle="-")
+    _panel_legend_line(ax, legend_y - 0.225, "#7f1d1d", "recurso fallado", linestyle="--")
+
+
+def _panel_legend_line(ax: Axes, y: float, color: str, label: str, *, linestyle: str = "-") -> None:
+    ax.plot([0.03, 0.17], [y, y], color=color, linewidth=4, linestyle=linestyle)
+    ax.text(0.21, y, label, ha="left", va="center", fontsize=7.0, color="#111827")
 
 
 def _draw_path(
@@ -274,6 +360,30 @@ def _fmt(value: Any) -> str:
         return str(value)
 
 
+def _format_failure_units(step: dict[str, Any]) -> str:
+    units = step.get("newlyFailedUnits") or []
+    if not units:
+        values = step.get("newlyFailedResources") or step.get("newlyFailedArcs") or []
+        return ", ".join(_short_failure_value("recurso", str(value)) for value in values) or "-"
+    labels: list[str] = []
+    for unit in units:
+        if isinstance(unit, dict):
+            kind = str(unit.get("kind") or "fallo")
+            value = str(unit.get("value") or "")
+        else:
+            kind = "fallo"
+            value = str(unit)
+        labels.append(_short_failure_value(kind, value))
+    return ", ".join(labels) or "-"
+
+
+def _short_failure_value(kind: str, value: str) -> str:
+    label = "recurso" if kind == "resource" else kind
+    if len(value) > 38:
+        value = f"{value[:20]}...{value[-14:]}"
+    return f"{label}: {value}"
+
+
 CER_HTML_TEMPLATE = """<!doctype html>
 <html lang="es">
 <meta charset="utf-8">
@@ -283,13 +393,52 @@ body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #f8fafc;
 main { display: grid; grid-template-columns: 340px 1fr; min-height: 100vh; }
 aside { background: #ffffff; border-right: 1px solid #d7dee8; padding: 16px; overflow: auto; }
 section { padding: 20px; overflow: auto; }
+body.layout-wide { overflow-y: auto; }
+body.layout-wide main { grid-template-columns: 1fr; grid-template-rows: 100vh 112px; height: auto; min-height: calc(100vh + 112px); overflow: visible; }
+body.layout-wide aside { grid-row: 2; border-right: 0; border-top: 1px solid #d7dee8; padding: 6px 9px; display: grid; grid-template-columns: 190px 1fr; gap: 8px; min-height: 0; overflow: hidden; }
+body.layout-wide aside h1, body.layout-wide aside p, body.layout-wide aside label, body.layout-wide aside select { grid-column: 1; }
+body.layout-wide aside h1 { margin: 0; font-size: 15px; line-height: 18px; }
+body.layout-wide aside p { margin: 0; font-size: 11px; line-height: 14px; }
+body.layout-wide aside label { margin-top: 2px; font-size: 11px; line-height: 13px; }
+body.layout-wide aside select { padding: 3px 6px; font-size: 11px; min-height: 24px; }
+body.layout-wide #steps { grid-column: 2; grid-row: 1 / span 5; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 1px 0 4px; align-items: flex-start; height: 88px; max-height: 88px; min-height: 0; }
+body.layout-wide aside button { flex: 0 0 156px; white-space: normal; font-size: 9.5px; line-height: 1.15; padding: 4px 5px; margin: 0; min-height: 52px; max-height: 72px; overflow: hidden; }
+body.layout-wide section { grid-row: 1; position: relative; display: block; overflow: hidden; padding: 12px; height: 100vh; min-height: 0; box-sizing: border-box; }
+body.layout-wide #title, body.layout-wide #status, body.layout-wide .controls, body.layout-wide #metrics, body.layout-wide .help, body.layout-wide .legend { width: 304px; box-sizing: border-box; }
+body.layout-wide #title { margin: 0 0 9px; font-size: 18px; line-height: 22px; max-height: 48px; overflow: hidden; }
+body.layout-wide #status { margin: 0 0 8px; font-size: 12px; line-height: 15px; max-height: 45px; overflow: hidden; }
+body.layout-wide .controls { margin: 6px 0 8px; gap: 5px; height: 32px; overflow: hidden; }
+body.layout-wide .controls button { min-width: 73px; min-height: 28px; padding: 4px 7px; font-size: 11px; }
+body.layout-wide .controls .muted { display: none; }
+body.layout-wide #metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 0 0 8px; font-size: 10.2px; line-height: 1.12; max-height: 230px; overflow: hidden; }
+body.layout-wide #metrics span { padding: 5px 6px; min-width: 0; overflow-wrap: anywhere; }
+body.layout-wide .help { display: none; }
+body.layout-wide .legend { grid-template-columns: 1fr; gap: 4px; margin: 0; font-size: 10px; line-height: 1.15; max-height: 138px; overflow: hidden; }
+body.layout-wide .legend span { padding: 4px 6px; border-left-width: 4px; }
+body.layout-wide #graph { position: absolute; left: 328px; right: 12px; top: 12px; bottom: 12px; width: auto; height: auto; min-height: 0; }
+body.layout-wide #detail { display: none; }
+#results { padding: 18px 22px 28px; border-top: 1px solid #d7dee8; background: #f8fafc; }
+#results h2 { margin: 0 0 6px; }
+#results .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 12px 0 16px; }
+#results .summary-card { background: #ffffff; border: 1px solid #d7dee8; border-radius: 8px; padding: 10px 12px; }
+#results .summary-card b { display: block; font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: .02em; }
+#results .summary-card span { display: block; margin-top: 4px; font-size: 20px; font-weight: 800; color: #111827; overflow-wrap: anywhere; }
+#results .table-wrap { max-height: 420px; overflow: auto; border: 1px solid #d7dee8; border-radius: 8px; background: #ffffff; }
+#results table { width: 100%; border-collapse: collapse; font-size: 12px; }
+#results th, #results td { border-bottom: 1px solid #e2e8f0; padding: 7px 8px; text-align: left; white-space: nowrap; }
+#results th { position: sticky; top: 0; background: #e2e8f0; z-index: 1; }
+#results tr:nth-child(even) td { background: #f8fafc; }
 button { display: block; width: 100%; margin: 4px 0; padding: 8px; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; text-align: left; cursor: pointer; }
 button.active { border-color: #2563eb; background: #eff6ff; }
+.controls { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.controls button { display: inline-flex; width: auto; min-width: 92px; justify-content: center; text-align: center; }
 select { width: 100%; padding: 7px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
 svg { width: 100%; height: 62vh; background: #ffffff; border: 1px solid #d7dee8; border-radius: 8px; }
 pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow: auto; }
 .ok { color: #15803d; font-weight: 700; }
 .bad { color: #b91c1c; font-weight: 700; }
+.warn { color: #b45309; font-weight: 700; }
+.visited { color: #6d28d9; font-weight: 700; }
 .muted { color: #64748b; font-size: 12px; }
 .metric { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; font-size: 13px; }
 .metric span { background: #f1f5f9; padding: 6px; border-radius: 6px; }
@@ -297,13 +446,18 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
 .edge-p0 { stroke: #2563eb; stroke-width: 4; opacity: .82; stroke-linecap: round; }
 .edge-source { stroke: #f59e0b; stroke-width: 3.6; opacity: .8; stroke-linecap: round; }
 .edge-candidate-ok { stroke: #16a34a; stroke-width: 4; opacity: .86; stroke-linecap: round; }
-.edge-candidate-bad { stroke: #dc2626; stroke-width: 4; opacity: .76; stroke-linecap: round; stroke-dasharray: 7 4; }
-.edge-failed-old { stroke: #ef4444; stroke-width: 4; opacity: .42; stroke-dasharray: 8 4; stroke-linecap: round; }
-.edge-failed-new { stroke: #991b1b; stroke-width: 6; opacity: .95; stroke-dasharray: 8 4; stroke-linecap: round; }
+.edge-candidate-bad { stroke: #dc2626; stroke-width: 4; opacity: .78; stroke-linecap: round; }
+.edge-candidate-duplicate { stroke: #9333ea; stroke-width: 4; opacity: .86; stroke-linecap: round; stroke-dasharray: 10 4; }
+.edge-candidate-visited { stroke: #7c3aed; stroke-width: 4; opacity: .82; stroke-linecap: round; stroke-dasharray: 4 4; }
+.edge-failed-old { stroke: #ef4444; stroke-width: 5; opacity: .78; stroke-dasharray: 8 4; stroke-linecap: round; }
+.edge-failed-new { stroke: #7f1d1d; stroke-width: 7; opacity: .98; stroke-dasharray: 8 4; stroke-linecap: round; }
 .node { fill: #fff; stroke: #334155; stroke-width: 1.2; opacity: .86; }
 .node-exit { fill: #dcfce7; stroke: #15803d; }
 .node-origin { fill: #f97316; stroke: #111827; stroke-width: 2; }
 .node-target { fill: #22c55e; stroke: #111827; stroke-width: 2; }
+.node-score-box { fill: #111827; opacity: .88; rx: 4; ry: 4; }
+.node-score-text { fill: #ffffff; font-size: 12px; font-weight: 800; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.node-score-zero .node-score-box { fill: #64748b; opacity: .72; }
 .legend { display:grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap:8px; margin:10px 0; font-size:12px; }
 .legend span { padding:7px 9px; border-radius:6px; background:#eef2f7; border-left: 5px solid #94a3b8; }
 .legend .p0 { border-left-color:#2563eb; }
@@ -311,6 +465,7 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
 .legend .ok { border-left-color:#16a34a; color:#111827; font-weight:400; }
 .legend .bad { border-left-color:#dc2626; color:#111827; font-weight:400; }
 .legend .fail { border-left-color:#991b1b; }
+.legend .duplicate { border-left-color:#9333ea; }
 .help { background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px; font-size:12px; line-height:1.45; }
 </style>
 <main>
@@ -324,28 +479,66 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
 <section>
 <h2 id="title">Paso</h2>
 <p id="status"></p>
+<div class="controls">
+  <button id="prevStep" type="button">Anterior</button>
+  <button id="playStep" type="button">Play</button>
+  <button id="nextStep" type="button">Siguiente</button>
+  <span class="muted">Tambien puedes usar las flechas izquierda/derecha.</span>
+</div>
 <div class="metric" id="metrics"></div>
 <div class="help">
-  C0 = coste de la ruta minima inicial P0. Cmax = C0 x (1 + tolerancia). Calt = coste de la ruta recalculada despues del fallo actual. Los casos evaluados se cuentan dentro de cada perfil: al cambiar de (1) a (1,1) empiezan otra vez.
+  C0 = coste de la ruta minima inicial P0. tau = tolerancia. Cmax = C0 x (1 + tau). Calt = coste de la ruta recalculada despues del fallo actual. "Recurso eliminado ahora" cambia porque cada paso prueba un fallo distinto. "Paso perfil" indica la posicion visual dentro del perfil; "casos evaluados" es el contador CER acumulado.
 </div>
 <div class="legend">
   <span>gris: grafo base completo usado por CER</span>
   <span class="p0">azul: P0, ruta minima inicial</span>
   <span class="source">ambar: ruta fuente a la que se le aplica el fallo actual</span>
   <span class="ok">verde: ruta alternativa aceptada dentro de Cmax</span>
-  <span class="bad">rojo fino/discontinuo: candidata rechazada o fuera de tolerancia</span>
-  <span class="fail">rojo grueso: recurso/arista eliminada en este paso</span>
+  <span class="duplicate">morado discontinuo: ruta valida pero duplicada</span>
+  <span class="bad">rojo continuo: candidata rechazada o fuera de tolerancia</span>
+  <span class="fail">rojo discontinuo grueso: recurso/arista eliminada en este paso</span>
+  <span>numero negro en nodo: distinctRoutes para el target/perfil activo</span>
 </div>
 <svg id="graph" role="img" aria-label="CER graph visualization"></svg>
 <pre id="detail"></pre>
 </section>
 </main>
+<section id="results">
+  <h2>Resultado final CER</h2>
+  <p class="muted">Resumen calculado a partir de todos los pasos y perfiles incluidos en este HTML.</p>
+  <div class="summary-grid" id="resultCards"></div>
+  <h3>Tabla por nodo, salida y perfil</h3>
+  <div class="table-wrap">
+    <table id="resultTable">
+      <thead>
+        <tr>
+          <th>origin</th>
+          <th>target</th>
+          <th>profile</th>
+          <th>distinctRoutes</th>
+          <th>accepted</th>
+          <th>total</th>
+          <th>coverage</th>
+          <th>noPath</th>
+          <th>overTol.</th>
+          <th>duplicate</th>
+          <th>visited</th>
+          <th>runtimeMs</th>
+          <th>trunc.</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
 <script>
 const payload = __CER_PAYLOAD__;
 const graph = __CER_GRAPH__;
 const preferredLevel = __CER_LEVEL__;
 const steps = payload.debugSteps || [];
-document.getElementById("meta").textContent = `${payload.metadata?.graphView || "graph"} | ${steps.length} pasos`;
+document.body.classList.add(`layout-${payload.metadata?.visualLayout || "standard"}`);
+const runInfo = runStatus(payload);
+document.getElementById("meta").textContent = `${payload.metadata?.graphView || "graph"} | ${steps.length} pasos | ${runInfo.short}`;
 const list = document.getElementById("steps");
 const detail = document.getElementById("detail");
 const title = document.getElementById("title");
@@ -353,8 +546,16 @@ const status = document.getElementById("status");
 const metrics = document.getElementById("metrics");
 const svg = document.getElementById("graph");
 const levelSelect = document.getElementById("level");
+const resultCards = document.getElementById("resultCards");
+const resultTable = document.querySelector("#resultTable tbody");
+const prevStep = document.getElementById("prevStep");
+const playStep = document.getElementById("playStep");
+const nextStep = document.getElementById("nextStep");
 let activeIndex = 0;
+let playTimer = null;
 const ns = "http://www.w3.org/2000/svg";
+const resultRows = collectResultRows(payload);
+renderResults(resultRows);
 const levels = graph.levels || [];
 levels.forEach(level => {
   const option = document.createElement("option");
@@ -365,25 +566,202 @@ levels.forEach(level => {
 if (preferredLevel && levels.includes(preferredLevel)) levelSelect.value = preferredLevel;
 else if (levels.length) levelSelect.value = levels[0];
 levelSelect.onchange = () => show(activeIndex);
+prevStep.onclick = () => show(Math.max(0, activeIndex - 1));
+nextStep.onclick = () => show(Math.min(steps.length - 1, activeIndex + 1));
+playStep.onclick = () => togglePlay();
+document.addEventListener("keydown", event => {
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    show(Math.max(0, activeIndex - 1));
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    show(Math.min(steps.length - 1, activeIndex + 1));
+  } else if (event.key === " ") {
+    event.preventDefault();
+    togglePlay();
+  }
+});
 function show(index) {
+  if (!steps.length) return;
   activeIndex = index;
   const step = steps[index] || {};
   document.querySelectorAll("button").forEach((b, i) => b.classList.toggle("active", i === index));
   title.textContent = `${step.origin || "?"} -> ${step.target || "?"} | ${step.failureProfile || ""}`;
-  status.innerHTML = step.accepted ? '<span class="ok">ACEPTADA</span>' : '<span class="bad">RECHAZADA</span>';
+  const decision = decisionInfo(step);
+  status.innerHTML = `<span class="${decision.className}">${decision.label}</span><br><span class="muted">${decision.description}</span>`;
   metrics.innerHTML = [
+    ["cálculo", runInfo.short],
+    ["límites", runInfo.limits],
+    ["orden visual", payload.metadata?.visualOrder || "calculation"],
+    ["paso global", `${step.globalStepIndex ?? "-"} / ${step.globalStepCount ?? "-"}`],
+    ["paso cálculo", step.calculationStepIndex ?? "-"],
+    ["paso perfil", `${step.profileStepIndex ?? "-"} / ${step.profileStepCount ?? "-"}`],
+    ["rama", `${step.branchStatus || "-"} ${step.branchDeathReason ? "(" + step.branchDeathReason + ")" : ""}`],
+    ["tau", fmt(payload.metadata?.costTolerance)],
     ["C0 ruta inicial", fmt(step.baseCost)],
     ["Cmax tolerado", fmt(step.costLimit)],
     ["Calt candidata", fmt(step.candidateCost)],
-    ["rutas distintas", step.distinctRouteCount ?? "-"],
-    ["casos del perfil", step.evaluatedFailureCases ?? "-"],
-    ["decision", step.reason || "-"],
+    ["casos evaluados", step.evaluatedFailureCases ?? "-"],
+    ["RUTAS DISTINTAS", step.distinctRouteCount ?? "-"],
+    ["recurso eliminado ahora", formatFailureUnits(step)],
   ].map(([k, v]) => `<span><b>${k}</b><br>${v}</span>`).join("");
   drawGraph(step);
   detail.textContent = JSON.stringify(step, null, 2);
+  prevStep.disabled = index <= 0;
+  nextStep.disabled = index >= steps.length - 1;
+  if (index >= steps.length - 1 && playTimer) stopPlay();
+}
+function togglePlay() {
+  if (playTimer) stopPlay();
+  else startPlay();
+}
+function startPlay() {
+  if (!steps.length) return;
+  playStep.textContent = "Pausa";
+  playTimer = setInterval(() => {
+    if (activeIndex >= steps.length - 1) {
+      stopPlay();
+      return;
+    }
+    show(activeIndex + 1);
+  }, 850);
+}
+function stopPlay() {
+  if (playTimer) clearInterval(playTimer);
+  playTimer = null;
+  playStep.textContent = "Play";
 }
 function fmt(value) {
   return value == null ? "-" : Number(value).toFixed(3);
+}
+function runStatus(payload) {
+  const metadata = payload.metadata || {};
+  const profileStats = [];
+  const limitHits = {};
+  for (const origin of Object.values(payload.nodes || {})) {
+    for (const target of Object.values(origin.targets || {})) {
+      Object.assign(limitHits, target.summary?.limitHits || {});
+      for (const profile of Object.values(target.failureProfiles || {})) profileStats.push(profile);
+    }
+  }
+  const runtime = fmt(metadata.runtimeMs);
+  const started = metadata.startedPairs ?? "-";
+  const completed = metadata.completedPairs ?? "-";
+  const runtimeCut = !!metadata.truncatedByRuntime || profileStats.some(profile => profile.truncatedByRuntime);
+  const comboCut = profileStats.some(profile => profile.truncatedByCombinations) || Number(limitHits.maxCombinations || 0) > 0;
+  const comboCases = profileStats.reduce((total, profile) => total + Number(profile.combinationsTruncatedCases || 0), 0);
+  const status = runtimeCut ? "cortado por runtime" : comboCut ? "cortado por combinaciones" : "completado";
+  const limits = [
+    runtimeCut ? `runtime alcanzado` : "",
+    comboCut ? `maxCombinations ${comboCases || limitHits.maxCombinations || ""}` : "",
+    limitHits.maxDepth ? `maxDepth ${limitHits.maxDepth}` : "",
+    limitHits.maxTotalFailures ? `maxTotalFailures ${limitHits.maxTotalFailures}` : "",
+  ].filter(Boolean).join(" | ") || "sin cortes";
+  return {
+    short: `${status} | ${runtime} ms | pares ${completed}/${started}`,
+    limits,
+  };
+}
+function collectResultRows(payload) {
+  const rows = [];
+  for (const [originId, origin] of Object.entries(payload.nodes || {})) {
+    for (const [targetId, target] of Object.entries(origin.targets || {})) {
+      for (const [profileLabel, profile] of Object.entries(target.failureProfiles || {})) {
+        rows.push({
+          origin: originId,
+          target: targetId,
+          profile: profileLabel,
+          distinctRoutes: Number(profile.distinctRoutes || 0),
+          acceptedCases: Number(profile.acceptedCases || 0),
+          totalCases: Number(profile.totalCases || 0),
+          coverage: Number(profile.coverage || 0),
+          noPathCases: Number(profile.noPathCases || 0),
+          overToleranceCases: Number(profile.overToleranceCases || 0),
+          duplicateRouteCases: Number(profile.duplicateRouteCases || 0),
+          visitedStateCases: Number(profile.visitedStateCases || 0),
+          runtimeMs: Number(profile.runtimeMs || 0),
+          truncated: !!profile.truncatedByRuntime || !!profile.truncatedByCombinations,
+        });
+      }
+    }
+  }
+  rows.sort((a, b) =>
+    b.distinctRoutes - a.distinctRoutes ||
+    b.coverage - a.coverage ||
+    a.origin.localeCompare(b.origin) ||
+    a.profile.localeCompare(b.profile)
+  );
+  return rows;
+}
+function renderResults(rows) {
+  if (!resultCards || !resultTable) return;
+  const origins = new Set(rows.map(row => row.origin));
+  const targets = new Set(rows.map(row => row.target));
+  const profiles = new Set(rows.map(row => row.profile));
+  const totalDistinct = rows.reduce((total, row) => total + row.distinctRoutes, 0);
+  const totalAccepted = rows.reduce((total, row) => total + row.acceptedCases, 0);
+  const totalCases = rows.reduce((total, row) => total + row.totalCases, 0);
+  const best = rows[0] || {};
+  resultCards.innerHTML = [
+    ["suma distinctRoutes", totalDistinct],
+    ["mejor fila", best.origin ? `${best.origin} -> ${best.target} | ${best.profile} = ${best.distinctRoutes}` : "-"],
+    ["origenes", origins.size],
+    ["salidas", targets.size],
+    ["perfiles", [...profiles].join(", ") || "-"],
+    ["coverage global", totalCases ? (totalAccepted / totalCases).toFixed(3) : "-"],
+  ].map(([label, value]) => `<div class="summary-card"><b>${label}</b><span>${value}</span></div>`).join("");
+  resultTable.innerHTML = rows.map(row => `
+    <tr>
+      <td>${escapeHtml(row.origin)}</td>
+      <td>${escapeHtml(row.target)}</td>
+      <td>${escapeHtml(row.profile)}</td>
+      <td><b>${row.distinctRoutes}</b></td>
+      <td>${row.acceptedCases}</td>
+      <td>${row.totalCases}</td>
+      <td>${row.coverage.toFixed(3)}</td>
+      <td>${row.noPathCases}</td>
+      <td>${row.overToleranceCases}</td>
+      <td>${row.duplicateRouteCases}</td>
+      <td>${row.visitedStateCases}</td>
+      <td>${row.runtimeMs.toFixed(1)}</td>
+      <td>${row.truncated ? "si" : "no"}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="13">Sin metricas de perfiles en este payload.</td></tr>`;
+}
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
+}
+function decisionInfo(step) {
+  const reason = String(step.reason || "");
+  if (reason === "accepted") return { label: "ACEPTADA", className: "ok", description: "Ruta alternativa nueva dentro de Cmax." };
+  if (reason === "duplicate_route") return { label: "DUPLICADA", className: "warn", description: "Ruta valida dentro de Cmax, pero su secuencia de nodos ya estaba contada." };
+  if (reason === "visited_state") return { label: "ESTADO VISITADO", className: "visited", description: "Ese conjunto de fallos ya se habia evaluado; se reutiliza el resultado." };
+  if (reason === "over_tolerance") return { label: "RECHAZADA POR TOLERANCIA", className: "bad", description: "Hay ruta, pero Calt supera Cmax." };
+  if (reason === "no_path") return { label: "SIN RUTA", className: "bad", description: "El fallo deja al origen sin ruta hacia la salida." };
+  return { label: step.accepted ? "ACEPTADA" : "RECHAZADA", className: step.accepted ? "ok" : "bad", description: reason || "-" };
+}
+function candidateClass(step) {
+  const reason = String(step.reason || "");
+  if (reason === "duplicate_route") return "edge-candidate-duplicate";
+  if (reason === "visited_state") return "edge-candidate-visited";
+  return step.accepted ? "edge-candidate-ok" : "edge-candidate-bad";
+}
+function formatFailureUnits(step) {
+  const units = step.newlyFailedUnits || [];
+  if (!units.length) return "-";
+  return units.map(unit => shortFailureValue(unit.kind || "fallo", unit.value || "")).join(", ");
+}
+function shortFailureValue(kind, value) {
+  const label = kind === "resource" ? "recurso" : kind;
+  value = String(value || "");
+  if (value.length > 38) value = `${value.slice(0, 20)}...${value.slice(-14)}`;
+  return `${label}: ${value}`;
 }
 function visibleNodes(level) {
   return (graph.nodes || []).filter(node => !level || node.level === level);
@@ -468,6 +846,27 @@ function drawNode(node, project, className = "node") {
   circle.setAttribute("class", className);
   svg.appendChild(circle);
 }
+function drawNodeScore(node, project, value) {
+  const [x, y] = project(node);
+  const text = String(value ?? 0);
+  const group = document.createElementNS(ns, "g");
+  if (Number(value || 0) === 0) group.setAttribute("class", "node-score-zero");
+  const width = Math.max(20, 12 + text.length * 7);
+  const box = document.createElementNS(ns, "rect");
+  box.setAttribute("x", x - width / 2);
+  box.setAttribute("y", y - 25);
+  box.setAttribute("width", width);
+  box.setAttribute("height", 18);
+  box.setAttribute("class", "node-score-box");
+  const label = document.createElementNS(ns, "text");
+  label.setAttribute("x", x);
+  label.setAttribute("y", y - 16);
+  label.setAttribute("class", "node-score-text");
+  label.textContent = text;
+  group.appendChild(box);
+  group.appendChild(label);
+  svg.appendChild(group);
+}
 function drawLabel(node, project, text) {
   const [x, y] = project(node);
   const label = document.createElementNS(ns, "text");
@@ -477,6 +876,15 @@ function drawLabel(node, project, text) {
   label.setAttribute("fill", "#111827");
   label.textContent = text;
   svg.appendChild(label);
+}
+function nodeScoresForStep(step) {
+  const profile = step.failureProfile || resultRows[0]?.profile;
+  const target = step.target || resultRows[0]?.target;
+  const scores = new Map();
+  for (const row of resultRows) {
+    if (row.profile === profile && row.target === target) scores.set(row.origin, row.distinctRoutes);
+  }
+  return scores;
 }
 function drawGraph(step) {
   svg.textContent = "";
@@ -494,9 +902,15 @@ function drawGraph(step) {
   if ((step.failureSourcePath || []).length && !samePath(step.failureSourcePath, step.basePath || [])) {
     drawPath(step.failureSourcePath || [], "edge-source", nodes, project);
   }
-  drawPath(step.candidatePath || [], step.accepted ? "edge-candidate-ok" : "edge-candidate-bad", nodes, project);
+  drawPath(step.candidatePath || [], candidateClass(step), nodes, project);
   drawFailed(step, nodes, project);
   for (const node of nodes) drawNode(node, project, node.isExit ? "node node-exit" : "node");
+  const scores = nodeScoresForStep(step);
+  if (scores.size) {
+    for (const node of nodes) {
+      if (scores.has(node.id)) drawNodeScore(node, project, scores.get(node.id));
+    }
+  }
   const origin = byId.get(step.origin);
   const target = byId.get(step.target);
   if (origin && (!level || origin.level === level)) { drawNode(origin, project, "node-origin"); drawLabel(origin, project, "origen"); }
@@ -508,7 +922,7 @@ if (!steps.length) {
 } else {
   steps.forEach((step, index) => {
     const button = document.createElement("button");
-    button.textContent = `${index + 1}. ${step.failureProfile} d${step.failureDepth} caso ${step.evaluatedFailureCases} | ${step.reason} | distintas=${step.distinctRouteCount}`;
+    button.textContent = `${index + 1}. ${step.failureProfile} d${step.failureDepth} | ${step.reason} | rama=${step.branchStatus || "-"} | distintas=${step.distinctRouteCount}`;
     button.onclick = () => show(index);
     list.appendChild(button);
   });

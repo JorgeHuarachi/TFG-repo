@@ -44,6 +44,7 @@ class RouteRecommendationConfig:
     rerouting_use_structural_precompute: bool = True
     rerouting_store_routes: bool = False
     rerouting_max_overlap: float = 0.8
+    rerouting_profile_weights: dict[str, float] = field(default_factory=dict)
     rerouting_centrality_by_node: dict[str, float] = field(default_factory=dict)
     rerouting_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -80,6 +81,7 @@ class RouteRecommendationConfig:
             rerouting_use_structural_precompute=bool(raw.get("reroutingUseStructuralPrecompute", True)),
             rerouting_store_routes=bool(raw.get("reroutingStoreRoutes", False)),
             rerouting_max_overlap=_bounded_float(raw.get("reroutingMaxOverlap"), _bounded_float(raw.get("centralityMaxOverlap"), 0.8, 0.0, 1.0), 0.0, 1.0),
+            rerouting_profile_weights=_profile_weights(raw.get("reroutingProfileWeights")),
         )
 
 
@@ -452,7 +454,7 @@ class EvacuationRouteRecommendationService:
             graph_view=graph_view,
             store_routes=config.rerouting_store_routes,
         )
-        return cer_node_scores(result), result.metadata
+        return cer_node_scores(result, profile_weights=config.rerouting_profile_weights), result.metadata
 
 
 def _path_cost(graph: nx.Graph, path: Iterable[str], weight: str) -> float:
@@ -560,3 +562,23 @@ def _failure_profiles(value: Any) -> tuple[tuple[int, ...], ...]:
         if profile:
             profiles.append(profile)
     return tuple(profiles) or ((1,),)
+
+
+def _profile_weights(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    weights: dict[str, float] = {}
+    for raw_key, raw_value in value.items():
+        try:
+            weight = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if weight < 0.0:
+            continue
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        if not key.startswith("("):
+            key = f"({key})"
+        weights[key] = weight
+    return weights

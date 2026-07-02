@@ -38,7 +38,11 @@ simulation/unaplanta-intento-1_rolling.gif
 simulation/unaplanta-intento-1_mixed.gif
 routing/cer/cer_rerouting_explanation.gif
 routing/cer/cer_rerouting_summary.png
+routing/cer/cer_rerouting_explanation.html
+routing/cer/cer_rerouting_debug.json
 ```
+
+La evidencia CER curada en GIF cubre los perfiles `(1)` y `(1,1)` completos con `tau = 0.2`. Para exploraciones mas profundas, como `(1,1,1)` o `(1,2)`, es preferible usar el HTML interactivo y grabar el tramo necesario con ScreenToGif.
 
 ## Nombres recomendados
 

@@ -204,31 +204,33 @@ def rerouting_evacuation_centrality(
                 continue
             cost_limit = base_cost * (1.0 + cost_tolerance)
             should_debug_pair = store_failure_cases and (debug_pairs is None or (origin, target) in debug_pairs)
+            stats_by_profile = {
+                profile: CERProfileStats(profile=profile, base_path=base_path, base_cost=base_cost, cost_limit=cost_limit)
+                for profile in profiles
+            }
+            _explore_failure_tree(
+                graph,
+                origin,
+                target,
+                _build_profile_tree(profiles),
+                prefix=(),
+                current_path=base_path,
+                failed_units=[],
+                base_path=base_path,
+                base_cost=base_cost,
+                cost_limit=cost_limit,
+                failure_unit=failure_unit,
+                distinctness_policy=distinctness_policy,
+                max_overlap=float(max_overlap),
+                max_combinations=max_combinations,
+                deadline=start + max_runtime_s,
+                weight=weight,
+                stats_by_profile=stats_by_profile,
+                seen_failures_by_profile={},
+                debug_steps=debug_steps if should_debug_pair else None,
+            )
             for profile in profiles:
-                stats = CERProfileStats(profile=profile, base_path=base_path, base_cost=base_cost, cost_limit=cost_limit)
-                seen_failures: set[tuple[FailureUnit, ...]] = set()
-                _explore_failure_profile(
-                    graph,
-                    origin,
-                    target,
-                    profile,
-                    depth=0,
-                    current_path=base_path,
-                    failed_units=[],
-                    base_path=base_path,
-                    base_cost=base_cost,
-                    cost_limit=cost_limit,
-                    failure_unit=failure_unit,
-                    distinctness_policy=distinctness_policy,
-                    max_overlap=float(max_overlap),
-                    max_combinations=max_combinations,
-                    deadline=start + max_runtime_s,
-                    weight=weight,
-                    stats=stats,
-                    seen_failures=seen_failures,
-                    debug_steps=debug_steps if should_debug_pair else None,
-                )
-                target_profiles[profile_label(profile)] = stats
+                target_profiles[profile_label(profile)] = stats_by_profile[profile]
             origin_payload["targets"][target] = {"profiles": target_profiles}
         origin_payload["summary"] = _origin_summary(origin_payload)
         nodes[origin] = origin_payload
@@ -239,8 +241,15 @@ def rerouting_evacuation_centrality(
     return CERResult(metadata=metadata, nodes=nodes, debug_steps=debug_steps)
 
 
-def cer_node_scores(result: CERResult | dict[str, Any], *, profile: str | None = None, target: str | None = None) -> dict[str, float]:
+def cer_node_scores(
+    result: CERResult | dict[str, Any],
+    *,
+    profile: str | None = None,
+    target: str | None = None,
+    profile_weights: dict[str, float] | None = None,
+) -> dict[str, float]:
     payload = result.to_dict() if isinstance(result, CERResult) else result
+    weights = profile_weights or {}
     scores: dict[str, float] = {}
     for origin, origin_payload in (payload.get("nodes") or {}).items():
         total = 0.0
@@ -252,7 +261,8 @@ def cer_node_scores(result: CERResult | dict[str, Any], *, profile: str | None =
             for label, stats in (target_payload.get("profiles") or {}).items():
                 if profile is not None and label != profile:
                     continue
-                total += float((stats or {}).get("distinctRoutes") or 0.0)
+                weight = float(weights.get(str(label), 1.0))
+                total += weight * float((stats or {}).get("distinctRoutes") or 0.0)
         scores[str(origin)] = total
     return scores
 
@@ -295,6 +305,223 @@ def path_cost(graph: nx.Graph, path: Iterable[str], weight: str = "weight") -> f
             return math.inf
         total += float(edge.get(weight, 1.0))
     return total
+
+
+def _build_profile_tree(profiles: Iterable[tuple[int, ...]]) -> dict[str, Any]:
+    root: dict[str, Any] = {"children": {}, "terminal": None}
+    for profile in profiles:
+        node = root
+        for value in profile:
+            children = node.setdefault("children", {})
+            node = children.setdefault(int(value), {"children": {}, "terminal": None})
+        node["terminal"] = tuple(profile)
+    return root
+
+
+def _profiles_under(node: dict[str, Any]) -> list[tuple[int, ...]]:
+    profiles: list[tuple[int, ...]] = []
+    terminal = node.get("terminal")
+    if terminal:
+        profiles.append(tuple(terminal))
+    for child in (node.get("children") or {}).values():
+        profiles.extend(_profiles_under(child))
+    return profiles
+
+
+def _mark_timeout(stats_by_profile: dict[tuple[int, ...], CERProfileStats], profiles: Iterable[tuple[int, ...]]) -> None:
+    for profile in profiles:
+        if profile in stats_by_profile:
+            stats_by_profile[profile].timeout = True
+
+
+def _mark_truncated(stats_by_profile: dict[tuple[int, ...], CERProfileStats], profiles: Iterable[tuple[int, ...]]) -> None:
+    for profile in profiles:
+        if profile in stats_by_profile:
+            stats_by_profile[profile].truncated = True
+
+
+def _record_profile_case(
+    graph: nx.Graph,
+    origin: str,
+    target: str,
+    profile: tuple[int, ...],
+    *,
+    depth: int,
+    accumulated: tuple[FailureUnit, ...],
+    newly_failed: tuple[FailureUnit, ...],
+    base_path: list[str],
+    current_path: list[str],
+    candidate_path: list[str],
+    base_cost: float,
+    candidate_cost: float | None,
+    cost_limit: float,
+    distinctness_policy: str,
+    max_overlap: float,
+    weight: str,
+    stats: CERProfileStats,
+    debug_steps: list[CERDebugStep] | None,
+) -> bool:
+    """Record one evaluated profile case and return whether the branch is live."""
+
+    stats.evaluated_failure_cases += 1
+    if candidate_cost is None or not candidate_path or not math.isfinite(candidate_cost):
+        stats.no_path_cases += 1
+        _append_debug(debug_steps, origin, target, profile, depth, accumulated, newly_failed, base_path, current_path, candidate_path, base_cost, None, cost_limit, False, "no_path", stats)
+        return False
+    if candidate_cost > cost_limit:
+        stats.over_tolerance_cases += 1
+        _append_debug(
+            debug_steps,
+            origin,
+            target,
+            profile,
+            depth,
+            accumulated,
+            newly_failed,
+            base_path,
+            current_path,
+            candidate_path,
+            base_cost,
+            candidate_cost,
+            cost_limit,
+            False,
+            "over_tolerance",
+            stats,
+        )
+        return False
+    signature = route_signature(graph, candidate_path, distinctness_policy)
+    duplicate = _route_duplicate(signature, stats.accepted_route_signatures, max_overlap, distinctness_policy)
+    stats.accepted_cases += 1
+    if duplicate:
+        stats.duplicate_route_cases += 1
+        reason = "duplicate_route"
+    else:
+        stats.accepted_route_signatures.add(signature)
+        stats.distinct_routes = len(stats.accepted_route_signatures)
+        reason = "within_tolerance"
+    _append_debug(
+        debug_steps,
+        origin,
+        target,
+        profile,
+        depth,
+        accumulated,
+        newly_failed,
+        base_path,
+        current_path,
+        candidate_path,
+        base_cost,
+        candidate_cost,
+        cost_limit,
+        not duplicate,
+        reason,
+        stats,
+    )
+    return True
+
+
+def _explore_failure_tree(
+    graph: nx.Graph,
+    origin: str,
+    target: str,
+    tree: dict[str, Any],
+    *,
+    prefix: tuple[int, ...],
+    current_path: list[str],
+    failed_units: list[FailureUnit],
+    base_path: list[str],
+    base_cost: float,
+    cost_limit: float,
+    failure_unit: str,
+    distinctness_policy: str,
+    max_overlap: float,
+    max_combinations: int,
+    deadline: float,
+    weight: str,
+    stats_by_profile: dict[tuple[int, ...], CERProfileStats],
+    seen_failures_by_profile: dict[tuple[int, ...], set[tuple[FailureUnit, ...]]],
+    debug_steps: list[CERDebugStep] | None,
+) -> None:
+    if time.perf_counter() >= deadline:
+        _mark_timeout(stats_by_profile, _profiles_under(tree))
+        return
+    for k, child in sorted((tree.get("children") or {}).items()):
+        profile_prefix = (*prefix, int(k))
+        profiles_under_child = _profiles_under(child)
+        stats = stats_by_profile.get(profile_prefix)
+        if stats and stats.evaluated_failure_cases >= max_combinations:
+            stats.truncated = True
+            continue
+        units = failure_units_for_path(graph, current_path, failure_unit, weight)
+        if len(units) < int(k):
+            if stats:
+                stats.pruned_cases += 1
+            continue
+        seen = seen_failures_by_profile.setdefault(profile_prefix, set())
+        for combo in combinations(units, int(k)):
+            if time.perf_counter() >= deadline:
+                _mark_timeout(stats_by_profile, profiles_under_child)
+                return
+            if stats and stats.evaluated_failure_cases >= max_combinations:
+                stats.truncated = True
+                break
+            accumulated = _canonical_failed_units([*failed_units, *combo])
+            if accumulated in seen:
+                continue
+            seen.add(accumulated)
+            newly_failed = _canonical_failed_units(combo)
+            test_graph = graph.copy()
+            remove_failure_units(test_graph, accumulated)
+            try:
+                candidate_path = [str(node) for node in nx.shortest_path(test_graph, origin, target, weight=weight)]
+                candidate_cost = path_cost(test_graph, candidate_path, weight)
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                candidate_path = []
+                candidate_cost = None
+            branch_live = candidate_cost is not None and bool(candidate_path) and math.isfinite(candidate_cost) and candidate_cost <= cost_limit
+            if stats:
+                branch_live = _record_profile_case(
+                    test_graph,
+                    origin,
+                    target,
+                    profile_prefix,
+                    depth=len(profile_prefix) - 1,
+                    accumulated=accumulated,
+                    newly_failed=newly_failed,
+                    base_path=base_path,
+                    current_path=current_path,
+                    candidate_path=candidate_path,
+                    base_cost=base_cost,
+                    candidate_cost=candidate_cost,
+                    cost_limit=cost_limit,
+                    distinctness_policy=distinctness_policy,
+                    max_overlap=max_overlap,
+                    weight=weight,
+                    stats=stats,
+                    debug_steps=debug_steps,
+                )
+            if branch_live and (child.get("children") or {}):
+                _explore_failure_tree(
+                    test_graph,
+                    origin,
+                    target,
+                    child,
+                    prefix=profile_prefix,
+                    current_path=candidate_path,
+                    failed_units=list(accumulated),
+                    base_path=base_path,
+                    base_cost=base_cost,
+                    cost_limit=cost_limit,
+                    failure_unit=failure_unit,
+                    distinctness_policy=distinctness_policy,
+                    max_overlap=max_overlap,
+                    max_combinations=max_combinations,
+                    deadline=deadline,
+                    weight=weight,
+                    stats_by_profile=stats_by_profile,
+                    seen_failures_by_profile=seen_failures_by_profile,
+                    debug_steps=debug_steps,
+                )
 
 
 def _explore_failure_profile(

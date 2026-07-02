@@ -105,6 +105,8 @@ La CER explica visualmente la Centralidad de Evacuacion por Reencaminamiento: ru
 | Centralidad de Evacuacion por Reencaminamiento | <img src="docs/tfg/media/routing/cer/cer_rerouting_explanation.gif" width="520"> |
 | Resumen estatico CER | <img src="docs/tfg/media/routing/cer/cer_rerouting_summary.png" width="520"> |
 
+El GIF CER curado muestra completos los perfiles `(1)` y `(1,1)` con `tau = 0.2`. Para perfiles mas profundos, como `(1,1,1)` o `(1,2)`, se recomienda abrir `docs/tfg/media/routing/cer/cer_rerouting_explanation.html` y grabar el tramo necesario con ScreenToGif.
+
 ## Resumen Ejecutivo
 
 El sistema actual permite:
