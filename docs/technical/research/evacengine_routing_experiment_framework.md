@@ -182,7 +182,7 @@ Estos campos viven en `scenario.routing` o dentro de cada `experiments.routingPr
 | `routeRecommendation.robustnessWeight` | peso de robustez en la politica combinada |
 | `routeRecommendation.agilityWeight` | peso de agilidad en la politica combinada |
 | `routeRecommendation.agilityAggregation` | agregacion de agilidad de nodos intermedios: `mean` o `geometric` |
-| `routeRecommendation.reroutingFailureProfiles` | perfiles CER como `[ [1], [1,1], [1,1,1], [1,2] ]` |
+| `routeRecommendation.reroutingFailureProfiles` | perfiles CER; base recomendada `[ [1], [1,1] ]`, y comparacion moderada `[ [2], [2,1] ]` |
 | `routeRecommendation.reroutingCostTolerance` | tolerancia CER: `Cmax = (1 + tau) * C0` |
 | `routeRecommendation.reroutingFailureUnit` | unidad de fallo CER: `resource`, `arc`, `undirected_pair` o `cell` |
 | `routeRecommendation.reroutingDistinctnessPolicy` | `exact` compara `tuple(path)`; `overlap` queda preparado |
@@ -295,21 +295,41 @@ origen -> salida -> perfil de fallo
 
 El resumen por nodo es derivado y sirve para politicas de recomendacion. La unidad recomendada es `failureUnit = resource`, porque al bloquear una puerta, rampa, tramo o conector se bloquea el recurso fisico completo identificado por `resourceRef`.
 
+La decision metodologica actual es usar perfiles cortos para resultados base:
+
+```text
+(1)
+(1,1)
+```
+
+Y, si se quiere comparar simultaneidad moderada:
+
+```text
+(2)
+(2,1)
+(2,2)
+```
+
+En el sistema real se mantiene `maxK <= 2`. `(2,2)` es el limite moderado para
+comparar fallos simultaneos consecutivos. Perfiles mas profundos como
+`(1,1,1)` o `(2,1,1)` quedan para visualizaciones puntuales o sensibilidad, no
+para el barrido principal de todos los nodos. Limites `f5+` se consideran
+experimentos de capacidad/combinatoria y deben ejecutarse preferiblemente sin
+debug completo.
+
 Hay dos formas de usar CER:
 
 - `CER-Cost` (`cer_weighted`): transforma CER en una penalizacion positiva por baja agilidad y permite usar Dijkstra/A* minimizando.
 - `CER-Agility` (`cer_agility_yen`): genera candidatas con Yen y selecciona la que atraviesa nodos con mayor CER dentro de la tolerancia.
 
-Por defecto el score de nodo puede ponderar perfiles de fallo para que los fallos inmediatos pesen mas que degradaciones profundas:
+Por defecto el score de nodo puede ponderar perfiles de fallo para que los fallos inmediatos pesen mas que degradaciones mas profundas:
 
 ```text
 CER_score(v) =
     1.0 * CER_(1)(v)
-  + 0.7 * CER_(2)(v)
   + 0.6 * CER_(1,1)(v)
-  + 0.5 * CER_(1,2)(v)
-  + 0.5 * CER_(2,1)(v)
-  + 0.3 * CER_(1,1,1)(v)
+  + 0.7 * CER_(2)(v)      [si se activa comparacion de simultaneidad]
+  + 0.5 * CER_(2,1)(v)    [si se activa comparacion de simultaneidad]
 ```
 
 Si no se define `reroutingProfileWeights`, la agregacion sigue siendo una suma simple para mantener compatibilidad.
@@ -377,7 +397,7 @@ Comparar tres politicas:
 Generar los HTML explicativos de aplicacion de CER al recomendador:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m src.evac_engine explain-routing-policies --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --failure-profiles "1;1,1;1,1,1" --cost-tolerance 0.2 --level LEVEL_00
+.\.venv\Scripts\python.exe -B -m src.evac_engine explain-routing-policies --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --failure-profiles "1;1,1" --cost-tolerance 0.2 --level LEVEL_00
 ```
 
 Este comando no simula agentes. Es una visualizacion didactica y reproducible de:

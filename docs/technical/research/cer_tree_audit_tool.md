@@ -82,7 +82,30 @@ derivado para inspeccion o futuras politicas.
 
 ## Perfiles generados
 
-Con los valores por defecto:
+La decision metodologica actual es trabajar con perfiles cortos y con
+simultaneidad acotada:
+
+```text
+maxK <= 2
+maxDepth = 1 o 2 para barridos globales
+maxDepth = 3 solo para visualizaciones puntuales
+```
+
+Para resultados base:
+
+```text
+(1)
+(1,1)
+```
+
+Para comparar simultaneidad moderada:
+
+```text
+(2)
+(2,1)
+```
+
+Con los valores tecnicos por defecto:
 
 ```text
 maxDepth = 2
@@ -112,7 +135,16 @@ Por ejemplo:
 
 - `baseCost`: coste de la ruta minima inicial `P0`.
 - `costLimit`: limite aceptable `Cmax = (1 + tau) * baseCost`.
-- `distinctRoutes`: rutas aceptadas con secuencia de nodos distinta.
+- `distinctRoutes` dentro de un `failureProfile`: rutas aceptadas con secuencia
+  de nodos distinta dentro de ese perfil concreto.
+- `uniqueDistinctRoutes` en el resumen `origin -> target`: rutas exactas
+  deduplicadas entre todos los perfiles. Esta es la cifra estricta para decir
+  cuantas alternativas distintas conserva un nodo hacia una salida.
+- `profileDistinctRoutes`: suma de `distinctRoutes` por perfil. Sirve para
+  auditar que perfiles aportan rutas, pero puede contar la misma ruta varias
+  veces.
+- `repeatedRoutesAcrossProfiles`: diferencia entre `profileDistinctRoutes` y
+  `uniqueDistinctRoutes`.
 - `acceptedCases`: casos con ruta encontrada dentro de tolerancia.
 - `totalCases`: casos evaluados para ese perfil.
 - `coverage`: `acceptedCases / totalCases`.
@@ -165,18 +197,23 @@ El playground pregunta por:
 Es la forma recomendada para jugar con perfiles como:
 
 ```text
-1;1,1;1,1,1
-2;2,1;2,1,1
-1;2;1,1;1,2;2,1
+1
+1;1,1
+2;2,1
 ```
 
 sin tener que moverse por una linea de comando enorme.
 
+Perfiles como `1;1,1;1,1,1` o `2;2,1;2,1,1` son utiles para visualizaciones
+puntuales o sensibilidad, pero no son el barrido global recomendado.
+
 Si eliges todos los nodos, lo normal es desactivar el HTML visual paso a paso.
-Asi se genera una tabla manejable con `distinctRoutes` por:
+Asi se genera una tabla manejable con la lectura por perfil y la lectura global
+por nodo:
 
 ```text
 origin -> target -> failureProfile
+origin -> target -> uniqueDistinctRoutes
 ```
 
 La tabla queda en:
@@ -198,6 +235,35 @@ python -m src.evac_engine cer-tree --scenario models\UnaPlanta_ConConexionesVert
 ```powershell
 python -m src.evac_engine cer-tree --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --origin CS_L00_DOOR_001 --target CS_L00_EXIT_001 --profile MP_WALKING --failure-profiles "1;1,1" --tau 0.3 --max-depth 2 --max-k 1 --max-runtime-ms 5000
 ```
+
+## Modo ligero sin debug
+
+Para barridos globales o limites altos, usa:
+
+```text
+--debug-steps none --formats summary-json
+```
+
+Esto no guarda `debugSteps`, rutas completas ni HTML visual. El resultado queda
+en un JSON pequeno con metricas finales y contadores agregados:
+
+- `runtimeMs`;
+- `calculationStepCount`;
+- `decisionCounts`;
+- `branchDeathReasonCounts`;
+- `limitHits`;
+- `uniqueDistinctRoutes`;
+- `profileDistinctRoutes`;
+- `repeatedRoutesAcrossProfiles`.
+
+Ejemplo para todos los nodos con limites altos:
+
+```powershell
+python -m src.evac_engine cer-tree --scenario models\UnaPlanta_ConConexionesVerticales\evacuation\scenarios\baseline.json --all-origins --target CS_L00_EXIT_001 --profile MP_WALKING --tau 0.2 --max-depth 5 --max-k 5 --max-total-failures 5 --max-combinations 10000000 --max-runtime-ms 3600000 --debug-steps none --formats summary-json --output-dir models\UnaPlanta_ConConexionesVerticales\outputs\cer_tree\exhaustive_all_origins_f5_summary
+```
+
+Si despues se quiere explicar visualmente un nodo concreto, se repite el calculo
+solo para ese origen con `--debug-steps full` y `--formats visual-html`.
 
 ## Barrido de todos los nodos
 
@@ -253,19 +319,75 @@ El visor `visual.html` reutiliza la gramatica visual de la explicacion CER:
 
 Permite avanzar con botones, `Play/Pausa` o flechas izquierda/derecha.
 Cuando el payload incluye varios origenes, el grafo muestra sobre cada nodo el
-valor `distinctRoutes` correspondiente al `target` y `failureProfile` del paso
-activo. Asi se puede ver visualmente como se reparte la CER, por ejemplo para
-`(1)` o `(1,1)`, sin bajar necesariamente a la tabla.
+valor estricto `uniqueDistinctRoutes` correspondiente a la salida activa,
+deduplicando entre perfiles. Asi se puede ver visualmente la CER por nodo sin
+inflarla por rutas repetidas en perfiles distintos.
 
 Debajo del grafo, haciendo scroll, el mismo HTML incluye un bloque de resultado
 final con:
 
-- suma de `distinctRoutes` para las filas incluidas;
+- suma por perfil, es decir `profileDistinctRoutes`;
+- rutas exactas unicas globales, es decir `uniqueDistinctRoutes`;
+- rutas repetidas entre perfiles, es decir `repeatedRoutesAcrossProfiles`;
+- tabla `origin -> target` con la lectura estricta por nodo/salida;
 - mejor fila `origin -> target -> profile`;
 - numero de origenes, salidas y perfiles;
 - coverage global;
 - tabla completa `origin, target, failureProfile, distinctRoutes, acceptedCases,
   totalCases, coverage...`.
+- diagnostico de diversidad de rutas por `origin -> target -> profile`;
+- tabla de `distinctRouteSignatures`, con la secuencia de nodos de cada ruta
+  distinta y su solape aproximado con `P0`.
+
+En el panel principal del HTML hay un selector independiente de rutas
+distintas:
+
+```text
+GLOBAL -> origin -> target -> rutas unicas
+origin -> target -> profile -> rutas por perfil
+```
+
+Despues se usan `Ruta -`, `Ver ruta`, `Ruta +` y `Solo rutas`.
+
+- `Ver ruta` superpone en cian una ruta distinta aceptada sobre la animacion
+  del calculo.
+- `Solo rutas` limpia la escena y deja solo el grafo base, los valores
+  `uniqueDistinctRoutes` de los nodos para esa salida, y la ruta seleccionada.
+- `Ver calculo` vuelve a mostrar P0, ruta fuente, candidata y fallos del paso
+  CER activo.
+
+Esto separa dos lecturas: la animacion audita como se llego al resultado, y el
+explorador de rutas permite comprobar si las rutas contadas como distintas
+representan alternativas espaciales relevantes o solo variaciones pequenas.
+Tambien se puede hacer clic en una fila de la tabla `distinctRouteSignatures`
+para abrir directamente esa ruta en modo `Solo rutas`.
+
+El diagnostico de diversidad usa solape Jaccard de aristas:
+
+```text
+0 = rutas sin aristas comunes
+1 = rutas iguales en aristas
+```
+
+Las columnas mas utiles son:
+
+- `mean vs P0`: cuanto se parecen, en media, las rutas distintas a la ruta base.
+- `mean pairwise`: cuanto se parecen entre si las rutas distintas del mismo
+  perfil.
+- `max pairwise`: el par de rutas mas parecido dentro del grupo.
+- `pairs >= 90%`: rutas casi duplicadas espacialmente aunque sean distintas
+  por secuencia exacta.
+
+Si `distinctRoutes` es alto pero `mean pairwise` tambien es alto, la metrica
+esta contando muchas variaciones pequenas del mismo corredor. Si
+`distinctRoutes` es alto y `mean pairwise` es bajo, las alternativas son mas
+diversas espacialmente. Esta lectura no modifica CER; sirve para calibrar
+tolerancia, perfiles y futura politica de distinctness por solape.
+
+Importante: `profileDistinctRoutes` suma cada perfil por separado. La misma
+ruta puede aparecer en `(1)`, `(1,1)` y `(2,1)`. Para no sobreinterpretar ese
+total, el valor principal agregado es `uniqueDistinctRoutes`, que deduplica por
+secuencia exacta de nodos entre perfiles.
 
 Hay dos ordenes visuales:
 
@@ -298,12 +420,46 @@ El resultado indica si se ha llegado al limite mediante `truncatedByRuntime`.
 Si aparece `false`, ese origen/salida/perfil se ha completado con los limites
 combinatorios indicados.
 
+## Decision practica de limites
+
+Los experimentos con limites altos han mostrado que la herramienta puede
+explorar la combinatoria, pero no conviene convertir esa capacidad en el caso
+base del TFG. Con `maxDepth=5`, `maxK=5` y `maxTotalFailures=5`, el calculo
+puede terminar sin cortes tecnicos, pero el numero de estados crece mucho y una
+gran parte de las rutas aparecen repetidas entre perfiles. Ese modo sirve para
+demostrar capacidad y para estudiar explosion combinatoria, no para los
+resultados principales.
+
+La configuracion recomendada para barridos globales es:
+
+```text
+Familia secuencial:    1;1,1
+Familia simultanea:    2;2,1;2,2
+maxK:                  2
+maxDepth:              2
+maxTotalFailures:      4
+```
+
+Esto mantiene la interpretacion controlada:
+
+- `(1)` y `(1,1)` miden fallo simple y reencaminamiento secuencial simple;
+- `(2)`, `(2,1)` y `(2,2)` miden simultaneidad moderada sin permitir `k > 2`;
+- perfiles mas largos como `(1,1,1)` o `(2,1,1)` quedan para visualizaciones
+  puntuales o sensibilidad;
+- limites `f5+` quedan como experimento exploratorio, preferiblemente con
+  `--debug-steps none --formats summary-json`.
+
 ## Estado actual
 
-La herramienta ya calcula CER-tree y exporta JSON, CSV y HTML. La integracion
-directa de estos valores en las politicas de recomendacion queda separada para
-la siguiente fase, cuando se decida si usar:
+La herramienta ya calcula CER-tree y exporta JSON, CSV y HTML. Tambien existe
+integracion experimental con las politicas de recomendacion:
 
 - penalizacion inversa sobre el peso de arista;
-- seleccion de rutas candidatas tipo Yen;
-- una combinacion de ambas.
+- seleccion de rutas candidatas tipo Yen.
+
+La decision metodologica actual es usar CER como medida de capacidad de
+reencaminamiento con perfiles cortos. La base es `1;1,1`; la comparacion
+moderada de simultaneidad es `2;2,1;2,2`. Se mantiene `maxK <= 2` para los
+resultados principales. La calibracion futura debe centrarse en pesos,
+tolerancia `tau`, coste temporal y comparacion entre `CER-Cost` y
+`CER-Agility`, no en hacer crecer indefinidamente el arbol de fallos.

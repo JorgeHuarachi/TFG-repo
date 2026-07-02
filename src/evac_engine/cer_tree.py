@@ -42,6 +42,7 @@ class CERTreeConfig:
     failure_profiles: tuple[tuple[int, ...], ...] | None = None
     failure_unit: str = "resource"
     weight: str = "weight"
+    debug_steps: str = "full"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class CERTreeConfig:
             "failureProfiles": [list(profile) for profile in self.failure_profiles] if self.failure_profiles else None,
             "failureUnit": self.failure_unit,
             "weight": self.weight,
+            "debugSteps": self.debug_steps,
         }
 
 
@@ -151,6 +153,7 @@ def compute_cer_tree(
             "truncatedByRuntime": False,
             "startedPairs": 0,
             "completedPairs": 0,
+            "debugStepsMode": config.debug_steps,
         },
         "nodes": {},
         "debugSteps": [],
@@ -171,7 +174,7 @@ def compute_cer_tree(
                 started,
                 deadline,
                 visited_states,
-                payload["debugSteps"],
+                payload["debugSteps"] if _store_debug_steps(config) else None,
             )
             origin_payload["targets"][str(target)] = target_payload
             if target_payload.get("truncatedByRuntime"):
@@ -181,6 +184,7 @@ def compute_cer_tree(
                 payload["metadata"]["completedPairs"] += 1
         origin_payload["summary"] = _origin_summary(origin_payload)
     payload["metadata"]["runtimeMs"] = round((time.perf_counter() - started) * 1000.0, 6)
+    payload["metadata"].update(_aggregate_payload_counters(payload))
     payload["metadata"]["debugStepCount"] = len(payload["debugSteps"])
     return payload
 
@@ -258,6 +262,10 @@ def export_cer_tree_for_scenario(
             path = output / f"cer_tree_{prefix}.json"
             path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
             paths[f"{profile.id}:json"] = str(path)
+        if "summary-json" in requested or "summary" in requested:
+            path = output / f"cer_tree_summary_{prefix}.json"
+            path.write_text(json.dumps(_compact_cer_tree_payload(payload), ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+            paths[f"{profile.id}:summary-json"] = str(path)
         if "csv" in requested:
             path = output / f"cer_tree_summary_{prefix}.csv"
             _write_summary_csv(payload, path)
@@ -289,6 +297,33 @@ def export_cer_tree_for_scenario(
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     paths["manifest"] = str(manifest_path)
     return {**manifest, "outputs": paths, "runs": runs}
+
+
+def _compact_cer_tree_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    compact_nodes: dict[str, Any] = {}
+    for origin, origin_payload in (payload.get("nodes") or {}).items():
+        compact_origin = {"summary": origin_payload.get("summary") or {}, "targets": {}}
+        for target, target_payload in (origin_payload.get("targets") or {}).items():
+            compact_target = {
+                "summary": target_payload.get("summary") or {},
+                "failureProfiles": {},
+            }
+            for label, stats in (target_payload.get("failureProfiles") or {}).items():
+                compact_target["failureProfiles"][label] = {
+                    key: value
+                    for key, value in stats.items()
+                    if key not in {"distinctRouteSignatures"}
+                }
+            if target_payload.get("skippedSelf"):
+                compact_target["skippedSelf"] = True
+            if target_payload.get("unreachable"):
+                compact_target["unreachable"] = True
+            compact_origin["targets"][target] = compact_target
+        compact_nodes[origin] = compact_origin
+    return {
+        "metadata": payload.get("metadata") or {},
+        "nodes": compact_nodes,
+    }
 
 
 def default_cer_tree_output_dir(scenario_path: str | Path, indoor_path: str | Path) -> Path:
@@ -388,7 +423,7 @@ def _compute_pair_tree(
     started: float,
     deadline: float,
     visited_states: dict[tuple[str, str, frozenset[FailureUnit]], _CachedEvaluation],
-    debug_steps: list[dict[str, Any]],
+    debug_steps: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     if origin == target:
         return {"skippedSelf": True, "failureProfiles": {}, "summary": {}}
@@ -419,6 +454,8 @@ def _compute_pair_tree(
         ]
     )
     pair_limit_hits = Counter()
+    pair_decision_counts = Counter()
+    pair_branch_death_counts = Counter()
     pair_truncated_runtime = False
     allowed_profile_prefixes = _profile_prefixes(config.failure_profiles)
 
@@ -468,6 +505,7 @@ def _compute_pair_tree(
                 cached = visited_states.get(state_key)
                 if cached is not None:
                     profile_stats.visited_state_cases += 1
+                    _record_tree_case(pair_decision_counts, pair_branch_death_counts, "visited_state", "visited_state")
                     _append_debug_step(
                         debug_steps,
                         origin,
@@ -535,6 +573,7 @@ def _compute_pair_tree(
                 branch_status = "live" if branch_live else "dead"
                 if branch_death_reason in {"max_depth", "max_total_failures"}:
                     branch_status = "terminal"
+                _record_tree_case(pair_decision_counts, pair_branch_death_counts, decision, branch_death_reason)
                 _append_debug_step(
                     debug_steps,
                     origin,
@@ -589,6 +628,8 @@ def _compute_pair_tree(
             "baseCost": round(base_cost, 6),
             "Cmax": round(cost_limit, 6),
             "limitHits": dict(pair_limit_hits),
+            "decisionCounts": dict(pair_decision_counts),
+            "branchDeathReasonCounts": dict(pair_branch_death_counts),
         }
     )
     return {
@@ -602,7 +643,7 @@ def _compute_pair_tree(
 
 
 def _append_debug_step(
-    debug_steps: list[dict[str, Any]],
+    debug_steps: list[dict[str, Any]] | None,
     origin: str,
     target: str,
     base_path: list[str],
@@ -625,6 +666,8 @@ def _append_debug_step(
     branch_death_reason: str,
     note: str = "",
 ) -> None:
+    if debug_steps is None:
+        return
     debug_steps.append(
         {
             "origin": origin,
@@ -658,6 +701,33 @@ def _append_debug_step(
             "routeHistory": [list(path) for path in state.route_history] + ([list(candidate_path)] if candidate_path else []),
         }
     )
+
+
+def _store_debug_steps(config: CERTreeConfig) -> bool:
+    return str(config.debug_steps or "full").lower() != "none"
+
+
+def _record_tree_case(decisions: Counter, branch_deaths: Counter, decision: str, branch_death_reason: str) -> None:
+    decisions[decision or "-"] += 1
+    branch_deaths[branch_death_reason or "-"] += 1
+
+
+def _aggregate_payload_counters(payload: dict[str, Any]) -> dict[str, Any]:
+    decisions = Counter()
+    branch_deaths = Counter()
+    limit_hits = Counter()
+    for origin_payload in (payload.get("nodes") or {}).values():
+        for target_payload in (origin_payload.get("targets") or {}).values():
+            summary = target_payload.get("summary") or {}
+            decisions.update(summary.get("decisionCounts") or {})
+            branch_deaths.update(summary.get("branchDeathReasonCounts") or {})
+            limit_hits.update(summary.get("limitHits") or {})
+    return {
+        "calculationStepCount": int(sum(decisions.values())),
+        "decisionCounts": dict(decisions),
+        "branchDeathReasonCounts": dict(branch_deaths),
+        "limitHits": dict(limit_hits),
+    }
 
 
 def _selected_edge_data(graph: nx.Graph, source: str, target: str, weight: str) -> dict[str, Any] | None:
@@ -720,12 +790,21 @@ def _branch_id(profile: Iterable[int], failed_units: Iterable[FailureUnit]) -> s
 
 
 def _target_summary(failure_profiles: dict[str, Any]) -> dict[str, Any]:
-    distinct = sum(int(profile.get("distinctRoutes") or 0) for profile in failure_profiles.values())
+    profile_distinct = sum(int(profile.get("distinctRoutes") or 0) for profile in failure_profiles.values())
+    unique_routes = {
+        tuple(str(node) for node in route)
+        for profile in failure_profiles.values()
+        for route in (profile.get("distinctRouteSignatures") or [])
+    }
+    unique_distinct = len(unique_routes)
     accepted = sum(int(profile.get("acceptedCases") or 0) for profile in failure_profiles.values())
     total = sum(int(profile.get("totalCases") or 0) for profile in failure_profiles.values())
     coverage = accepted / total if total else 0.0
     return {
-        "distinctRoutes": distinct,
+        "distinctRoutes": unique_distinct,
+        "uniqueDistinctRoutes": unique_distinct,
+        "profileDistinctRoutes": profile_distinct,
+        "repeatedRoutesAcrossProfiles": max(0, profile_distinct - unique_distinct),
         "acceptedCases": accepted,
         "totalCases": total,
         "coverage": round(coverage, 6),
@@ -737,10 +816,16 @@ def _origin_summary(origin_payload: dict[str, Any]) -> dict[str, Any]:
     best_coverage = None
     best_distinct_value = -1
     best_coverage_value = -1.0
+    sum_unique_distinct = 0
+    sum_profile_distinct = 0
+    repeated_across_profiles = 0
     for target, target_payload in (origin_payload.get("targets") or {}).items():
         summary = target_payload.get("summary") or {}
-        distinct = int(summary.get("distinctRoutes") or 0)
+        distinct = int(summary.get("uniqueDistinctRoutes", summary.get("distinctRoutes") or 0) or 0)
         coverage = float(summary.get("coverage") or 0.0)
+        sum_unique_distinct += distinct
+        sum_profile_distinct += int(summary.get("profileDistinctRoutes") or distinct)
+        repeated_across_profiles += int(summary.get("repeatedRoutesAcrossProfiles") or 0)
         if distinct > best_distinct_value:
             best_distinct = target
             best_distinct_value = distinct
@@ -749,8 +834,12 @@ def _origin_summary(origin_payload: dict[str, Any]) -> dict[str, Any]:
             best_coverage_value = coverage
     return {
         "bestTargetByDistinctRoutes": best_distinct,
+        "bestTargetByUniqueDistinctRoutes": best_distinct,
         "bestTargetByCoverage": best_coverage,
-        "sumDistinctRoutes": max(best_distinct_value, 0),
+        "sumDistinctRoutes": sum_unique_distinct,
+        "sumUniqueDistinctRoutes": sum_unique_distinct,
+        "sumProfileDistinctRoutes": sum_profile_distinct,
+        "repeatedRoutesAcrossProfiles": repeated_across_profiles,
     }
 
 
@@ -798,6 +887,9 @@ def _write_summary_csv(payload: dict[str, Any], output_path: str | Path) -> Path
                 "target",
                 "failureProfile",
                 "distinctRoutes",
+                "targetUniqueDistinctRoutes",
+                "targetProfileDistinctRoutes",
+                "targetRepeatedRoutesAcrossProfiles",
                 "acceptedCases",
                 "totalCases",
                 "coverage",
@@ -813,6 +905,7 @@ def _write_summary_csv(payload: dict[str, Any], output_path: str | Path) -> Path
         writer.writeheader()
         for origin, origin_payload in (payload.get("nodes") or {}).items():
             for target, target_payload in (origin_payload.get("targets") or {}).items():
+                target_summary = target_payload.get("summary") or {}
                 for label, stats in (target_payload.get("failureProfiles") or {}).items():
                     writer.writerow(
                         {
@@ -820,6 +913,9 @@ def _write_summary_csv(payload: dict[str, Any], output_path: str | Path) -> Path
                             "target": target,
                             "failureProfile": label,
                             "distinctRoutes": stats.get("distinctRoutes"),
+                            "targetUniqueDistinctRoutes": target_summary.get("uniqueDistinctRoutes", target_summary.get("distinctRoutes")),
+                            "targetProfileDistinctRoutes": target_summary.get("profileDistinctRoutes"),
+                            "targetRepeatedRoutesAcrossProfiles": target_summary.get("repeatedRoutesAcrossProfiles"),
                             "acceptedCases": stats.get("acceptedCases"),
                             "totalCases": stats.get("totalCases"),
                             "coverage": stats.get("coverage"),
@@ -837,8 +933,20 @@ def _write_summary_csv(payload: dict[str, Any], output_path: str | Path) -> Path
 
 def _html_summary(payload: dict[str, Any]) -> str:
     rows = []
+    global_rows = []
     for origin, origin_payload in (payload.get("nodes") or {}).items():
         for target, target_payload in (origin_payload.get("targets") or {}).items():
+            target_summary = target_payload.get("summary") or {}
+            global_rows.append(
+                "<tr>"
+                f"<td>{origin}</td><td>{target}</td>"
+                f"<td>{target_summary.get('uniqueDistinctRoutes', target_summary.get('distinctRoutes'))}</td>"
+                f"<td>{target_summary.get('profileDistinctRoutes')}</td>"
+                f"<td>{target_summary.get('repeatedRoutesAcrossProfiles')}</td>"
+                f"<td>{target_summary.get('acceptedCases')}</td><td>{target_summary.get('totalCases')}</td>"
+                f"<td>{target_summary.get('coverage')}</td>"
+                "</tr>"
+            )
             for label, stats in (target_payload.get("failureProfiles") or {}).items():
                 rows.append(
                     "<tr>"
@@ -868,6 +976,10 @@ code, pre {{ background:#eef2f7; padding:8px; border-radius:6px; }}
 </style></head><body>
 <h1>CER tree audit</h1>
 <pre>{json.dumps(payload.get("metadata") or {{}}, ensure_ascii=True, indent=2)}</pre>
+<h2>Resumen estricto por nodo y salida</h2>
+<table><thead><tr><th>origin</th><th>target</th><th>uniqueDistinctRoutes</th><th>sumProfileDistinctRoutes</th><th>repeatedAcrossProfiles</th><th>acceptedCases</th><th>totalCases</th><th>coverage</th></tr></thead><tbody>
+{''.join(global_rows)}
+</tbody></table>
 <h2>Resumen por perfil</h2>
 <table><thead><tr><th>origin</th><th>target</th><th>profile</th><th>distinctRoutes</th><th>acceptedCases</th><th>totalCases</th><th>coverage</th><th>runtime</th><th>comb.</th></tr></thead><tbody>
 {''.join(rows)}

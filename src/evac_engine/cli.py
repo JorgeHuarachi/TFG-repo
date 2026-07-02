@@ -74,7 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
     cer_tree.add_argument("--target", action="append", default=[], help="Target exit CellSpace id/ref. Defaults to scenario destination/exits")
     cer_tree.add_argument("--profile", action="append", default=[], help="Mobility profile id. Repeat for walking/rolling comparisons; defaults to all profiles")
     cer_tree.add_argument("--output-dir", help="Output folder for cer_tree JSON/CSV/HTML")
-    cer_tree.add_argument("--formats", default="json,csv,html,visual-html", help="Comma-separated: json,csv,html,visual-html")
+    cer_tree.add_argument("--formats", default="json,csv,html,visual-html", help="Comma-separated: json,csv,html,visual-html,summary-json")
+    cer_tree.add_argument("--debug-steps", choices=["full", "none"], default="full", help="Store full per-case debugSteps or only aggregate counters")
     cer_tree.add_argument("--tau", type=float, default=0.3, help="Fixed CER tolerance; Cmax = C0 * (1 + tau)")
     cer_tree.add_argument("--max-depth", type=int, default=2)
     cer_tree.add_argument("--max-k", type=int, default=2)
@@ -306,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
             max_distinct_routes=args.max_distinct_routes,
             failure_profiles=_parse_failure_profiles_arg(args.failure_profiles),
             failure_unit=args.failure_unit,
+            debug_steps=args.debug_steps,
         )
         payload = export_cer_tree_for_scenario(
             indoor,

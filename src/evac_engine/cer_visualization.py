@@ -410,6 +410,10 @@ body.layout-wide #status { margin: 0 0 8px; font-size: 12px; line-height: 15px; 
 body.layout-wide .controls { margin: 6px 0 8px; gap: 5px; height: 32px; overflow: hidden; }
 body.layout-wide .controls button { min-width: 73px; min-height: 28px; padding: 4px 7px; font-size: 11px; }
 body.layout-wide .controls .muted { display: none; }
+body.layout-wide #routeTools { width: 304px; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 0 0 8px; }
+body.layout-wide #routeTools button { min-width: 0; min-height: 26px; padding: 4px 5px; font-size: 10px; }
+body.layout-wide #distinctRouteGroup { grid-column: 1 / -1; padding: 3px 5px; font-size: 10px; min-height: 23px; }
+body.layout-wide #distinctRouteStatus { grid-column: 1 / -1; font-size: 10px; line-height: 1.15; max-height: 34px; overflow: hidden; }
 body.layout-wide #metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin: 0 0 8px; font-size: 10.2px; line-height: 1.12; max-height: 230px; overflow: hidden; }
 body.layout-wide #metrics span { padding: 5px 6px; min-width: 0; overflow-wrap: anywhere; }
 body.layout-wide .help { display: none; }
@@ -428,6 +432,12 @@ body.layout-wide #detail { display: none; }
 #results th, #results td { border-bottom: 1px solid #e2e8f0; padding: 7px 8px; text-align: left; white-space: nowrap; }
 #results th { position: sticky; top: 0; background: #e2e8f0; z-index: 1; }
 #results tr:nth-child(even) td { background: #f8fafc; }
+#globalRoutesTable tbody tr { cursor: pointer; }
+#globalRoutesTable tbody tr:hover td { background: #eff6ff; }
+#diversityTable tbody tr { cursor: pointer; }
+#diversityTable tbody tr:hover td { background: #f0fdf4; }
+#distinctRoutesTable tbody tr { cursor: pointer; }
+#distinctRoutesTable tbody tr:hover td { background: #ecfeff; }
 button { display: block; width: 100%; margin: 4px 0; padding: 8px; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; text-align: left; cursor: pointer; }
 button.active { border-color: #2563eb; background: #eff6ff; }
 .controls { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
@@ -449,6 +459,7 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
 .edge-candidate-bad { stroke: #dc2626; stroke-width: 4; opacity: .78; stroke-linecap: round; }
 .edge-candidate-duplicate { stroke: #9333ea; stroke-width: 4; opacity: .86; stroke-linecap: round; stroke-dasharray: 10 4; }
 .edge-candidate-visited { stroke: #7c3aed; stroke-width: 4; opacity: .82; stroke-linecap: round; stroke-dasharray: 4 4; }
+.edge-distinct-route { stroke: #0891b2; stroke-width: 5.2; opacity: .94; stroke-linecap: round; stroke-dasharray: 12 3; }
 .edge-failed-old { stroke: #ef4444; stroke-width: 5; opacity: .78; stroke-dasharray: 8 4; stroke-linecap: round; }
 .edge-failed-new { stroke: #7f1d1d; stroke-width: 7; opacity: .98; stroke-dasharray: 8 4; stroke-linecap: round; }
 .node { fill: #fff; stroke: #334155; stroke-width: 1.2; opacity: .86; }
@@ -466,7 +477,12 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
 .legend .bad { border-left-color:#dc2626; color:#111827; font-weight:400; }
 .legend .fail { border-left-color:#991b1b; }
 .legend .duplicate { border-left-color:#9333ea; }
+.legend .distinct { border-left-color:#0891b2; }
 .help { background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; padding:10px; font-size:12px; line-height:1.45; }
+.route-tools { display: grid; grid-template-columns: repeat(4, minmax(0, auto)); gap: 8px; align-items: center; margin: 8px 0 10px; }
+.route-tools select { grid-column: 1 / -1; }
+.route-tools button { display: inline-flex; width: auto; min-width: 98px; justify-content: center; text-align: center; }
+.path-cell { white-space: normal; min-width: 360px; max-width: 760px; overflow-wrap: anywhere; }
 </style>
 <main>
 <aside>
@@ -485,6 +501,14 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
   <button id="nextStep" type="button">Siguiente</button>
   <span class="muted">Tambien puedes usar las flechas izquierda/derecha.</span>
 </div>
+<div class="route-tools" id="routeTools">
+  <select id="distinctRouteGroup" aria-label="Grupo de rutas distintas"></select>
+  <button id="prevDistinctRoute" type="button">Ruta -</button>
+  <button id="toggleDistinctRoute" type="button">Ver ruta</button>
+  <button id="nextDistinctRoute" type="button">Ruta +</button>
+  <button id="toggleRouteOnly" type="button">Solo rutas</button>
+  <span class="muted" id="distinctRouteStatus"></span>
+</div>
 <div class="metric" id="metrics"></div>
 <div class="help">
   C0 = coste de la ruta minima inicial P0. tau = tolerancia. Cmax = C0 x (1 + tau). Calt = coste de la ruta recalculada despues del fallo actual. "Recurso eliminado ahora" cambia porque cada paso prueba un fallo distinto. "Paso perfil" indica la posicion visual dentro del perfil; "casos evaluados" es el contador CER acumulado.
@@ -497,7 +521,8 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
   <span class="duplicate">morado discontinuo: ruta valida pero duplicada</span>
   <span class="bad">rojo continuo: candidata rechazada o fuera de tolerancia</span>
   <span class="fail">rojo discontinuo grueso: recurso/arista eliminada en este paso</span>
-  <span>numero negro en nodo: distinctRoutes para el target/perfil activo</span>
+  <span class="distinct">cian discontinuo: ruta distinta seleccionada</span>
+  <span>numero negro en nodo: rutas unicas globales para la salida activa</span>
 </div>
 <svg id="graph" role="img" aria-label="CER graph visualization"></svg>
 <pre id="detail"></pre>
@@ -507,6 +532,23 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
   <h2>Resultado final CER</h2>
   <p class="muted">Resumen calculado a partir de todos los pasos y perfiles incluidos en este HTML.</p>
   <div class="summary-grid" id="resultCards"></div>
+  <h3>Rutas unicas por nodo y salida</h3>
+  <p class="muted">Deduplica por secuencia exacta de nodos entre todos los perfiles. Esta es la lectura estricta para no contar dos veces la misma ruta en perfiles distintos.</p>
+  <div class="table-wrap">
+    <table id="globalRoutesTable">
+      <thead>
+        <tr>
+          <th>origin</th>
+          <th>target</th>
+          <th>uniqueDistinctRoutes</th>
+          <th>sumProfileDistinctRoutes</th>
+          <th>repeatedAcrossProfiles</th>
+          <th>profiles</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
   <h3>Tabla por nodo, salida y perfil</h3>
   <div class="table-wrap">
     <table id="resultTable">
@@ -515,7 +557,8 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
           <th>origin</th>
           <th>target</th>
           <th>profile</th>
-          <th>distinctRoutes</th>
+          <th>profileDistinctRoutes</th>
+          <th>targetUnique</th>
           <th>accepted</th>
           <th>total</th>
           <th>coverage</th>
@@ -525,6 +568,47 @@ pre { background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; ov
           <th>visited</th>
           <th>runtimeMs</th>
           <th>trunc.</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <h3>Diagnostico de diversidad de rutas</h3>
+  <p class="muted">Solape Jaccard de aristas: 0 significa rutas sin aristas comunes, 1 significa rutas casi iguales en aristas. Esta tabla no cambia CER; ayuda a juzgar si las rutas exactas distintas son alternativas espaciales relevantes.</p>
+  <div class="table-wrap">
+    <table id="diversityTable">
+      <thead>
+        <tr>
+          <th>origin</th>
+          <th>target</th>
+          <th>profile</th>
+          <th>routes</th>
+          <th>uniqueEdges</th>
+          <th>meanEdges</th>
+          <th>mean vs P0</th>
+          <th>mean pairwise</th>
+          <th>max pairwise</th>
+          <th>pairs >= 90%</th>
+          <th>lectura</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <h3>Rutas distintas guardadas</h3>
+  <p class="muted">Cada fila es una ruta aceptada y distinta por secuencia exacta de nodos. El solape se calcula contra P0 cuando hay una ruta base disponible en el payload.</p>
+  <div class="table-wrap">
+    <table id="distinctRoutesTable">
+      <thead>
+        <tr>
+          <th>origin</th>
+          <th>target</th>
+          <th>scope</th>
+          <th>profile</th>
+          <th>#</th>
+          <th>nodes</th>
+          <th>overlap P0</th>
+          <th>path</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -547,15 +631,34 @@ const metrics = document.getElementById("metrics");
 const svg = document.getElementById("graph");
 const levelSelect = document.getElementById("level");
 const resultCards = document.getElementById("resultCards");
+const globalRoutesTable = document.querySelector("#globalRoutesTable tbody");
 const resultTable = document.querySelector("#resultTable tbody");
+const diversityTable = document.querySelector("#diversityTable tbody");
+const distinctRoutesTable = document.querySelector("#distinctRoutesTable tbody");
 const prevStep = document.getElementById("prevStep");
 const playStep = document.getElementById("playStep");
 const nextStep = document.getElementById("nextStep");
+const distinctRouteGroup = document.getElementById("distinctRouteGroup");
+const prevDistinctRoute = document.getElementById("prevDistinctRoute");
+const toggleDistinctRoute = document.getElementById("toggleDistinctRoute");
+const nextDistinctRoute = document.getElementById("nextDistinctRoute");
+const toggleRouteOnly = document.getElementById("toggleRouteOnly");
+const distinctRouteStatus = document.getElementById("distinctRouteStatus");
 let activeIndex = 0;
+let distinctRouteIndex = 0;
+let selectedRouteGroupIndex = 0;
+let showDistinctRoute = false;
+let routeOnlyMode = false;
 let playTimer = null;
 const ns = "http://www.w3.org/2000/svg";
 const resultRows = collectResultRows(payload);
+const globalRouteGroups = collectGlobalRouteRows(resultRows);
+const profileRouteGroups = resultRows.filter(row => (row.routeSignatures || []).length > 0);
+const routeGroups = [...globalRouteGroups, ...profileRouteGroups];
 renderResults(resultRows);
+renderRouteGroups();
+renderDiversity(routeGroups);
+renderDistinctRoutes(routeGroups);
 const levels = graph.levels || [];
 levels.forEach(level => {
   const option = document.createElement("option");
@@ -569,6 +672,11 @@ levelSelect.onchange = () => show(activeIndex);
 prevStep.onclick = () => show(Math.max(0, activeIndex - 1));
 nextStep.onclick = () => show(Math.min(steps.length - 1, activeIndex + 1));
 playStep.onclick = () => togglePlay();
+distinctRouteGroup.onchange = () => selectRouteGroup(Number(distinctRouteGroup.value || 0), 0, true, false);
+prevDistinctRoute.onclick = () => moveDistinctRoute(-1);
+nextDistinctRoute.onclick = () => moveDistinctRoute(1);
+toggleDistinctRoute.onclick = () => toggleDistinctRouteView();
+toggleRouteOnly.onclick = () => toggleRouteOnlyView();
 document.addEventListener("keydown", event => {
   if (event.key === "ArrowLeft") {
     event.preventDefault();
@@ -585,10 +693,16 @@ function show(index) {
   if (!steps.length) return;
   activeIndex = index;
   const step = steps[index] || {};
-  document.querySelectorAll("button").forEach((b, i) => b.classList.toggle("active", i === index));
-  title.textContent = `${step.origin || "?"} -> ${step.target || "?"} | ${step.failureProfile || ""}`;
+  list.querySelectorAll("button").forEach((b, i) => b.classList.toggle("active", i === index));
   const decision = decisionInfo(step);
-  status.innerHTML = `<span class="${decision.className}">${decision.label}</span><br><span class="muted">${decision.description}</span>`;
+  const group = activeRouteGroup();
+  if (routeOnlyMode && group) {
+    title.textContent = `Rutas distintas | ${group.origin} -> ${group.target} | ${group.profile}`;
+    status.innerHTML = `<span class="ok">EXPLORADOR DE RESULTADOS</span><br><span class="muted">Grafo limpio con una ruta aceptada y distinta superpuesta. El paso CER activo queda solo como referencia temporal.</span>`;
+  } else {
+    title.textContent = `${step.origin || "?"} -> ${step.target || "?"} | ${step.failureProfile || ""}`;
+    status.innerHTML = `<span class="${decision.className}">${decision.label}</span><br><span class="muted">${decision.description}</span>`;
+  }
   metrics.innerHTML = [
     ["cálculo", runInfo.short],
     ["límites", runInfo.limits],
@@ -603,9 +717,11 @@ function show(index) {
     ["Calt candidata", fmt(step.candidateCost)],
     ["casos evaluados", step.evaluatedFailureCases ?? "-"],
     ["RUTAS DISTINTAS", step.distinctRouteCount ?? "-"],
+    ["ruta inspeccionada", distinctRouteMetric()],
     ["recurso eliminado ahora", formatFailureUnits(step)],
   ].map(([k, v]) => `<span><b>${k}</b><br>${v}</span>`).join("");
   drawGraph(step);
+  syncDistinctRouteControls();
   detail.textContent = JSON.stringify(step, null, 2);
   prevStep.disabled = index <= 0;
   nextStep.disabled = index >= steps.length - 1;
@@ -666,12 +782,17 @@ function collectResultRows(payload) {
   const rows = [];
   for (const [originId, origin] of Object.entries(payload.nodes || {})) {
     for (const [targetId, target] of Object.entries(origin.targets || {})) {
+      const targetSummary = target.summary || {};
       for (const [profileLabel, profile] of Object.entries(target.failureProfiles || {})) {
         rows.push({
           origin: originId,
           target: targetId,
           profile: profileLabel,
           distinctRoutes: Number(profile.distinctRoutes || 0),
+          routeSignatures: Array.isArray(profile.distinctRouteSignatures) ? profile.distinctRouteSignatures : [],
+          targetUniqueDistinctRoutes: Number(targetSummary.uniqueDistinctRoutes ?? targetSummary.distinctRoutes ?? 0),
+          targetProfileDistinctRoutes: Number(targetSummary.profileDistinctRoutes ?? 0),
+          targetRepeatedRoutesAcrossProfiles: Number(targetSummary.repeatedRoutesAcrossProfiles ?? 0),
           acceptedCases: Number(profile.acceptedCases || 0),
           totalCases: Number(profile.totalCases || 0),
           coverage: Number(profile.coverage || 0),
@@ -701,9 +822,14 @@ function renderResults(rows) {
   const totalDistinct = rows.reduce((total, row) => total + row.distinctRoutes, 0);
   const totalAccepted = rows.reduce((total, row) => total + row.acceptedCases, 0);
   const totalCases = rows.reduce((total, row) => total + row.totalCases, 0);
+  const globalRouteStats = globalDistinctRouteStats(rows);
   const best = rows[0] || {};
+  const bestGlobal = globalRouteGroups[0] || {};
   resultCards.innerHTML = [
-    ["suma distinctRoutes", totalDistinct],
+    ["suma por perfil", totalDistinct],
+    ["rutas unicas globales", globalRouteStats.uniqueRoutes],
+    ["repetidas entre perfiles", globalRouteStats.repeatedAcrossProfiles],
+    ["mejor nodo global", bestGlobal.origin ? `${bestGlobal.origin} -> ${bestGlobal.target} = ${bestGlobal.uniqueDistinctRoutes}` : "-"],
     ["mejor fila", best.origin ? `${best.origin} -> ${best.target} | ${best.profile} = ${best.distinctRoutes}` : "-"],
     ["origenes", origins.size],
     ["salidas", targets.size],
@@ -716,6 +842,7 @@ function renderResults(rows) {
       <td>${escapeHtml(row.target)}</td>
       <td>${escapeHtml(row.profile)}</td>
       <td><b>${row.distinctRoutes}</b></td>
+      <td><b>${row.targetUniqueDistinctRoutes || "-"}</b></td>
       <td>${row.acceptedCases}</td>
       <td>${row.totalCases}</td>
       <td>${row.coverage.toFixed(3)}</td>
@@ -726,7 +853,172 @@ function renderResults(rows) {
       <td>${row.runtimeMs.toFixed(1)}</td>
       <td>${row.truncated ? "si" : "no"}</td>
     </tr>
-  `).join("") || `<tr><td colspan="13">Sin metricas de perfiles en este payload.</td></tr>`;
+  `).join("") || `<tr><td colspan="14">Sin metricas de perfiles en este payload.</td></tr>`;
+  renderGlobalRoutes(globalRouteGroups);
+}
+function globalDistinctRouteStats(rows) {
+  const allRoutes = [];
+  for (const row of rows) {
+    for (const route of row.routeSignatures || []) allRoutes.push(`${row.origin}||${row.target}||${routeKey(route)}`);
+  }
+  const uniqueRoutes = new Set(allRoutes).size;
+  return {
+    uniqueRoutes,
+    repeatedAcrossProfiles: Math.max(0, allRoutes.length - uniqueRoutes),
+  };
+}
+function routeKey(route) {
+  return (route || []).map(value => String(value)).join("||");
+}
+function collectGlobalRouteRows(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.origin}||${row.target}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        origin: row.origin,
+        target: row.target,
+        profile: "GLOBAL",
+        scope: "global",
+        isGlobal: true,
+        distinctRoutes: 0,
+        routeSignatures: [],
+        profileDistinctRoutes: 0,
+        repeatedRoutesAcrossProfiles: 0,
+        profiles: new Set(),
+        _routeMap: new Map(),
+      });
+    }
+    const group = groups.get(key);
+    group.profiles.add(row.profile);
+    group.profileDistinctRoutes += row.distinctRoutes;
+    for (const route of row.routeSignatures || []) {
+      const routeId = routeKey(route);
+      if (!group._routeMap.has(routeId)) group._routeMap.set(routeId, route);
+    }
+  }
+  const result = [...groups.values()].map(group => {
+    group.routeSignatures = [...group._routeMap.values()];
+    group.distinctRoutes = group.routeSignatures.length;
+    group.uniqueDistinctRoutes = group.distinctRoutes;
+    group.repeatedRoutesAcrossProfiles = Math.max(0, group.profileDistinctRoutes - group.distinctRoutes);
+    group.profileList = [...group.profiles].sort();
+    delete group._routeMap;
+    delete group.profiles;
+    return group;
+  });
+  result.sort((a, b) =>
+    b.uniqueDistinctRoutes - a.uniqueDistinctRoutes ||
+    a.origin.localeCompare(b.origin) ||
+    a.target.localeCompare(b.target)
+  );
+  return result;
+}
+function renderGlobalRoutes(groups) {
+  if (!globalRoutesTable) return;
+  globalRoutesTable.innerHTML = groups.map((group, index) => `
+    <tr data-global-group="${index}">
+      <td>${escapeHtml(group.origin)}</td>
+      <td>${escapeHtml(group.target)}</td>
+      <td><b>${group.uniqueDistinctRoutes}</b></td>
+      <td>${group.profileDistinctRoutes}</td>
+      <td>${group.repeatedRoutesAcrossProfiles}</td>
+      <td>${escapeHtml((group.profileList || []).join(", "))}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="6">Sin rutas distintas globales.</td></tr>`;
+  globalRoutesTable.querySelectorAll("tr[data-global-group]").forEach(row => {
+    row.onclick = () => {
+      selectRouteGroup(Number(row.dataset.globalGroup || 0), 0, true, true);
+      document.getElementById("graph")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+  });
+}
+function renderRouteGroups() {
+  if (!distinctRouteGroup) return;
+  distinctRouteGroup.innerHTML = "";
+  if (!routeGroups.length) {
+    const option = document.createElement("option");
+    option.value = "0";
+    option.textContent = "Sin rutas distintas guardadas";
+    distinctRouteGroup.appendChild(option);
+    distinctRouteGroup.disabled = true;
+    return;
+  }
+  routeGroups.forEach((row, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = routeGroupLabel(row);
+    distinctRouteGroup.appendChild(option);
+  });
+  distinctRouteGroup.disabled = false;
+}
+function routeGroupLabel(row) {
+  if (row.isGlobal) return `GLOBAL | ${row.origin} -> ${row.target} | ${row.routeSignatures.length} rutas unicas`;
+  return `${row.origin} -> ${row.target} | ${row.profile} | ${row.routeSignatures.length} rutas`;
+}
+function renderDiversity(groups) {
+  if (!diversityTable) return;
+  const stats = groups.map((row, groupIndex) => ({ row, groupIndex, stats: routeDiversityStats(row) }));
+  stats.sort((a, b) =>
+    b.stats.routeCount - a.stats.routeCount ||
+    (b.stats.meanPairwiseJaccard ?? -1) - (a.stats.meanPairwiseJaccard ?? -1) ||
+    a.row.profile.localeCompare(b.row.profile)
+  );
+  diversityTable.innerHTML = stats.map(item => `
+    <tr data-diversity-group="${item.groupIndex}">
+      <td>${escapeHtml(item.row.origin)}</td>
+      <td>${escapeHtml(item.row.target)}</td>
+      <td>${escapeHtml(item.row.profile)}</td>
+      <td><b>${item.stats.routeCount}</b></td>
+      <td>${item.stats.uniqueEdges}</td>
+      <td>${item.stats.meanEdges.toFixed(1)}</td>
+      <td>${formatRatio(item.stats.meanP0Jaccard)}</td>
+      <td>${formatRatio(item.stats.meanPairwiseJaccard)}</td>
+      <td>${formatRatio(item.stats.maxPairwiseJaccard)}</td>
+      <td>${item.stats.nearDuplicatePairs90}/${item.stats.pairCount}</td>
+      <td>${escapeHtml(item.stats.reading)}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="11">Este payload no incluye rutas distintas guardadas.</td></tr>`;
+  diversityTable.querySelectorAll("tr[data-diversity-group]").forEach(row => {
+    row.onclick = () => {
+      selectRouteGroup(Number(row.dataset.diversityGroup || 0), 0, true, true);
+      document.getElementById("graph")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+  });
+}
+function renderDistinctRoutes(groups) {
+  if (!distinctRoutesTable) return;
+  const flattened = [];
+  for (const [groupIndex, row] of groups.entries()) {
+    const base = basePathForRow(row);
+    (row.routeSignatures || []).forEach((route, index) => {
+      flattened.push({ groupIndex, row, route, index, overlap: routeOverlap(route, base) });
+    });
+  }
+  flattened.sort((a, b) =>
+    a.row.origin.localeCompare(b.row.origin) ||
+    a.row.target.localeCompare(b.row.target) ||
+    a.row.profile.localeCompare(b.row.profile) ||
+    a.index - b.index
+  );
+  distinctRoutesTable.innerHTML = flattened.map(item => `
+    <tr data-route-group="${item.groupIndex}" data-route-index="${item.index}">
+      <td>${escapeHtml(item.row.origin)}</td>
+      <td>${escapeHtml(item.row.target)}</td>
+      <td>${item.row.isGlobal ? "global" : "perfil"}</td>
+      <td>${escapeHtml(item.row.profile)}</td>
+      <td>${item.index + 1}</td>
+      <td>${item.route.length}</td>
+      <td>${formatOverlap(item.overlap)}</td>
+      <td class="path-cell">${escapeHtml(item.route.join(" -> "))}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="8">Este payload no incluye distinctRouteSignatures.</td></tr>`;
+  distinctRoutesTable.querySelectorAll("tr[data-route-group]").forEach(row => {
+    row.onclick = () => {
+      selectRouteGroup(Number(row.dataset.routeGroup || 0), Number(row.dataset.routeIndex || 0), true, true);
+      document.getElementById("graph")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+  });
 }
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -751,6 +1043,155 @@ function candidateClass(step) {
   if (reason === "duplicate_route") return "edge-candidate-duplicate";
   if (reason === "visited_state") return "edge-candidate-visited";
   return step.accepted ? "edge-candidate-ok" : "edge-candidate-bad";
+}
+function activeRouteGroup() {
+  return routeGroups[selectedRouteGroupIndex] || routeGroups[0] || null;
+}
+function activeDistinctRoutes() {
+  const row = activeRouteGroup();
+  return (row && Array.isArray(row.routeSignatures)) ? row.routeSignatures : [];
+}
+function selectedDistinctRoute() {
+  const routes = activeDistinctRoutes();
+  if (!routes.length || !showDistinctRoute) return null;
+  distinctRouteIndex = Math.max(0, Math.min(distinctRouteIndex, routes.length - 1));
+  return routes[distinctRouteIndex] || null;
+}
+function moveDistinctRoute(delta) {
+  const routes = activeDistinctRoutes();
+  if (!routes.length) return;
+  showDistinctRoute = true;
+  distinctRouteIndex = (distinctRouteIndex + delta + routes.length) % routes.length;
+  show(activeIndex);
+}
+function toggleDistinctRouteView() {
+  const routes = activeDistinctRoutes();
+  if (!routes.length) return;
+  showDistinctRoute = !showDistinctRoute;
+  if (!showDistinctRoute) routeOnlyMode = false;
+  show(activeIndex);
+}
+function toggleRouteOnlyView() {
+  const routes = activeDistinctRoutes();
+  if (!routes.length) return;
+  routeOnlyMode = !routeOnlyMode;
+  showDistinctRoute = true;
+  show(activeIndex);
+}
+function selectRouteGroup(groupIndex, routeIndex = 0, visible = true, onlyRoutes = routeOnlyMode) {
+  selectedRouteGroupIndex = Math.max(0, Math.min(groupIndex, routeGroups.length - 1));
+  distinctRouteIndex = Math.max(0, routeIndex);
+  showDistinctRoute = visible;
+  routeOnlyMode = !!onlyRoutes;
+  if (distinctRouteGroup) distinctRouteGroup.value = String(selectedRouteGroupIndex);
+  if (steps.length) show(activeIndex);
+  else drawGraph({});
+}
+function syncDistinctRouteControls() {
+  const routes = activeDistinctRoutes();
+  const hasRoutes = routes.length > 0;
+  prevDistinctRoute.disabled = !hasRoutes;
+  nextDistinctRoute.disabled = !hasRoutes;
+  toggleDistinctRoute.disabled = !hasRoutes;
+  toggleRouteOnly.disabled = !hasRoutes;
+  toggleDistinctRoute.textContent = showDistinctRoute ? "Ocultar ruta" : "Ver ruta";
+  toggleRouteOnly.textContent = routeOnlyMode ? "Ver calculo" : "Solo rutas";
+  distinctRouteStatus.textContent = distinctRouteMetric();
+}
+function distinctRouteMetric() {
+  const group = activeRouteGroup();
+  const routes = activeDistinctRoutes();
+  if (!routes.length) return "sin rutas guardadas";
+  distinctRouteIndex = Math.max(0, Math.min(distinctRouteIndex, routes.length - 1));
+  const route = routes[distinctRouteIndex] || [];
+  const basePath = basePathForRow(group);
+  const overlap = routeOverlap(route, basePath);
+  const diversity = routeDiversityStats(group);
+  return `${group.origin} -> ${group.target} | ${group.profile} | ruta ${distinctRouteIndex + 1}/${routes.length} | nodos ${route.length} | solape P0 ${formatOverlap(overlap)} | media entre rutas ${formatRatio(diversity.meanPairwiseJaccard)}`;
+}
+function basePathForRow(row) {
+  if (!row) return [];
+  const step = steps.find(item => item.origin === row.origin && item.target === row.target && item.failureProfile === row.profile)
+      || steps.find(item => item.origin === row.origin && item.target === row.target);
+  return step?.basePath || [];
+}
+function pathEdges(path) {
+  const edges = [];
+  for (let i = 0; i < (path || []).length - 1; i++) {
+    const a = String(path[i]);
+    const b = String(path[i + 1]);
+    edges.push(a < b ? `${a}|${b}` : `${b}|${a}`);
+  }
+  return edges;
+}
+function pathEdgeSet(path) {
+  return new Set(pathEdges(path));
+}
+function edgeJaccard(left, right) {
+  if (!left || !right || (!left.size && !right.size)) return null;
+  let shared = 0;
+  for (const edge of left) if (right.has(edge)) shared += 1;
+  const union = new Set([...left, ...right]).size;
+  return union ? shared / union : null;
+}
+function routeDiversityStats(row) {
+  const routes = (row?.routeSignatures || []).filter(route => Array.isArray(route) && route.length);
+  const edgeSets = routes.map(pathEdgeSet);
+  const routeEdgeCounts = edgeSets.map(edges => edges.size);
+  const uniqueEdges = new Set(edgeSets.flatMap(edges => [...edges]));
+  const baseEdges = pathEdgeSet(basePathForRow(row));
+  const p0Scores = baseEdges.size ? edgeSets.map(edges => edgeJaccard(edges, baseEdges)).filter(value => value != null) : [];
+  const pairwise = [];
+  for (let i = 0; i < edgeSets.length; i++) {
+    for (let j = i + 1; j < edgeSets.length; j++) {
+      const score = edgeJaccard(edgeSets[i], edgeSets[j]);
+      if (score != null) pairwise.push(score);
+    }
+  }
+  const meanPairwise = mean(pairwise);
+  const near90 = pairwise.filter(value => value >= 0.9).length;
+  const near75 = pairwise.filter(value => value >= 0.75).length;
+  return {
+    routeCount: routes.length,
+    uniqueEdges: uniqueEdges.size,
+    meanEdges: mean(routeEdgeCounts) ?? 0,
+    meanP0Jaccard: mean(p0Scores),
+    maxP0Jaccard: p0Scores.length ? Math.max(...p0Scores) : null,
+    meanPairwiseJaccard: meanPairwise,
+    maxPairwiseJaccard: pairwise.length ? Math.max(...pairwise) : null,
+    nearDuplicatePairs90: near90,
+    nearDuplicatePairs75: near75,
+    pairCount: pairwise.length,
+    reading: diversityReading(routes.length, meanPairwise, near90, pairwise.length, uniqueEdges.size, mean(routeEdgeCounts) ?? 0),
+  };
+}
+function mean(values) {
+  const filtered = (values || []).filter(value => Number.isFinite(value));
+  if (!filtered.length) return null;
+  return filtered.reduce((total, value) => total + value, 0) / filtered.length;
+}
+function formatRatio(value) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${Math.round(value * 100)}%`;
+}
+function diversityReading(routeCount, meanPairwise, near90, pairCount, uniqueEdges, meanEdges) {
+  if (routeCount <= 1) return "sin comparacion";
+  const nearRatio = pairCount ? near90 / pairCount : 0;
+  const spread = meanEdges ? uniqueEdges / meanEdges : 0;
+  if (meanPairwise >= 0.75 || nearRatio >= 0.4) return "muchas variantes muy parecidas";
+  if (meanPairwise >= 0.45) return spread >= 2.5 ? "diversidad media con varios corredores" : "diversidad media";
+  return spread >= 2.5 ? "alta diversidad espacial" : "bajo solape, revisar visualmente";
+}
+function routeOverlap(route, basePath) {
+  const routeEdges = pathEdges(route);
+  const baseEdges = new Set(pathEdges(basePath));
+  if (!routeEdges.length || !baseEdges.size) return null;
+  const shared = routeEdges.filter(edge => baseEdges.has(edge)).length;
+  return { shared, total: Math.max(routeEdges.length, baseEdges.size), routeEdges: routeEdges.length, baseEdges: baseEdges.size };
+}
+function formatOverlap(overlap) {
+  if (!overlap) return "-";
+  return `${Math.round((overlap.shared / Math.max(overlap.total, 1)) * 100)}% (${overlap.shared}/${overlap.total})`;
 }
 function formatFailureUnits(step) {
   const units = step.newlyFailedUnits || [];
@@ -877,12 +1318,22 @@ function drawLabel(node, project, text) {
   label.textContent = text;
   svg.appendChild(label);
 }
-function nodeScoresForStep(step) {
-  const profile = step.failureProfile || resultRows[0]?.profile;
-  const target = step.target || resultRows[0]?.target;
+function nodeScoresForContext(step) {
+  const group = routeOnlyMode ? activeRouteGroup() : null;
+  const target = group?.target || step.target || resultRows[0]?.target;
   const scores = new Map();
+  const routeKeysByOrigin = new Map();
   for (const row of resultRows) {
-    if (row.profile === profile && row.target === target) scores.set(row.origin, row.distinctRoutes);
+    if (row.target !== target) continue;
+    if (!routeKeysByOrigin.has(row.origin)) routeKeysByOrigin.set(row.origin, new Set());
+    const keys = routeKeysByOrigin.get(row.origin);
+    for (const route of row.routeSignatures || []) keys.add(routeKey(route));
+    if (!(row.routeSignatures || []).length && row.targetUniqueDistinctRoutes) {
+      scores.set(row.origin, row.targetUniqueDistinctRoutes);
+    }
+  }
+  for (const [origin, keys] of routeKeysByOrigin.entries()) {
+    if (keys.size) scores.set(origin, keys.size);
   }
   return scores;
 }
@@ -898,21 +1349,26 @@ function drawGraph(step) {
     const b = byId.get(edge.target);
     if (a && b) appendLine(project(a), project(b), "edge-base");
   }
-  drawPath(step.basePath || [], "edge-p0", nodes, project);
-  if ((step.failureSourcePath || []).length && !samePath(step.failureSourcePath, step.basePath || [])) {
-    drawPath(step.failureSourcePath || [], "edge-source", nodes, project);
+  if (!routeOnlyMode) {
+    drawPath(step.basePath || [], "edge-p0", nodes, project);
+    if ((step.failureSourcePath || []).length && !samePath(step.failureSourcePath, step.basePath || [])) {
+      drawPath(step.failureSourcePath || [], "edge-source", nodes, project);
+    }
+    drawPath(step.candidatePath || [], candidateClass(step), nodes, project);
+    drawFailed(step, nodes, project);
   }
-  drawPath(step.candidatePath || [], candidateClass(step), nodes, project);
-  drawFailed(step, nodes, project);
+  const selectedRoute = selectedDistinctRoute();
+  if (selectedRoute) drawPath(selectedRoute, "edge-distinct-route", nodes, project);
   for (const node of nodes) drawNode(node, project, node.isExit ? "node node-exit" : "node");
-  const scores = nodeScoresForStep(step);
+  const scores = nodeScoresForContext(step);
   if (scores.size) {
     for (const node of nodes) {
       if (scores.has(node.id)) drawNodeScore(node, project, scores.get(node.id));
     }
   }
-  const origin = byId.get(step.origin);
-  const target = byId.get(step.target);
+  const routeGroup = routeOnlyMode ? activeRouteGroup() : null;
+  const origin = byId.get(routeGroup?.origin || step.origin);
+  const target = byId.get(routeGroup?.target || step.target);
   if (origin && (!level || origin.level === level)) { drawNode(origin, project, "node-origin"); drawLabel(origin, project, "origen"); }
   if (target && (!level || target.level === level)) { drawNode(target, project, "node-target"); drawLabel(target, project, "salida"); }
 }

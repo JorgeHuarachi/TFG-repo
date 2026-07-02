@@ -4,6 +4,62 @@
 
 ---
 
+## 0. Decision metodologica actual
+
+Este documento empezo como referencia y prompt de diseno. La decision actual
+para el sistema real es usar la CER tal como esta implementada en EvacEngine,
+sobre snapshots ponderados del grafo `multilevel_transfer_to_transfer`.
+
+Configuracion metodologica recomendada:
+
+```text
+failureUnit = resource
+distinctnessPolicy = exact
+maxK <= 2
+maxDepth = 1 o 2 para barridos globales
+maxDepth = 3 solo para casos explicativos de un origen concreto
+maxTotalFailures <= 4
+```
+
+Perfiles principales:
+
+```text
+(1)
+(1,1)
+```
+
+Perfiles secundarios para comparar simultaneidad moderada:
+
+```text
+(2)
+(2,1)
+(2,2)
+```
+
+`(2,2)` se considera el limite superior razonable para comparar simultaneidad
+sin abrir demasiado la combinatoria. Perfiles como `(1,1,1)` o `(2,1,1)` se
+conservan para visualizaciones, sensibilidad y casos puntuales, pero no son la
+configuracion base para barridos de todos los nodos. Perfiles con `k = 3` o
+superior se consideran exploratorios en grafo pequeno, no parte de la
+metodologia operativa actual.
+
+Se ha verificado que el sistema puede ejecutar limites mas agresivos, por
+ejemplo `maxDepth=5`, `maxK=5`, `maxTotalFailures=5`, pero el numero de estados
+crece fuertemente. En una ejecucion estructural sobre todos los nodos del modelo
+de una planta se completaron todos los pares sin cortes tecnicos, pero se
+generaron cientos de miles de casos. Esta capacidad se deja como prueba de
+exploracion combinatoria y no como configuracion base: para usarla de forma
+sistematica harian falta optimizaciones adicionales o una formulacion
+alternativa.
+
+La documentacion operativa del comando esta en:
+
+```text
+docs/technical/research/cer_tree_audit_tool.md
+```
+
+---
+
 ## 1. Idea central
 
 La métrica busca medir, para cada nodo de un grafo de evacuación, **cuántas alternativas de evacuación válidas mantiene ese nodo hacia una o varias salidas cuando se fuerzan rutas alternativas mediante la eliminación de aristas o recursos y posterior replanificación**.
@@ -242,7 +298,10 @@ Ejemplo orientativo:
           }
         },
         "summary": {
-          "distinctRoutes": 5,
+          "distinctRoutes": 4,
+          "uniqueDistinctRoutes": 4,
+          "profileDistinctRoutes": 5,
+          "repeatedRoutesAcrossProfiles": 1,
           "acceptedCases": 9,
           "totalCases": 16,
           "weightedScore": 3.5
@@ -273,6 +332,12 @@ Ejemplo orientativo:
 origin -> target -> failureProfile
 ```
 
+Cuando se agregan perfiles, `distinctRoutes` del resumen `origin -> target`
+debe interpretarse como `uniqueDistinctRoutes`: rutas exactas deduplicadas entre
+perfiles. La suma por perfiles se conserva aparte como `profileDistinctRoutes`,
+porque puede contar varias veces la misma ruta si aparece en `(1)`, `(1,1)` o
+perfiles mas profundos.
+
 ---
 
 ## 6. Métricas que se deben guardar
@@ -281,7 +346,9 @@ origin -> target -> failureProfile
 
 Número de rutas distintas, válidas, seguras y dentro de tolerancia.
 
-Es la métrica principal de centralidad.
+Dentro de un perfil, se deduplica solo respecto a ese perfil. En el resumen de
+un nodo hacia una salida, se deduplica entre todos los perfiles y por eso es la
+métrica principal estricta de centralidad.
 
 Se calcula deduplicando por ruta exacta:
 
@@ -716,36 +783,50 @@ truncatedByRuntime = true
 
 ## 15. Perfiles recomendados
 
-### Para memoria principal
+### Para memoria principal y resultados base
 
-Usar familias claras:
+Usar perfiles cortos y comparables:
 
 ```text
 (1)
 (1,1)
-(1,1,1)
 ```
 
-Representan degradación secuencial simple.
+Representan degradación secuencial simple:
+
+- `(1)`: falla un recurso de la ruta base y se reencamina.
+- `(1,1)`: tras una primera alternativa válida, falla otro recurso de la ruta activa y se reencamina de nuevo.
+
+### Para comparar simultaneidad moderada
+
+Si se quiere estudiar un fallo simultáneo inicial sin abandonar límites razonables:
 
 ```text
 (2)
 (2,1)
+(2,2)
+```
+
+Representan un shock doble inicial y reencaminamiento posterior. `(2,2)` se
+admite como limite moderado para observar dos fallos simultaneos consecutivos
+sin activar perfiles con `k > 2`.
+
+### Para visualizaciones o sensibilidad puntual
+
+Pueden usarse sobre un origen y salida concretos, pero no como barrido global por defecto:
+
+```text
+(1,1,1)
 (2,1,1)
 ```
 
-Representan un shock doble inicial y reencaminamiento posterior.
-
-Opcional:
-
-```text
-(3)
-(3,1)
-```
+Estos perfiles sirven para comprobar sensibilidad y para generar material
+explicativo, pero no deben mezclarse automaticamente con los resultados base si
+se quiere mantener una comparacion metodologica compacta.
 
 ### Para experimento controlado
 
-En el grafo pequeño de `obtencion_centralidad_CE.py` se puede activar exploración más agresiva:
+En el grafo pequeño de `obtencion_centralidad_CE.py` se puede activar exploración más agresiva para estudiar explosión combinatoria:
 
 ```text
 maxK = 3 o más
@@ -754,19 +835,33 @@ maxTotalFailures = alto
 maxCombinations = alto
 ```
 
-Objetivo: observar cuándo explota la combinatoria y cuándo el propio árbol muere por ausencia de rutas o por tolerancia.
+Esto queda como análisis exploratorio histórico, no como configuración recomendada para EvacEngine.
 
 ### Para grafo grande
 
-Usar límites conservadores:
+Usar límites conservadores. La decisión actual es no usar `k=3` en el sistema real salvo prueba aislada:
 
 ```text
 maxK = 2
-maxDepth = 3
+maxDepth = 2
 maxTotalFailures = 4
-maxCombinations = 100
+maxCombinations = 1000
 maxRuntimeMs = definido
 ```
+
+Perfiles recomendados para barridos globales del grafo real:
+
+```text
+1;1,1
+2;2,1;2,2
+```
+
+La primera familia mide fallo simple y secuencial simple. La segunda familia
+mide simultaneidad moderada. Limites como `maxDepth=5`, `maxK=5` y
+`maxTotalFailures=5` han demostrado que la herramienta puede explorar mas
+combinatoria, pero el numero de casos y las rutas repetidas entre perfiles
+crecen rapidamente. Por tanto se documentan como experimento de capacidad, no
+como configuracion principal del TFG.
 
 ---
 
@@ -930,6 +1025,10 @@ Objetivo:
 
 > Explorar la combinatoria en un grafo pequeño para decidir límites razonables antes de llevar la métrica al grafo grande de EvacEngine.
 
+Estado actual: esta exploración ya cumplió su función. La decisión para el
+grafo real es usar perfiles cortos, `maxK <= 2` y no convertir perfiles largos
+en la configuración base.
+
 Pruebas recomendadas:
 
 1. Elegir un nodo origen y una salida.
@@ -937,7 +1036,7 @@ Pruebas recomendadas:
 3. Activar modo exacto.
 4. Probar `maxK = 1`, `maxDepth` alto.
 5. Probar `maxK = 2`, `maxDepth` medio.
-6. Probar `maxK = 3` en grafo pequeño.
+6. Probar `maxK = 3` solo como experimento histórico de explosión combinatoria.
 7. Medir:
    - ramas evaluadas;
    - ramas muertas por `no_path`;
@@ -946,7 +1045,9 @@ Pruebas recomendadas:
    - rutas distintas;
    - tiempos.
 
-Esto permitirá decidir si en el grafo grande se usan límites conservadores o si el propio árbol muere suficientemente rápido.
+Esto permitió justificar límites conservadores en el grafo grande. El árbol
+puede morir por tolerancia o ausencia de ruta, pero no conviene depender de eso
+como única protección computacional.
 
 ---
 
@@ -1128,18 +1229,25 @@ Explica claramente qué hace cada uno.
 
 ## Perfiles
 
-Quiero dos modos:
+Decision actual:
 
-### Modo canónico
+### Modo operativo
 
 Reportar:
 
 ```text
 (1)
 (1,1)
-(1,1,1)
 (2)
 (2,1)
+```
+
+### Modo visual o sensibilidad puntual
+
+Permitir, bajo control y normalmente para un origen concreto:
+
+```text
+(1,1,1)
 (2,1,1)
 ```
 
@@ -1156,6 +1264,7 @@ maxRuntimeMs
 ```
 
 La idea es observar cuándo explota la combinatoria y cuándo muere el árbol.
+Este modo no es la configuración recomendada para EvacEngine.
 
 ## Salida por pantalla
 
