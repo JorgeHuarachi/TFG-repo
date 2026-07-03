@@ -133,8 +133,9 @@ class EvacuationModel:
                         },
                     )
                     continue
-            if self._needs_route(agent, replan, replan_interval, blocked_route_cells):
-                agent.route = self.routing_engine.find_route(
+            replan_reason = self._route_replan_reason(agent, replan, replan_interval, blocked_route_cells)
+            if replan_reason:
+                replanned_route = self.routing_engine.find_route(
                     origin=agent.current_cell,
                     target_refs=route_targets,
                     mobility_profile=profile,
@@ -149,15 +150,44 @@ class EvacuationModel:
                     origin_position=agent.position,
                     origin_level=agent.level,
                 )
-                agent.route_index = 0
-                if not agent.route.reachable:
-                    agent.status = "no_route"
-                    agent.velocity = (0.0, 0.0)
-                    agent.no_route_reason = (agent.route.diagnostics[0].code if agent.route.diagnostics else "NO_ROUTE")
-                    self._event("agent_no_route", agent, {"reason": agent.no_route_reason})
-                    self._record_trajectory(agent)
-                    continue
-                self._event("route_planned", agent, {"route": agent.route.to_dict()})
+                if self._should_keep_current_route_target(agent, replanned_route, replan_reason, blocked_route_cells):
+                    current_next = self._next_route_cell(agent)
+                    new_next = replanned_route.node_sequence[1] if len(replanned_route.node_sequence) > 1 else None
+                    self._event(
+                        "route_replan_deferred",
+                        agent,
+                        {
+                            "reason": replan_reason,
+                            "keptNextCell": current_next,
+                            "candidateNextCell": new_next,
+                            "candidateDestination": replanned_route.destination,
+                            "candidateTotalCost": replanned_route.total_cost,
+                        },
+                    )
+                else:
+                    previous_next = self._next_route_cell(agent)
+                    agent.route = replanned_route
+                    agent.route_index = 0
+                    if not agent.route.reachable:
+                        agent.status = "no_route"
+                        agent.velocity = (0.0, 0.0)
+                        agent.no_route_reason = (agent.route.diagnostics[0].code if agent.route.diagnostics else "NO_ROUTE")
+                        self._event("agent_no_route", agent, {"reason": agent.no_route_reason})
+                        self._record_trajectory(agent)
+                        continue
+                    self._start_route_reorientation(agent, previous_next, self._next_route_cell(agent), replan_reason)
+                    self._event(
+                        "route_planned",
+                        agent,
+                        {
+                            "reason": replan_reason,
+                            "position": [round(float(agent.position[0]), 6), round(float(agent.position[1]), 6)],
+                            "currentCellSpaceRef": agent.current_cell,
+                            "replanPolicy": replan,
+                            "replanIntervalSteps": replan_interval,
+                            "route": agent.route.to_dict(),
+                        },
+                    )
 
             self._consume_embedded_route_progress(agent)
             target_cell = self._next_route_cell(agent)
@@ -180,7 +210,12 @@ class EvacuationModel:
                 self._event("agent_evacuated", agent, {"cellSpaceRef": agent.current_cell})
                 self._record_trajectory(agent)
                 continue
-            speed = profile.base_speed_mps * hazard_state.speed_factors.get(agent.current_cell, 1.0) * self._movement_speed_factor(agent.current_cell, target_cell)
+            speed = (
+                profile.base_speed_mps
+                * hazard_state.speed_factors.get(agent.current_cell, 1.0)
+                * self._movement_speed_factor(agent.current_cell, target_cell)
+                * self._route_reorientation_speed_scale(agent)
+            )
             next_pos, arrived, next_velocity = self._advance(agent, target_cell, speed)
             next_cell = target_cell if arrived else self._transit_cell_after_step(agent, target_cell, next_pos)
             decisions.append((agent, next_cell, next_pos, next_velocity))
@@ -693,14 +728,84 @@ class EvacuationModel:
         return bool(geom is not None and not geom.is_empty and geom.buffer(1e-6).covers(Point(position)))
 
     def _needs_route(self, agent: AgentState, replan: str, interval: int, blocked_cells: set[str]) -> bool:
+        return self._route_replan_reason(agent, replan, interval, blocked_cells) is not None
+
+    def _route_replan_reason(self, agent: AgentState, replan: str, interval: int, blocked_cells: set[str]) -> str | None:
         if agent.route is None:
-            return True
+            return "initial"
         if replan == "never":
-            return False
+            return None
         remaining = set(agent.route.node_sequence[agent.route_index + 1 :])
         if remaining & blocked_cells:
-            return True
-        return interval > 0 and self.step_count > 0 and self.step_count % interval == 0
+            return "blocked_remaining"
+        if replan == "blocked_only":
+            return None
+        if replan == "every_step":
+            return "every_step" if self.step_count > 0 else None
+        if interval > 0 and self.step_count > 0 and self.step_count % interval == 0:
+            return "interval"
+        return None
+
+    def _should_keep_current_route_target(
+        self,
+        agent: AgentState,
+        candidate_route: Any,
+        replan_reason: str,
+        blocked_cells: set[str],
+    ) -> bool:
+        if replan_reason not in {"interval", "every_step"}:
+            return False
+        if not agent.route or not agent.route.reachable or not candidate_route or not candidate_route.reachable:
+            return False
+        current_next = self._next_route_cell(agent)
+        if not current_next or current_next in blocked_cells:
+            return False
+        if set(agent.route.node_sequence[agent.route_index + 1 :]) & blocked_cells:
+            return False
+        candidate_next = candidate_route.node_sequence[1] if len(candidate_route.node_sequence) > 1 else None
+        if not candidate_next or candidate_next == current_next:
+            return False
+        return True
+
+    def _start_route_reorientation(
+        self,
+        agent: AgentState,
+        previous_next: str | None,
+        new_next: str | None,
+        reason: str,
+    ) -> None:
+        if not previous_next or not new_next or previous_next == new_next:
+            return
+        duration = max(0.0, float(self.scenario.physics.get("routeReorientationS", 0.75)))
+        if duration <= 0.0:
+            return
+        speed_scale = float(self.scenario.physics.get("routeReorientationSpeedScale", 0.45))
+        speed_scale = max(0.1, min(1.0, speed_scale))
+        velocity_scale = float(self.scenario.physics.get("routeReorientationVelocityScale", 0.35))
+        velocity_scale = max(0.0, min(1.0, velocity_scale))
+        agent.route_reorientation_until_s = max(agent.route_reorientation_until_s, self.time_s + duration)
+        agent.route_reorientation_scale = min(agent.route_reorientation_scale, speed_scale)
+        agent.velocity = (agent.velocity[0] * velocity_scale, agent.velocity[1] * velocity_scale)
+        self._event(
+            "route_reorientation",
+            agent,
+            {
+                "reason": reason,
+                "previousNextCell": previous_next,
+                "newNextCell": new_next,
+                "durationS": round(duration, 6),
+                "speedScale": round(speed_scale, 6),
+            },
+        )
+
+    def _route_reorientation_speed_scale(self, agent: AgentState) -> float:
+        if self._is_route_reorienting(agent):
+            return max(0.1, min(1.0, agent.route_reorientation_scale))
+        agent.route_reorientation_scale = 1.0
+        return 1.0
+
+    def _is_route_reorienting(self, agent: AgentState) -> bool:
+        return self.time_s <= agent.route_reorientation_until_s
 
     def _beacon_escape_cell(
         self,
@@ -877,6 +982,8 @@ class EvacuationModel:
             return close_entry, True, velocity
         arrived = False if hold_center is not None else inside_target or distance_to_waypoint <= arrival_radius + max(max_distance, 1e-9)
         target = self._motion_target(agent, target_cell, waypoint, arrived, hold_center is not None)
+        if self._is_route_reorienting(agent):
+            target = self._safe_motion_target(agent, target_cell, waypoint, target)
         desired = _unit((target[0] - current[0], target[1] - current[1]))
         social = self._social_repulsion(agent)
         wall = self._wall_repulsion(agent, target_cell)
@@ -934,6 +1041,40 @@ class EvacuationModel:
             next_position = self._constrain_step(agent, target_cell, current, next_position)
             next_position = self._wall_clearance_project(agent, target_cell, current, next_position)
         return next_position, arrived, next_velocity
+
+    def _safe_motion_target(
+        self,
+        agent: AgentState,
+        target_cell: str,
+        waypoint: tuple[float, float],
+        target: tuple[float, float],
+    ) -> tuple[float, float]:
+        if agent.current_cell.startswith("VTN_") or target_cell.startswith("VTN_"):
+            return target
+        if self.topology.node_level(target_cell) != agent.level:
+            return target
+        if self._motion_target_reachable(agent, target_cell, target):
+            return target
+        if self._motion_target_reachable(agent, target_cell, waypoint):
+            return waypoint
+        allowed = self._movement_geometry(agent, target_cell)
+        visibility = _visibility_waypoint(agent.position, target, allowed)
+        if visibility is not None and self._motion_target_reachable(agent, target_cell, visibility):
+            return visibility
+        visibility = _visibility_waypoint(agent.position, waypoint, allowed)
+        if visibility is not None and self._motion_target_reachable(agent, target_cell, visibility):
+            return visibility
+        return agent.position
+
+    def _motion_target_reachable(self, agent: AgentState, target_cell: str, target: tuple[float, float]) -> bool:
+        if _distance(agent.position, target) <= 1e-9:
+            return True
+        if self._line_crosses_wall(agent.level, agent.position, target):
+            return False
+        allowed = self._movement_geometry(agent, target_cell)
+        if allowed is None or allowed.is_empty:
+            return True
+        return bool(allowed.buffer(1e-6).covers(LineString([agent.position, target])))
 
     def _constrain_step(
         self,

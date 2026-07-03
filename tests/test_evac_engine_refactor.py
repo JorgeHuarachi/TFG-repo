@@ -682,12 +682,14 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("Stair", categories)
         self.assertIn("Ramp", categories)
 
-    def test_workbench_model_summary_exposes_routing_experiments(self):
+    def test_workbench_model_summary_exposes_route_recommendation_policies(self):
         summary = load_model_summary(None, str(EXAMPLES / "minimal_scenario_model.json"))
 
         self.assertIn("routingPresets", summary)
-        self.assertIn("dijkstra_time", summary["routingPresets"])
-        self.assertIn("floyd_warshall_time", summary["routingPresets"])
+        self.assertIn("minimum_time", summary["routingPresets"])
+        self.assertIn("safety_time", summary["routingPresets"])
+        self.assertIn("cer_weighted", summary["routingPresets"])
+        self.assertIn("cer_agility_yen", summary["routingPresets"])
         self.assertIn("riskCostModel", summary["config"])
         self.assertIn("routeRecommendation", summary["config"])
 
@@ -715,10 +717,12 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertTrue(virtual_edges)
         self.assertFalse([edge for edge in virtual_edges if not edge.get("levels")])
 
-    def test_workbench_routing_experiments_are_after_beacons_and_use_safety_labels(self):
-        self.assertLess(WORKBENCH_HTML.index("<h2>Beacons</h2>"), WORKBENCH_HTML.index("<h2>Routing Experiments</h2>"))
+    def test_workbench_route_recommendation_is_after_beacons_and_uses_safety_labels(self):
+        self.assertLess(WORKBENCH_HTML.index("<h2>Beacons</h2>"), WORKBENCH_HTML.index("<h2>CER & Route Recommendation</h2>"))
         self.assertIn("Safety-cost model", WORKBENCH_HTML)
-        self.assertIn("Advanced safety/cost parameters", WORKBENCH_HTML)
+        self.assertIn("Advanced tuning optional", WORKBENCH_HTML)
+        self.assertIn("CER mode", WORKBENCH_HTML)
+        self.assertIn("Replan policy", WORKBENCH_HTML)
         self.assertIn("Safety loss curve preview", WORKBENCH_HTML)
         self.assertIn("Stair capacity", WORKBENCH_HTML)
         self.assertIn("Ramp capacity", WORKBENCH_HTML)
@@ -729,7 +733,7 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertNotIn("if (isVirtualEdge(e)) continue", WORKBENCH_HTML)
         self.assertIn("Save scenario", WORKBENCH_HTML)
         self.assertIn("Save GIF/HTML", WORKBENCH_HTML)
-        self.assertIn("Save comparison viewer", WORKBENCH_HTML)
+        self.assertIn("Save policy comparison viewer", WORKBENCH_HTML)
         self.assertIn("Scenarios for loaded model", WORKBENCH_HTML)
         self.assertIn("sessionInfo", WORKBENCH_HTML)
         self.assertIn("workbenchSession", WORKBENCH_HTML)
@@ -745,7 +749,8 @@ class EvacEngineRefactorTests(unittest.TestCase):
         self.assertIn("estimatedTotalEvacuationS", WORKBENCH_HTML)
         self.assertIn("pixelsPerMeter", WORKBENCH_HTML)
         self.assertIn("agentBodyRadiusPx", WORKBENCH_HTML)
-        self.assertIn("Apply preset + run", WORKBENCH_HTML)
+        self.assertIn("Copy policy + run", WORKBENCH_HTML)
+        self.assertIn("RUN SIMULATION WILL USE", WORKBENCH_HTML)
         self.assertIn("drawVirtualBoundaries", WORKBENCH_HTML)
         self.assertIn("activeVirtualBoundaries", WORKBENCH_HTML)
         self.assertIn("edgeVisibleOnLevel", WORKBENCH_HTML)

@@ -22,7 +22,12 @@ from src.spatial_engine.project_workspace import related_scenarios_for_model
 
 from .cer_export import default_cer_output_dir, export_cer_analysis
 from .domain import ScenarioDefinition
-from .experiments import apply_routing_preset, available_routing_presets, summarize_routing_run
+from .experiments import (
+    apply_routing_preset,
+    available_routing_presets,
+    available_workbench_policy_presets,
+    summarize_routing_run,
+)
 from .loaders import load_project
 from .model_workspace import ensure_baseline_for_indoor, ensure_model_baseline_scenario
 from .simulation import EvacuationModel
@@ -121,7 +126,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 scenario = query.get("scenario", [self.scenario_default])[0]
                 indoor_path = query.get("indoor", [None])[0]
                 _, scenario_definition = load_project(_workspace_path(indoor_path) if indoor_path else None, _workspace_path(scenario))
-                self._send_json({"presets": available_routing_presets(scenario_definition.raw)})
+                self._send_json({"presets": available_workbench_policy_presets(scenario_definition.raw)})
             except Exception as exc:
                 self._send_json({"error": str(exc), "presets": {}})
             return
@@ -235,6 +240,9 @@ def load_model_summary(indoor_path: str | None, scenario_path: str) -> dict[str,
             "randomSeed": scenario.random_seed,
             "algorithm": scenario.routing.get("algorithm", "dijkstra"),
             "costPolicy": scenario.routing.get("costPolicy", "minimum_travel_time"),
+            "replanPolicy": scenario.routing.get("replanPolicy", "on_blocked_or_interval"),
+            "replanIntervalSteps": scenario.routing.get("replanIntervalSteps", 2),
+            "noRouteRetryIntervalSteps": scenario.routing.get("noRouteRetryIntervalSteps", scenario.routing.get("replanIntervalSteps", 2)),
             "useHazardRisk": bool(scenario.routing.get("useHazardRisk", True)),
             "useBeaconRisk": bool(scenario.routing.get("useBeaconRisk", True)),
             "useCongestion": bool(scenario.routing.get("useCongestion", False)),
@@ -257,7 +265,7 @@ def load_model_summary(indoor_path: str | None, scenario_path: str) -> dict[str,
             "firstGroupDistribution": scenario.groups[0].get("distribution", "random_within_space") if scenario.groups else "random_within_space",
             "destinationCells": (scenario.routing.get("destination") or {}).get("cellSpaceRefs") or [],
         },
-        "routingPresets": available_routing_presets(scenario.raw),
+        "routingPresets": available_workbench_policy_presets(scenario.raw),
         "manualAgents": scenario.agents,
         "beacons": scenario.beacons,
         "scheduledEvents": scenario.raw.get("scheduledEvents") or [],
@@ -451,7 +459,7 @@ def compare_configured_routing(request: dict[str, Any], default_scenario: str) -
     presets = available_routing_presets(seed_scenario.raw)
     preset_ids = [str(item) for item in (request.get("presetIds") or []) if str(item) in presets]
     if not preset_ids:
-        preset_ids = list(presets)[:4]
+        preset_ids = list(available_workbench_policy_presets(seed_scenario.raw))
     rows: list[dict[str, Any]] = []
     route_rows: list[dict[str, Any]] = []
     for preset_id in preset_ids:
@@ -654,6 +662,11 @@ def apply_request_to_scenario(scenario: ScenarioDefinition, request: dict[str, A
         scenario.routing["algorithm"] = config["algorithm"]
     if config.get("costPolicy"):
         scenario.routing["costPolicy"] = config["costPolicy"]
+    if config.get("replanPolicy"):
+        scenario.routing["replanPolicy"] = str(config["replanPolicy"])
+    for key in ("replanIntervalSteps", "noRouteRetryIntervalSteps"):
+        if config.get(key) is not None:
+            scenario.routing[key] = max(1, int(config[key]))
     for key in ("riskCostModel", "riskEndpointPolicy", "riskAggregation"):
         if config.get(key):
             scenario.routing[key] = str(config[key])
@@ -864,7 +877,7 @@ def _write_comparison_html(path: Path, comparison: dict[str, Any]) -> None:
   {bars}
   <h2>Metrics</h2>
   <table>
-    <thead><tr><th>preset</th><th>algorithm</th><th>evacuated</th><th>noRoute</th><th>meanEvacS</th><th>meanRouteCost</th><th>meanPlanMs</th><th>runtimeMs</th><th>robust</th><th>agility</th></tr></thead>
+    <thead><tr><th>policy</th><th>solver</th><th>evacuated</th><th>noRoute</th><th>meanEvacS</th><th>meanRouteCost</th><th>meanPlanMs</th><th>runtimeMs</th><th>robust</th><th>agility</th></tr></thead>
     <tbody>{table}</tbody>
   </table>
 </body>
@@ -990,11 +1003,12 @@ WORKBENCH_HTML = """<!doctype html>
       <div><label>Destination exit/cell</label><select id="destinationCell"></select></div>
     </div>
     <div class="compact-note">All scenario exits usa las salidas del scenario; Selected only fuerza una celda concreta.</div>
+    <select id="algorithm" style="display:none"><option>dijkstra</option><option>astar</option><option>floyd_warshall</option><option>yen_ksp</option><option>robust_agility</option></select>
     <div class="row">
-      <div><label>Algorithm</label><select id="algorithm"><option>dijkstra</option><option>astar</option><option>floyd_warshall</option><option>yen_ksp</option><option>robust_agility</option></select></div>
-      <div><label>Cost</label><select id="costPolicy"><option>minimum_travel_time</option></select></div>
+      <div><label>Cost base</label><select id="costPolicy"><option>minimum_travel_time</option></select></div>
+      <div><label>Internal solver</label><input id="policySolver" readonly value="Dijkstra"></div>
     </div>
-    <div class="compact-note">Algorithm se usa en la proxima simulacion salvo que apliques un preset. Cost base = tiempo de viaje.</div>
+    <div class="compact-note">El solver se deriva de la politica elegida. El coste base de arista siempre es tiempo de viaje.</div>
     <div class="row">
       <div><label title="Agentes que pueden estar a la vez dentro de una escalera o sus endpoints.">Stair capacity</label><input id="stairCapacity" type="number" min="1" step="1"></div>
       <div><label title="Agentes que pueden estar a la vez dentro de una rampa o sus endpoints.">Ramp capacity</label><input id="rampCapacity" type="number" min="1" step="1"></div>
@@ -1075,21 +1089,32 @@ WORKBENCH_HTML = """<!doctype html>
     </div>
     <div id="beaconImpact" class="status-box">Beacon impact preview will appear after the model loads.</div>
     <textarea id="beacons"></textarea>
-    <h2>Routing Experiments</h2>
-    <div class="muted">Presets are complete routing strategies. Apply one, run it visually, or compare several with the same agents and beacons.</div>
+    <h2>CER & Route Recommendation</h2>
+    <div class="muted">Arriba eliges una plantilla. Run simulation usa la configuracion activa de abajo; Copy policy la copia.</div>
     <div class="row">
-      <div><label title="Predefined routing strategy. Apply copies its parameters into the controls.">Preset strategy</label><select id="routingPreset"></select></div>
-      <div><label title="Copies the selected strategy into the editable routing controls.">Use this preset</label><button id="applyRoutingPreset" type="button">Apply preset</button></div>
+      <div><label title="Template with predefined route recommendation parameters. It is not active until copied.">Policy preset template</label><select id="routingPreset"></select></div>
+      <div><label title="Copies the selected preset into the active controls used by Run simulation.">Copy to active setup</label><button id="applyRoutingPreset" type="button">Copy policy</button></div>
     </div>
     <div class="row">
-      <button id="runRoutingPreset" type="button" title="Apply the selected preset first, then run it in the canvas.">Apply preset + run</button>
-      <button id="compareRoutingPresets" type="button" title="Run checked presets on the current agents, beacons and scenario.">Compare checked</button>
+      <button id="runRoutingPreset" type="button" title="Copy the selected policy first, then run it in the canvas.">Copy policy + run</button>
+      <button id="compareRoutingPresets" type="button" title="Run checked policies on the current agents, beacons and scenario.">Compare policies</button>
     </div>
-    <div class="compact-note">Run simulation usa los selectores actuales. Apply preset + run cambia esos selectores al preset antes de simular.</div>
-    <label>Presets to compare</label>
+    <div class="compact-note">Run simulation no usa automaticamente la plantilla de arriba. Usa la configuracion activa indicada abajo.</div>
+    <div class="row">
+      <div><label title="Active policy used by Run simulation.">Active route policy used by Run</label><select id="routeSelection"><option value="lowest_cost">Minimum/Safety cost</option><option value="cer_weighted">CER-Cost</option><option value="cer_agility_yen">CER-Agility</option></select></div>
+      <div><label title="Structural CER is precomputed and stable. Dynamic CER recomputes on each route plan.">CER mode</label><select id="cerMode"><option value="structural">Structural CER stable</option><option value="dynamic">Dynamic CER per replan</option></select></div>
+    </div>
+    <div class="row">
+      <div><label title="Controls when agents recompute their evacuation route.">Replan policy</label><select id="replanPolicy"><option value="blocked_only">blocked only</option><option value="on_blocked_or_interval">interval/block</option><option value="never">freeze route</option><option value="every_step">every step</option></select></div>
+      <div><label title="Number of simulation steps between interval replans.">Replan steps</label><input id="replanIntervalSteps" type="number" min="1" step="1"></div>
+    </div>
+    <div class="compact-note" id="replanHint"></div>
+    <div class="status-box" id="activeRoutingSummary">Active routing setup will appear here.</div>
+    <label>Policies to compare</label>
     <div id="routingPresetChecks" class="check-list"></div>
     <details id="cerDebugSection">
-      <summary>Advanced safety/cost parameters</summary>
+      <summary>Advanced tuning optional</summary>
+      <div class="compact-note">Normalmente no hace falta tocar esto. Primero ajusta Route policy, CER mode, Replan policy y beacons.</div>
       <div class="compact-note" id="routingParameterStatus"></div>
       <div class="row">
         <div><label title="Formula used to convert travel time and safety loss into an edge weight.">Safety-cost model</label><select id="riskCostModel"><option>legacy_additive</option><option>multiplicative_beta</option><option>linear_time_risk</option></select></div>
@@ -1108,10 +1133,7 @@ WORKBENCH_HTML = """<!doctype html>
         <div><label title="Weight of hazard safety loss.">hazard beta</label><input id="hazardBeta" type="number" min="0" step="0.05" value="1"></div>
         <div><label title="Weight of beacon safety loss.">beacon beta</label><input id="beaconBeta" type="number" min="0" step="0.05" value="1"></div>
       </div>
-      <div class="row">
-        <div><label title="Safety-loss to cost conversion used by linear_time_risk.">safety unit cost</label><input id="riskUnitCost" type="number" min="0" step="0.05" value="1"></div>
-        <div><label title="Policy that selects a candidate route after the search algorithm generates candidates.">Route selection</label><select id="routeSelection"><option value="lowest_cost">lowest_cost</option><option value="highest_robustness">highest_robustness</option><option value="highest_agility">highest_agility</option><option value="robust_agility">robust_agility</option><option value="cer_weighted">CER-Cost (cer_weighted)</option><option value="cer_agility_yen">CER-Agility (cer_agility_yen)</option></select></div>
-      </div>
+      <label title="Safety-loss to cost conversion used by linear_time_risk.">safety unit cost</label><input id="riskUnitCost" type="number" min="0" step="0.05" value="1">
       <div class="row three">
         <div><label title="Number of candidate routes for Yen/advanced policies.">k routes</label><input id="kShortestPaths" type="number" min="1" step="1" value="6"></div>
         <div><label title="Allowed extra cost versus the cheapest candidate.">cost tolerance</label><input id="candidateCostTolerance" type="number" min="0" step="0.05" value="0.35"></div>
@@ -1130,10 +1152,10 @@ WORKBENCH_HTML = """<!doctype html>
       </div>
       <div class="row">
         <div><label title="Centrality family used by agility policies.">centrality type</label><select id="centralityType"><option>legacy</option><option>rerouting</option></select></div>
-        <label><input id="reroutingUseStructuralPrecompute" type="checkbox" style="width:auto" checked> structural CER precompute</label>
+        <label hidden><input id="reroutingUseStructuralPrecompute" type="checkbox" style="width:auto" checked> structural CER precompute</label>
       </div>
       <div class="row three">
-        <div><label title="Failure profiles separated by semicolon, e.g. 1;1,1;1,1,1;1,2.">CER profiles</label><input id="reroutingFailureProfiles" type="text" value="1;1,1;1,1,1;1,2"></div>
+        <div><label title="Failure profiles separated by semicolon. Recommended base: 1;1,1.">CER profiles</label><input id="reroutingFailureProfiles" type="text" value="1;1,1"></div>
         <div><label title="CER tolerance: Cmax = (1 + tau) * C0.">CER tolerance</label><input id="reroutingCostTolerance" type="number" min="0" step="0.05" value="0.2"></div>
         <div><label title="Physical unit removed during CER failures.">failure unit</label><select id="reroutingFailureUnit"><option>resource</option><option>arc</option><option>undirected_pair</option><option>cell</option></select></div>
       </div>
@@ -1144,15 +1166,14 @@ WORKBENCH_HTML = """<!doctype html>
       </div>
     </details>
     <details>
-      <summary>Routing notes</summary>
+      <summary>Recommendation notes</summary>
       <pre class="status-box">Safety = 1 means usable. Safety = 0 means unsafe.
 Safety loss = 1 - safety; internally this is stored as riskPenalty.
 C(e) = alpha*time(e) + beta*safety_loss(e)
-Dijkstra/A*/Floyd-Warshall: one best path under the current scalar cost
-Yen: k candidate paths, then a policy chooses one
-Robustness: path keeps alternatives if one connection fails
-Agility: path crosses spaces with more evacuation alternatives
-CER: rerouting centrality counts acceptable distinct alternatives after resource failures</pre>
+Minimum/Safety cost: one best path under current time+safety cost
+CER-Cost: adds inverse-CER penalty to avoid low-rerouting-capacity nodes
+CER-Agility: generates candidate routes and selects the one with stronger CER
+CER: counts acceptable distinct alternatives after resource failures</pre>
     </details>
     <details>
       <summary>CER visual debug</summary>
@@ -1174,13 +1195,13 @@ CER: rerouting centrality counts acceptable distinct alternatives after resource
       <button id="saveCerDebug" type="button">Save CER debug</button>
       <div id="cerResults" class="status-box">CER exports will appear here.</div>
     </details>
-    <div id="routingResults" class="status-box">Choose a preset to see what it does, or compare checked presets.</div>
-    <button id="saveRoutingComparison" type="button">Save comparison viewer</button>
+    <div id="routingResults" class="status-box">Choose a policy to see what it does, or compare checked policies.</div>
+    <button id="saveRoutingComparison" type="button">Save policy comparison viewer</button>
     <h2>Dynamic Events</h2>
     <textarea id="events"></textarea>
     <h2>Run & Record</h2>
     <button id="run">Run simulation</button>
-    <div class="compact-note">Este boton NO aplica presets: usa Algorithm, Cost y parametros tal como esten ahora.</div>
+    <div class="compact-note">Este boton usa la politica y parametros actuales; no cambia la seleccion automaticamente.</div>
     <div class="row">
       <label><input id="recordGif" type="checkbox" style="width:auto" checked> GIF</label>
       <label><input id="recordHtml" type="checkbox" style="width:auto" checked> HTML viewer</label>
@@ -1209,6 +1230,13 @@ CER: rerouting centrality counts acceptable distinct alternatives after resource
           </div>
           <canvas id="routeCostChart" class="route-cost-chart"></canvas>
         </div>
+        <div class="route-cost-wrap">
+          <div>
+            <strong>Route CER agility</strong>
+            <div id="routeAgilityStatus" class="compact-note">Run CER-Agility to inspect route agility over replans.</div>
+          </div>
+          <canvas id="routeAgilityChart" class="route-cost-chart"></canvas>
+        </div>
         <pre id="metrics">Run a simulation to see metrics and QA.</pre>
       </div>
     </div>
@@ -1233,14 +1261,15 @@ const profileColors = { MP_WALKING: "#006dff", MP_WALKING_VERTICAL: "#006dff", M
 const statusColors = { active: "#006dff", evacuated: "#1a9f52", no_route: "#c0392b", trapped: "#8e44ad" };
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const routeCostChart = $("routeCostChart"), routeCostCtx = routeCostChart.getContext("2d");
+const routeAgilityChart = $("routeAgilityChart"), routeAgilityCtx = routeAgilityChart.getContext("2d");
 const beaconCurve = $("beaconCurve"), beaconCurveCtx = beaconCurve.getContext("2d");
 
 const sectionDescriptions = {
   "Open": "Carga un modelo/scenario y guarda configuraciones nuevas.",
-  "Simulation": "Duracion, destino, algoritmo base y QA.",
+  "Simulation": "Duracion, destino, politica base y QA.",
   "Agents": "Colocacion automatica por sala o manual con clics.",
   "Beacons": "Balizas, curva temporal de seguridad y bloqueo.",
-  "Routing Experiments": "Presets, comparativas y parametros de recomendacion.",
+  "CER & Route Recommendation": "Politicas CER, safety-cost y recomendacion.",
   "Dynamic Events": "Eventos JSON generados por balizas u otras fuentes.",
   "Run & Record": "Previsualiza, reproduce y exporta HTML/GIF."
 };
@@ -1361,12 +1390,12 @@ async function recordSimulation() {
 async function saveRoutingComparison() {
   const presetIds = selectedRoutingPresetIds();
   if (!presetIds.length) {
-    $("routingResults").textContent = "Select at least one preset.";
+    $("routingResults").textContent = "Select at least one policy.";
     return;
   }
   const request = buildSimulationRequest();
   request.presetIds = presetIds;
-  $("routingResults").textContent = "Saving routing comparison...";
+  $("routingResults").textContent = "Saving policy comparison...";
   const res = await fetch("/api/save-routing-comparison", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(request) });
   const comparison = await res.json();
   if (comparison.error) throw new Error(comparison.error);
@@ -1439,6 +1468,8 @@ async function loadModel() {
   $("rampCapacity").value = model.config.rampCapacity ?? 1;
   $("linearTransferFlowMode").value = model.config.linearTransferFlowMode || "single_file";
   $("seed").value = model.config.randomSeed;
+  $("replanPolicy").value = model.config.replanPolicy || "on_blocked_or_interval";
+  $("replanIntervalSteps").value = model.config.replanIntervalSteps || 2;
   $("agentCount").value = model.config.firstGroupCount;
   $("spawnCell").value = spawnable.some(c => c.id === model.config.firstSpawnCell)
     ? model.config.firstSpawnCell
@@ -1469,6 +1500,7 @@ async function loadModel() {
   payload = null;
   $("metrics").textContent = "Scenario loaded. Configure values on the left, then press Run simulation.";
   updateDurationHint();
+  updateReplanHint();
   drawModelPreview();
   drawBeaconCurve();
   updateControlAvailability();
@@ -1525,6 +1557,7 @@ function routeDebugSummary(data) {
   const route = routeForDebug(null, 0);
   if (!route) return null;
   const breakdown = route.weightBreakdown || {};
+  const routeMetrics = breakdown.routeMetrics || {};
   return {
     agentId: route.agentId || null,
     profileId: route.profileId || null,
@@ -1532,6 +1565,10 @@ function routeDebugSummary(data) {
     totalCost: route.totalCost,
     algorithm: route.algorithm,
     costPolicy: route.costPolicy,
+    replanReason: route.eventReason || null,
+    eventPosition: route.eventPosition || null,
+    eventCurrentCell: route.eventCurrentCell || null,
+    routeMetrics,
     firstStep: breakdown.firstStep || null,
     originCandidates: breakdown.originCandidates || [],
     nodeSequence: route.nodeSequence || [],
@@ -1573,6 +1610,9 @@ function buildSimulationRequest() {
       rampCapacity: Math.max(1, Math.round(numberFromInput("rampCapacity", 1))),
       linearTransferFlowMode: $("linearTransferFlowMode").value,
       randomSeed: Number($("seed").value),
+      replanPolicy: $("replanPolicy").value,
+      replanIntervalSteps: Math.max(1, Math.round(numberFromInput("replanIntervalSteps", 2))),
+      noRouteRetryIntervalSteps: Math.max(1, Math.round(numberFromInput("replanIntervalSteps", 2))),
       firstGroupCount: Number($("agentCount").value),
       firstSpawnCell: $("spawnCell").value,
       firstSpawnPosition: [Number($("spawnX").value), Number($("spawnY").value)],
@@ -1588,9 +1628,30 @@ function buildSimulationRequest() {
   };
   return request;
 }
+function algorithmForRoutePolicy(selection) {
+  if (selection === "cer_agility_yen") return "yen_ksp";
+  return "dijkstra";
+}
+function solverLabelForRoutePolicy(selection) {
+  if (selection === "cer_agility_yen") return "Yen candidates + CER selection";
+  if (selection === "cer_weighted") return "Dijkstra with inverse-CER penalty";
+  return "Dijkstra shortest path";
+}
+function syncDerivedRoutingControls() {
+  const selection = $("routeSelection").value || "lowest_cost";
+  const algorithm = algorithmForRoutePolicy(selection);
+  if ($("algorithm")) $("algorithm").value = algorithm;
+  if ($("policySolver")) $("policySolver").value = solverLabelForRoutePolicy(selection);
+  if (selection.startsWith("cer_") && $("centralityType")) $("centralityType").value = "rerouting";
+  if ($("cerMode") && $("reroutingUseStructuralPrecompute")) {
+    $("reroutingUseStructuralPrecompute").checked = $("cerMode").value !== "dynamic";
+  }
+}
 function routingConfigFromControls() {
+  syncDerivedRoutingControls();
+  const routeSelection = $("routeSelection").value;
   return {
-    algorithm: $("algorithm").value,
+    algorithm: algorithmForRoutePolicy(routeSelection),
     costPolicy: $("costPolicy").value,
     useHazardRisk: $("useHazardRisk").checked,
     useBeaconRisk: $("useBeaconRisk").checked,
@@ -1604,7 +1665,7 @@ function routingConfigFromControls() {
     beaconBeta: numberFromInput("beaconBeta", 1),
     riskUnitCost: numberFromInput("riskUnitCost", 1),
     routeRecommendation: {
-      routeSelection: $("routeSelection").value,
+      routeSelection,
       kShortestPaths: Math.max(1, Math.round(numberFromInput("kShortestPaths", 6))),
       candidateCostTolerance: numberFromInput("candidateCostTolerance", 0.35),
       robustnessTolerance: numberFromInput("robustnessTolerance", 0.2),
@@ -1616,7 +1677,7 @@ function routingConfigFromControls() {
       agilityWeight: numberFromInput("agilityWeight", 0.35),
       agilityAggregation: $("agilityAggregation").value,
       centralityType: $("centralityType").value,
-      reroutingEnabled: $("centralityType").value === "rerouting" || $("routeSelection").value.startsWith("cer_"),
+      reroutingEnabled: $("centralityType").value === "rerouting" || routeSelection.startsWith("cer_"),
       reroutingFailureProfiles: parseReroutingProfiles($("reroutingFailureProfiles").value),
       reroutingCostTolerance: numberFromInput("reroutingCostTolerance", 0.2),
       reroutingFailureUnit: $("reroutingFailureUnit").value,
@@ -1661,6 +1722,8 @@ function applyRoutingConfigToControls(config) {
   setNumberIfPresent("reroutingMaxCombinations", routeRecommendation.reroutingMaxCombinations);
   setNumberIfPresent("reroutingMaxRuntimeMs", routeRecommendation.reroutingMaxRuntimeMs);
   $("reroutingUseStructuralPrecompute").checked = routeRecommendation.reroutingUseStructuralPrecompute !== false;
+  if ($("cerMode")) $("cerMode").value = $("reroutingUseStructuralPrecompute").checked ? "structural" : "dynamic";
+  syncDerivedRoutingControls();
   updateRoutingParameterStatus();
   updateBeaconImpactPreview();
   updateCerPickStatus();
@@ -1682,15 +1745,21 @@ function setNumberIfPresent(id, value) {
   if (value != null && Number.isFinite(Number(value))) $(id).value = String(value);
 }
 function populateRoutingPresets() {
-  const rows = Object.values(routingPresets).sort((a, b) => String(a.presetId).localeCompare(String(b.presetId)));
-  fillSelect($("routingPreset"), rows, preset => `${preset.presetId} - ${preset.label || preset.presetId}`, preset => preset.presetId, "No presets");
-  const selectedDefaults = new Set(["dijkstra_time", "floyd_warshall_time", "astar_risk_multiplicative", "yen_highest_robustness", "robust_agility", "cer_weighted"]);
+  const policyOrder = ["minimum_time", "safety_time", "cer_weighted", "cer_agility_yen"];
+  const rows = Object.values(routingPresets).sort((a, b) => {
+    const ai = policyOrder.indexOf(String(a.presetId));
+    const bi = policyOrder.indexOf(String(b.presetId));
+    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 999) - (bi >= 0 ? bi : 999);
+    return String(a.presetId).localeCompare(String(b.presetId));
+  });
+  fillSelect($("routingPreset"), rows, preset => `${preset.label || preset.presetId} (${preset.presetId})`, preset => preset.presetId, "No policies");
+  const selectedDefaults = new Set(["minimum_time", "safety_time", "cer_weighted", "cer_agility_yen"]);
   $("routingPresetChecks").innerHTML = rows.map(preset => {
     const id = String(preset.presetId);
     const checked = selectedDefaults.has(id) ? "checked" : "";
-    const label = `${id} - ${preset.label || id}`;
+    const label = `${preset.label || id} (${id})`;
     return `<label title="${escapeHtml(preset.description || label)}"><input type="checkbox" class="routingPresetCheck" value="${escapeHtml(id)}" ${checked}> <span>${escapeHtml(label)}</span></label>`;
-  }).join("") || "<span class='muted'>No presets loaded</span>";
+  }).join("") || "<span class='muted'>No policies loaded</span>";
   document.querySelectorAll(".routingPresetCheck").forEach(input => input.addEventListener("change", updateControlAvailability));
   updateRoutingPresetInfo();
 }
@@ -1713,19 +1782,19 @@ async function runSelectedRoutingPreset() {
 async function compareSelectedRoutingPresets() {
   const presetIds = selectedRoutingPresetIds();
   if (!presetIds.length) {
-    $("routingResults").textContent = "Select at least one preset.";
+    $("routingResults").textContent = "Select at least one policy.";
     return;
   }
   const request = buildSimulationRequest();
   request.presetIds = presetIds;
-  $("routingResults").textContent = "Comparing routing presets...";
+  $("routingResults").textContent = "Comparing route policies...";
   const res = await fetch("/api/routing-compare", { method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(request) });
   const comparison = await res.json();
   if (comparison.error) throw new Error(comparison.error);
   $("routingResults").textContent = formatRoutingComparison(comparison);
 }
 function formatRoutingComparison(comparison) {
-  const lines = ["preset | alg | evacuated | active | noRoute | plans | routeCost | planMs | robust | agility"];
+  const lines = ["policy | solver | evacuated | active | noRoute | plans | routeCost | planMs | robust | agility"];
   for (const row of comparison.runs || []) {
     lines.push([
       row.presetId,
@@ -1751,11 +1820,11 @@ function updateRoutingPresetInfo() {
     `${preset.presetId}\\n` +
     `${preset.label || ""}\\n` +
     `${preset.description || ""}\\n\\n` +
-    `Algorithm: ${routing.algorithm || "scenario default"}\\n` +
+    `Internal solver: ${routing.algorithm || algorithmForRoutePolicy(recommendation.routeSelection || "lowest_cost")}\\n` +
     `Cost: ${routing.costPolicy || "scenario default"}\\n` +
     `Safety model: ${routing.riskCostModel || "legacy_additive"}\\n` +
     `Safety source: ${routing.riskEndpointPolicy || "target"}\\n` +
-    `Selection: ${recommendation.routeSelection || "lowest_cost"}\\n` +
+    `Policy: ${recommendation.routeSelection || "lowest_cost"}\\n` +
     `Beacon safety: ${routing.useBeaconRisk === false ? "off" : "on"} | Hazard safety: ${routing.useHazardRisk === false ? "off" : "on"} | Congestion: ${routing.useCongestion ? "on" : "off"}\\n\\n` +
     presetUseHint(preset) +
     `\\n\\nactive/ignored parameters\\n` +
@@ -1763,42 +1832,106 @@ function updateRoutingPresetInfo() {
     `\\n\\ntechnical patch\\n` +
     JSON.stringify(routing, null, 2);
   updateRoutingParameterStatus(routing);
+  updateActiveRoutingSummary();
 }
 function presetUseHint(preset) {
   const id = String(preset.presetId || "");
-  if (id.includes("dijkstra_time")) return "Use it as the simplest baseline: shortest evacuation time without safety penalties.";
-  if (id.includes("astar_time")) return "Use it to compare A* latency against Dijkstra while keeping the same time-only objective.";
+  if (id === "minimum_time" || id.includes("dijkstra_time")) return "Use it as the simplest baseline: shortest evacuation time without safety penalties.";
+  if (id === "safety_time" || id.includes("risk_multiplicative")) return "Use it when beacon/hazard safety should bend routes away from unsafe spaces.";
   if (id.includes("risk_multiplicative")) return "Use it when beacon/hazard safety should bend routes away from unsafe spaces.";
   if (id.includes("yen_risk_lowest")) return "Use it to generate several candidate routes but still choose the cheapest safe one.";
   if (id.includes("robustness")) return "Use it when you prefer routes that keep alternatives if a connection fails.";
   if (id.includes("agility")) return "Use it when you prefer routes through spaces with more evacuation alternatives.";
   if (id.includes("congestion")) return "Use it when current crowding should penalize route choices.";
-  return "Use this preset as a complete routing strategy. Apply it, then run or compare.";
+  return "Use this policy as a complete recommendation setup. Apply it, then run or compare.";
+}
+function routePolicyLabel(value) {
+  if (value === "cer_agility_yen") return "CER-Agility";
+  if (value === "cer_weighted") return "CER-Cost";
+  return "Minimum/Safety cost";
+}
+function replanPolicyLabel(value) {
+  if (value === "never") return "freeze route";
+  if (value === "every_step") return "every step";
+  if (value === "blocked_only") return "blocked only";
+  return "interval/block";
+}
+function selectedPresetActiveMessage() {
+  const preset = selectedRoutingPreset();
+  if (!preset) return "No preset template selected.";
+  const routing = preset.routing || {};
+  const recommendation = routing.routeRecommendation || {};
+  const presetSelection = recommendation.routeSelection || "lowest_cost";
+  const activeSelection = $("routeSelection").value || "lowest_cost";
+  const mismatches = [];
+  if (presetSelection !== activeSelection) {
+    mismatches.push(`preset=${routePolicyLabel(presetSelection)} but active=${routePolicyLabel(activeSelection)}`);
+  }
+  if (activeSelection.startsWith("cer_")) {
+    const presetStructural = recommendation.reroutingUseStructuralPrecompute !== false;
+    const activeStructural = $("cerMode").value !== "dynamic";
+    if (presetStructural !== activeStructural) {
+      mismatches.push(`preset CER=${presetStructural ? "structural" : "dynamic"} but active CER=${activeStructural ? "structural" : "dynamic"}`);
+    }
+  }
+  if (!mismatches.length) {
+    return `Preset "${preset.label || preset.presetId}" is copied to the active setup.`;
+  }
+  return `Preset "${preset.label || preset.presetId}" is NOT fully active: ${mismatches.join("; ")}. Press Copy policy or Copy policy + run.`;
+}
+function updateActiveRoutingSummary() {
+  if (!$("activeRoutingSummary")) return;
+  const routing = routingConfigFromControls();
+  const recommendation = routing.routeRecommendation || {};
+  const selection = recommendation.routeSelection || "lowest_cost";
+  const solver = solverLabelForRoutePolicy(selection);
+  const replan = $("replanPolicy").value || "on_blocked_or_interval";
+  const replanSeconds = Math.max(0, numberFromInput("timeStep", 0) * Math.max(1, Math.round(numberFromInput("replanIntervalSteps", 2))));
+  const cerLine = selection.startsWith("cer_")
+    ? `CER mode: ${$("cerMode").value === "dynamic" ? "Dynamic CER per replan" : "Structural CER stable"}`
+    : "CER mode: inactive for this active policy";
+  const replanLine = replan === "on_blocked_or_interval"
+    ? `Replan: interval/block every ${replanSeconds.toFixed(2)} simulated s`
+    : `Replan: ${replanPolicyLabel(replan)}`;
+  $("activeRoutingSummary").textContent = [
+    "RUN SIMULATION WILL USE:",
+    `Policy: ${routePolicyLabel(selection)}`,
+    `Internal solver: ${solver}`,
+    cerLine,
+    replanLine,
+    selectedPresetActiveMessage(),
+  ].join("\\n");
 }
 function routingParameterWarnings(config = null) {
   const routing = config || routingConfigFromControls();
   const recommendation = routing.routeRecommendation || {};
-  const algorithm = routing.algorithm || "dijkstra";
   const selection = recommendation.routeSelection || "lowest_cost";
+  const algorithm = routing.algorithm || algorithmForRoutePolicy(selection);
   const notes = [`base cost: minimum_travel_time is always active`];
   notes.push(routing.useBeaconRisk === false ? "beacon beta inactive: beacon safety is off" : "beacon beta active when beacons affect spaces");
   notes.push(routing.useHazardRisk === false ? "hazard beta inactive: hazard safety is off" : "hazard beta active when hazards affect spaces");
   notes.push(routing.useCongestion ? "congestion penalty active" : "congestion penalty inactive");
   notes.push(routing.riskCostModel === "linear_time_risk" ? "safety unit cost active" : "safety unit cost ignored unless linear_time_risk is selected");
-  const usesCandidates = algorithm === "yen_ksp" || algorithm === "robust_agility" || selection !== "lowest_cost";
+  const usesCandidates = selection === "cer_agility_yen" || algorithm === "yen_ksp" || algorithm === "robust_agility" || selection === "highest_robustness" || selection === "highest_agility" || selection === "robust_agility";
   notes.push(usesCandidates ? "k/tolerance parameters active: candidate routes are evaluated" : "k/tolerance parameters ignored: single best route only");
   const usesRobustness = selection === "highest_robustness" || selection === "robust_agility" || algorithm === "robust_agility";
   notes.push(usesRobustness ? "robustness active: alternatives after edge failure are scored" : "robustness ignored for this selection");
   const usesAgility = selection === "highest_agility" || selection === "robust_agility" || selection === "cer_agility_yen" || selection === "cer_weighted" || algorithm === "robust_agility";
   const usesCer = selection.startsWith("cer_") || recommendation.centralityType === "rerouting";
-  notes.push(usesAgility ? "CE/agility active: intermediate spaces with more alternatives are scored" : "CE/agility ignored for this selection");
+  notes.push(usesAgility ? "CER/agility active: intermediate transfers with more rerouting alternatives are scored" : "CER/agility ignored for this selection");
   notes.push(usesCer ? "CER active: rerouting centrality is used for agility" : "CER inactive: legacy CE/agility or no centrality");
+  if (usesCer) {
+    notes.push(recommendation.reroutingUseStructuralPrecompute === false
+      ? "CER mode: dynamic, recalculated whenever a route plan is requested"
+      : "CER mode: structural, precomputed once and stable during the run");
+  }
   return notes;
 }
 function updateRoutingParameterStatus(config = null) {
   if (!$("routingParameterStatus")) return;
   $("routingParameterStatus").textContent = routingParameterWarnings(config).join("\\n");
   updateControlAvailability();
+  updateActiveRoutingSummary();
 }
 
 function updateControlAvailability() {
@@ -1807,6 +1940,7 @@ function updateControlAvailability() {
   setControlDisabled("spawnY", !distributionFixed, "Solo se usa con distribucion fixed.");
   const selectedDestination = $("destinationMode").value === "selected";
   setControlDisabled("destinationCell", !selectedDestination, "Se usa solo con Destination mode = Selected only.");
+  setControlDisabled("replanIntervalSteps", $("replanPolicy").value === "never", "No se usa cuando Replan policy = freeze route.");
 
   const beaconRiskOn = $("useBeaconRisk").checked;
   setControlDisabled("beaconBlockThreshold", !beaconRiskOn, "Solo afecta al routing si Beacon safety esta activo.");
@@ -1816,23 +1950,23 @@ function updateControlAvailability() {
 
   const routing = routingConfigFromControls();
   const recommendation = routing.routeRecommendation || {};
-  const algorithm = routing.algorithm || "dijkstra";
   const selection = recommendation.routeSelection || "lowest_cost";
-  const usesCandidates = algorithm === "yen_ksp" || algorithm === "robust_agility" || selection !== "lowest_cost";
+  const algorithm = routing.algorithm || algorithmForRoutePolicy(selection);
+  const usesCandidates = selection === "cer_agility_yen" || algorithm === "yen_ksp" || algorithm === "robust_agility" || selection === "highest_robustness" || selection === "highest_agility" || selection === "robust_agility";
   const usesRobustness = selection === "highest_robustness" || selection === "robust_agility" || algorithm === "robust_agility";
   const usesAgility = selection === "highest_agility" || selection === "robust_agility" || selection === "cer_agility_yen" || selection === "cer_weighted" || algorithm === "robust_agility";
   const usesCer = selection.startsWith("cer_") || recommendation.centralityType === "rerouting";
   const usesWeightedSelection = selection === "robust_agility" || algorithm === "robust_agility";
 
-  ["kShortestPaths", "candidateCostTolerance"].forEach(id => setControlDisabled(id, !usesCandidates, "Solo se usa con Yen, robust_agility o seleccion multicriterio."));
+  ["kShortestPaths", "candidateCostTolerance"].forEach(id => setControlDisabled(id, !usesCandidates, "Solo se usa con CER-Agility o politicas de candidatas."));
   ["robustnessTolerance", "robustnessWeight"].forEach(id => setControlDisabled(id, !usesRobustness, "Solo se usa en estrategias con robustez."));
   ["centralityTolerance", "centralityMaxPaths", "centralityMaxOverlap", "agilityAggregation", "agilityWeight"].forEach(id => setControlDisabled(id, !usesAgility, "Solo se usa en estrategias con agilidad/CE."));
-  ["centralityType", "reroutingFailureProfiles", "reroutingCostTolerance", "reroutingFailureUnit", "reroutingDistinctnessPolicy", "reroutingMaxCombinations", "reroutingMaxRuntimeMs", "reroutingUseStructuralPrecompute"].forEach(id => setControlDisabled(id, !usesCer, "Solo se usa con politicas CER/rerouting."));
+  ["cerMode", "centralityType", "reroutingFailureProfiles", "reroutingCostTolerance", "reroutingFailureUnit", "reroutingDistinctnessPolicy", "reroutingMaxCombinations", "reroutingMaxRuntimeMs", "reroutingUseStructuralPrecompute"].forEach(id => setControlDisabled(id, !usesCer, "Solo se usa con politicas CER/rerouting."));
   setControlDisabled("costWeight", !usesWeightedSelection, "Solo se usa en robust_agility.");
 
   const hasPresetSelection = selectedRoutingPresetIds().length > 0;
-  setControlDisabled("compareRoutingPresets", !hasPresetSelection, "Selecciona al menos un preset.");
-  setControlDisabled("saveRoutingComparison", !hasPresetSelection, "Selecciona al menos un preset.");
+  setControlDisabled("compareRoutingPresets", !hasPresetSelection, "Selecciona al menos una politica.");
+  setControlDisabled("saveRoutingComparison", !hasPresetSelection, "Selecciona al menos una politica.");
   setControlDisabled("recordSimulation", !$("recordGif").checked && !$("recordHtml").checked, "Activa GIF o HTML viewer.");
 
   const hasManualAgents = readManualAgents().length > 0;
@@ -1873,6 +2007,20 @@ function updateDurationHint() {
   const seconds = Math.max(0, numberFromInput("timeStep", 0) * numberFromInput("maxSteps", 0));
   const minutes = seconds / 60;
   $("durationHint").textContent = `Simulation window: ${seconds.toFixed(1)} s (${minutes.toFixed(2)} min)`;
+}
+function updateReplanHint() {
+  if (!$("replanHint")) return;
+  const policy = $("replanPolicy").value;
+  const seconds = Math.max(0, numberFromInput("timeStep", 0) * Math.max(1, Math.round(numberFromInput("replanIntervalSteps", 2))));
+  if (policy === "never") {
+    $("replanHint").textContent = "freeze route: cada agente conserva la primera ruta alcanzable; util para depurar cambios por replan.";
+  } else if (policy === "blocked_only") {
+    $("replanHint").textContent = "blocked only: solo recalcula si una celda restante de la ruta queda bloqueada; util para evitar cambios periodicos en escenarios estaticos.";
+  } else if (policy === "every_step") {
+    $("replanHint").textContent = "every step: recalcula en cada tick; util para estres, pero puede cambiar por posicion continuamente.";
+  } else {
+    $("replanHint").textContent = `interval/block: recalcula si la ruta se bloquea o cada ${seconds.toFixed(2)} s simulados.`;
+  }
 }
 function writeManualAgents(agents) {
   $("manualAgents").value = JSON.stringify(agents, null, 2);
@@ -2863,6 +3011,7 @@ function drawRouteCostChart() {
   if (!payload) {
     $("routeCostStatus").textContent = "Run a simulation to inspect ETA over replans.";
     drawRouteCostEmpty("No simulation");
+    drawRouteAgilityChart();
     return;
   }
   const route = routeForDebug($("level").value || null, currentFrame);
@@ -2870,6 +3019,7 @@ function drawRouteCostChart() {
   if (!route || !history.length) {
     $("routeCostStatus").textContent = "No route_planned events for the visible agent.";
     drawRouteCostEmpty("No ETA");
+    drawRouteAgilityChart();
     return;
   }
   const currentTime = currentPreviewTimeS();
@@ -2926,8 +3076,15 @@ function drawRouteCostChart() {
 
   const delta = current.etaTotal - first.etaTotal;
   const sign = delta > 1e-6 ? "+" : "";
+  const routeMetrics = (route.weightBreakdown && route.weightBreakdown.routeMetrics) || {};
+  const candidateRoutes = routeMetrics.candidateRoutes || [];
+  const selectedCandidate = candidateRoutes.find(item => item.selected);
+  const candidateText = selectedCandidate
+    ? ` | selected #${selectedCandidate.rank}/${candidateRoutes.length} cost ${Number(selectedCandidate.totalCost).toFixed(2)} agility ${formatMetric(selectedCandidate.reroutingAgility ?? selectedCandidate.agility)}`
+    : (candidateRoutes.length ? ` | candidates ${candidateRoutes.length}` : "");
   $("routeCostStatus").textContent =
-    `agent ${route.agentId || "?"} | alg ${current.algorithm || route.algorithm || "?"} | ETA ${current.etaTotal.toFixed(3)} s | remaining ${current.totalCost.toFixed(3)} s | delta ${sign}${delta.toFixed(3)} s | samples ${history.length}`;
+    `agent ${route.agentId || "?"} | solver ${current.algorithm || route.algorithm || "?"} | replan ${current.reason || route.eventReason || "?"}${candidateText} | ETA ${current.etaTotal.toFixed(3)} s | remaining ${current.totalCost.toFixed(3)} s | delta ${sign}${delta.toFixed(3)} s | samples ${history.length}`;
+  drawRouteAgilityChart();
 }
 function drawRouteCostEmpty(message) {
   const w = routeCostChart.width, h = routeCostChart.height;
@@ -2941,15 +3098,32 @@ function routeCostHistory(agentId) {
   if (!agentId || !payload || !Array.isArray(payload.events)) return [];
   return payload.events
     .filter(event => event.agentId === agentId && ["route_planned", "agent_route_recovered"].includes(event.eventType) && event.route && Number.isFinite(Number(event.route.totalCost)))
-    .map(event => ({
-      step: Number(event.step || 0),
-      timeS: Number(event.timeS || 0),
-      totalCost: Number(event.route.totalCost),
-      etaTotal: Number((Number(event.timeS || 0) + Number(event.route.totalCost)).toFixed(6)),
-      algorithm: event.route.algorithm || "",
-      nodeSequence: event.route.nodeSequence || [],
-    }))
+    .map(event => routeHistoryRow(event))
     .sort((a, b) => a.step - b.step || a.timeS - b.timeS);
+}
+function routeHistoryRow(event) {
+  const route = event.route || {};
+  const metrics = ((route.weightBreakdown || {}).routeMetrics || {});
+  const candidateRoutes = metrics.candidateRoutes || [];
+  const selectedCandidate = candidateRoutes.find(item => item.selected) || null;
+  const agility = selectedCandidate
+    ? Number(selectedCandidate.reroutingAgility ?? selectedCandidate.agility)
+    : Number(metrics.reroutingAgility ?? metrics.agility);
+  return {
+    step: Number(event.step || 0),
+    timeS: Number(event.timeS || 0),
+    totalCost: Number(route.totalCost),
+    etaTotal: Number((Number(event.timeS || 0) + Number(route.totalCost)).toFixed(6)),
+    algorithm: route.algorithm || "",
+    reason: event.reason || "",
+    nodeSequence: route.nodeSequence || [],
+    agility: Number.isFinite(agility) ? agility : null,
+    selectedRank: selectedCandidate ? Number(selectedCandidate.rank || 0) : null,
+    candidateCount: candidateRoutes.length,
+    selectedCost: selectedCandidate ? Number(selectedCandidate.totalCost) : null,
+    costRatio: selectedCandidate && selectedCandidate.costRatio != null ? Number(selectedCandidate.costRatio) : null,
+    selectionScore: selectedCandidate && selectedCandidate.selectionScore != null ? Number(selectedCandidate.selectionScore) : null,
+  };
 }
 function latestRouteCostAt(history, timeS) {
   let latest = null;
@@ -2958,6 +3132,91 @@ function latestRouteCostAt(history, timeS) {
     else break;
   }
   return latest || history[0] || null;
+}
+function drawRouteAgilityChart() {
+  if (!routeAgilityChart) return;
+  routeAgilityChart.width = routeAgilityChart.clientWidth * devicePixelRatio;
+  routeAgilityChart.height = routeAgilityChart.clientHeight * devicePixelRatio;
+  const w = routeAgilityChart.width, h = routeAgilityChart.height;
+  const padL = 38 * devicePixelRatio, padR = 10 * devicePixelRatio, padT = 10 * devicePixelRatio, padB = 18 * devicePixelRatio;
+  routeAgilityCtx.clearRect(0, 0, w, h);
+  routeAgilityCtx.fillStyle = "#ffffff";
+  routeAgilityCtx.fillRect(0, 0, w, h);
+  if (!payload) {
+    $("routeAgilityStatus").textContent = "Run CER-Agility to inspect route agility over replans.";
+    drawRouteAgilityEmpty("No simulation");
+    return;
+  }
+  const route = routeForDebug($("level").value || null, currentFrame);
+  const history = route ? routeCostHistory(route.agentId).filter(item => item.agility != null) : [];
+  if (!route || !history.length) {
+    $("routeAgilityStatus").textContent = "No CER agility values in route_planned events. Check that active policy is CER-Agility or CER-Cost.";
+    drawRouteAgilityEmpty("No CER agility");
+    return;
+  }
+  const currentTime = currentPreviewTimeS();
+  const current = latestRouteCostAt(history, currentTime) || history[history.length - 1];
+  const maxTime = Math.max(...history.map(item => item.timeS), currentTime, 1);
+  const minAgility = Math.min(...history.map(item => item.agility));
+  const maxAgility = Math.max(...history.map(item => item.agility));
+  const yLow = minAgility === maxAgility ? Math.max(0, minAgility - 1) : minAgility;
+  const yHigh = minAgility === maxAgility ? maxAgility + 1 : maxAgility;
+  const xOf = time => padL + (Math.max(0, time) / maxTime) * Math.max(1, w - padL - padR);
+  const yOf = value => h - padB - ((value - yLow) / Math.max(yHigh - yLow, 1e-9)) * Math.max(1, h - padT - padB);
+
+  routeAgilityCtx.strokeStyle = "#cbd5e1";
+  routeAgilityCtx.lineWidth = 1 * devicePixelRatio;
+  routeAgilityCtx.beginPath();
+  routeAgilityCtx.moveTo(padL, padT);
+  routeAgilityCtx.lineTo(padL, h - padB);
+  routeAgilityCtx.lineTo(w - padR, h - padB);
+  routeAgilityCtx.stroke();
+
+  for (let i = 1; i < history.length; i++) {
+    const prev = history[i - 1], item = history[i];
+    routeAgilityCtx.beginPath();
+    routeAgilityCtx.moveTo(xOf(prev.timeS), yOf(prev.agility));
+    routeAgilityCtx.lineTo(xOf(item.timeS), yOf(item.agility));
+    routeAgilityCtx.strokeStyle = item.agility >= prev.agility - 1e-9 ? "#16a34a" : "#f97316";
+    routeAgilityCtx.lineWidth = 2 * devicePixelRatio;
+    routeAgilityCtx.stroke();
+  }
+  for (const item of history) {
+    routeAgilityCtx.beginPath();
+    routeAgilityCtx.arc(xOf(item.timeS), yOf(item.agility), 2.6 * devicePixelRatio, 0, Math.PI * 2);
+    routeAgilityCtx.fillStyle = item === current ? "#7c3aed" : "#0f172a";
+    routeAgilityCtx.fill();
+  }
+  routeAgilityCtx.beginPath();
+  routeAgilityCtx.moveTo(xOf(currentTime), padT);
+  routeAgilityCtx.lineTo(xOf(currentTime), h - padB);
+  routeAgilityCtx.setLineDash([4 * devicePixelRatio, 3 * devicePixelRatio]);
+  routeAgilityCtx.strokeStyle = "#7c3aed";
+  routeAgilityCtx.lineWidth = 1.4 * devicePixelRatio;
+  routeAgilityCtx.stroke();
+  routeAgilityCtx.setLineDash([]);
+
+  routeAgilityCtx.fillStyle = "#334155";
+  routeAgilityCtx.font = `${10 * devicePixelRatio}px Segoe UI, Arial`;
+  routeAgilityCtx.textAlign = "left";
+  routeAgilityCtx.fillText(`${yHigh.toFixed(2)}`, 4 * devicePixelRatio, padT + 4 * devicePixelRatio);
+  routeAgilityCtx.fillText(`${yLow.toFixed(2)}`, 4 * devicePixelRatio, h - padB);
+  routeAgilityCtx.textAlign = "right";
+  routeAgilityCtx.fillText(`${maxTime.toFixed(1)}s`, w - padR, h - 4 * devicePixelRatio);
+
+  const rankText = current.selectedRank ? ` | selected #${current.selectedRank}/${current.candidateCount}` : "";
+  const scoreText = current.selectionScore != null ? ` | score ${current.selectionScore.toFixed(3)}` : "";
+  const ratioText = current.costRatio != null ? ` | cost ratio ${current.costRatio.toFixed(3)}` : "";
+  $("routeAgilityStatus").textContent =
+    `agent ${route.agentId || "?"} | agility ${current.agility.toFixed(3)}${rankText}${scoreText}${ratioText} | samples ${history.length}`;
+}
+function drawRouteAgilityEmpty(message) {
+  const w = routeAgilityChart.width, h = routeAgilityChart.height;
+  routeAgilityCtx.fillStyle = "#64748b";
+  routeAgilityCtx.font = `${12 * devicePixelRatio}px Segoe UI, Arial`;
+  routeAgilityCtx.textAlign = "center";
+  routeAgilityCtx.textBaseline = "middle";
+  routeAgilityCtx.fillText(message, w / 2, h / 2);
 }
 function drawRouteDebug(level, project) {
   const route = routeForDebug(level, currentFrame);
@@ -3057,6 +3316,9 @@ function plannedRouteForAgent(agentId, frame = currentFrame) {
     agentId: planned.agentId,
     eventStep: planned.step,
     eventTimeS: planned.timeS,
+    eventReason: planned.reason || "",
+    eventPosition: planned.position || null,
+    eventCurrentCell: planned.currentCellSpaceRef || "",
     ...(planned.route || {}),
   };
 }
@@ -3375,8 +3637,8 @@ $("beaconCurve").onmousedown = startCurveDrag;
 $("beaconCurve").onmousemove = dragCurvePoint;
 $("beaconCurve").onmouseup = stopCurveDrag;
 $("beaconCurve").onmouseleave = stopCurveDrag;
-$("timeStep").oninput = () => { updateDurationHint(); drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
-$("maxSteps").oninput = () => { updateDurationHint(); drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
+$("timeStep").oninput = () => { updateDurationHint(); updateReplanHint(); drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
+$("maxSteps").oninput = () => { updateDurationHint(); updateReplanHint(); drawBeaconCurve(); updateBeaconImpactPreview(); draw(); };
 $("useBeaconRisk").onchange = () => { updateRoutingParameterStatus(); updateBeaconImpactPreview(); draw(); };
 $("beaconBlockThreshold").oninput = () => { updateBeaconImpactPreview(); draw(); };
 $("destinationMode").onchange = updateControlAvailability;
@@ -3422,9 +3684,9 @@ $("reset").onclick = () => { currentFrame=0; draw(); };
 $("frame").oninput = e => { currentFrame = Number(e.target.value); draw(); };
 $("level").onchange = draw;
 [
-  "algorithm", "costPolicy", "riskCostModel", "riskEndpointPolicy", "useHazardRisk",
+  "algorithm", "costPolicy", "replanPolicy", "replanIntervalSteps", "riskCostModel", "riskEndpointPolicy", "useHazardRisk",
   "useCongestion", "riskEdgePrecedence", "riskAggregation", "riskAlpha", "hazardBeta",
-  "beaconBeta", "riskUnitCost", "routeSelection", "kShortestPaths",
+  "beaconBeta", "riskUnitCost", "routeSelection", "cerMode", "kShortestPaths",
   "candidateCostTolerance", "robustnessTolerance", "centralityTolerance",
   "centralityMaxPaths", "centralityMaxOverlap", "costWeight", "robustnessWeight",
   "agilityWeight", "agilityAggregation", "centralityType", "reroutingFailureProfiles",
@@ -3432,8 +3694,12 @@ $("level").onchange = draw;
   "reroutingMaxCombinations", "reroutingMaxRuntimeMs", "reroutingUseStructuralPrecompute"
 ].forEach(id => {
   const el = $(id);
-  if (el) el.addEventListener("input", () => updateRoutingParameterStatus());
-  if (el) el.addEventListener("change", () => updateRoutingParameterStatus());
+  const updateRoutingControls = () => {
+    updateRoutingParameterStatus();
+    updateReplanHint();
+  };
+  if (el) el.addEventListener("input", updateRoutingControls);
+  if (el) el.addEventListener("change", updateRoutingControls);
 });
 canvas.onclick = event => {
   if (!model) return;

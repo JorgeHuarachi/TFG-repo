@@ -132,6 +132,7 @@ class EvacuationRouteRecommendationService:
         if config.route_selection == "lowest_cost" and config.algorithm != "robust_agility":
             selected = min(candidates, key=lambda item: (item.total_cost, len(item.node_sequence), item.destination))
             selected.metrics = self._basic_metrics(graph, selected, candidates, config, targets, weight)
+            selected.metrics["candidateRoutes"] = _candidate_debug_records(candidates, selected)
             return selected
 
         filtered = self._within_cost_tolerance(candidates, config.candidate_cost_tolerance)
@@ -139,6 +140,7 @@ class EvacuationRouteRecommendationService:
         selected = self._select_advanced_candidate(filtered, config)
         selected.metrics["candidateCount"] = len(candidates)
         selected.metrics["eligibleCandidateCount"] = len(filtered)
+        selected.metrics["candidateRoutes"] = _candidate_debug_records(filtered, selected)
         return selected
 
     def evacuation_centrality(
@@ -273,6 +275,7 @@ class EvacuationRouteRecommendationService:
             "originalCost": round(original_cost, 6),
             "cerMaxNodeScore": round(max(config.rerouting_centrality_by_node.values(), default=0.0), 6),
             "reroutingMetadata": dict(config.rerouting_metadata),
+            "candidateRoutes": _candidate_debug_records(candidates, selected),
         }
         return selected
 
@@ -387,6 +390,8 @@ class EvacuationRouteRecommendationService:
                 "centralityType": "rerouting" if uses_rerouting else "legacy",
                 "costRatio": round(candidate.total_cost / best_cost, 6) if best_cost > 0 else 1.0,
             }
+            if uses_rerouting:
+                candidate.metrics["reroutingMetadata"] = dict(config.rerouting_metadata)
             max_agility = max(max_agility, agility)
         for candidate in candidates:
             cost_ratio = float(candidate.metrics["costRatio"])
@@ -509,6 +514,29 @@ def _remove_failed_connection(graph: nx.Graph, source: str, target: str) -> None
         return
     if graph.has_edge(source, target):
         graph.remove_edge(source, target)
+
+
+def _candidate_debug_records(candidates: list[RouteCandidate], selected: RouteCandidate | None = None) -> list[dict[str, Any]]:
+    selected_path = tuple(selected.node_sequence) if selected else ()
+    rows = []
+    for index, candidate in enumerate(candidates, start=1):
+        metrics = dict(candidate.metrics or {})
+        rows.append(
+            {
+                "rank": index,
+                "selected": tuple(candidate.node_sequence) == selected_path,
+                "destination": candidate.destination,
+                "totalCost": round(float(candidate.total_cost), 6),
+                "nodeSequence": list(candidate.node_sequence),
+                "robustness": metrics.get("robustness"),
+                "agility": metrics.get("agility"),
+                "reroutingAgility": metrics.get("reroutingAgility", metrics.get("agility")),
+                "selectionScore": metrics.get("selectionScore"),
+                "costRatio": metrics.get("costRatio"),
+                "centralityType": metrics.get("centralityType"),
+            }
+        )
+    return rows
 
 
 def _reconstruct_floyd_path(origin: str, target: str, predecessors: dict[Any, Any]) -> list[str]:

@@ -1,4 +1,4 @@
-"""Routing experiment presets and comparison utilities."""
+"""Route policy presets and comparison utilities."""
 
 from __future__ import annotations
 
@@ -15,6 +15,39 @@ from .simulation import EvacuationModel
 
 
 BUILTIN_ROUTING_PRESETS: dict[str, dict[str, Any]] = {
+    "minimum_time": {
+        "presetId": "minimum_time",
+        "label": "Minimum time",
+        "description": "Baseline policy: minimize traversal time on the mobility-filtered transfer backbone.",
+        "routing": {
+            "algorithm": "dijkstra",
+            "costPolicy": "minimum_travel_time",
+            "useHazardRisk": False,
+            "useBeaconRisk": False,
+            "useCongestion": False,
+            "riskCostModel": "legacy_additive",
+            "routeRecommendation": {"routeSelection": "lowest_cost"},
+        },
+    },
+    "safety_time": {
+        "presetId": "safety_time",
+        "label": "Safety + time",
+        "description": "Baseline policy: minimize time after applying beacon/hazard safety loss to edge weights.",
+        "routing": {
+            "algorithm": "dijkstra",
+            "costPolicy": "minimum_travel_time",
+            "useHazardRisk": True,
+            "useBeaconRisk": True,
+            "useCongestion": False,
+            "riskCostModel": "multiplicative_beta",
+            "riskEndpointPolicy": "max",
+            "riskAggregation": "sum",
+            "riskAlpha": 1.0,
+            "hazardBeta": 1.0,
+            "beaconBeta": 1.0,
+            "routeRecommendation": {"routeSelection": "lowest_cost"},
+        },
+    },
     "dijkstra_time": {
         "presetId": "dijkstra_time",
         "label": "Dijkstra / tiempo puro",
@@ -195,14 +228,14 @@ BUILTIN_ROUTING_PRESETS: dict[str, dict[str, Any]] = {
                 "routeSelection": "cer_weighted",
                 "centralityType": "rerouting",
                 "reroutingEnabled": True,
-                "reroutingFailureProfiles": [[1], [1, 1], [1, 1, 1], [1, 2]],
+                "reroutingFailureProfiles": [[1], [1, 1]],
                 "reroutingCostTolerance": 0.35,
                 "reroutingFailureUnit": "resource",
                 "reroutingDistinctnessPolicy": "exact",
                 "reroutingMaxCombinations": 500,
                 "reroutingMaxRuntimeMs": 1000,
                 "reroutingUseStructuralPrecompute": True,
-                "reroutingProfileWeights": {"(1)": 1.0, "(1,1)": 0.6, "(1,1,1)": 0.3, "(1,2)": 0.5},
+                "reroutingProfileWeights": {"(1)": 1.0, "(1,1)": 0.6},
                 "agilityWeight": 0.35,
                 "agilityAggregation": "mean",
             },
@@ -229,14 +262,14 @@ BUILTIN_ROUTING_PRESETS: dict[str, dict[str, Any]] = {
                 "reroutingEnabled": True,
                 "kShortestPaths": 6,
                 "candidateCostTolerance": 0.35,
-                "reroutingFailureProfiles": [[1], [1, 1], [1, 1, 1], [1, 2]],
+                "reroutingFailureProfiles": [[1], [1, 1]],
                 "reroutingCostTolerance": 0.35,
                 "reroutingFailureUnit": "resource",
                 "reroutingDistinctnessPolicy": "exact",
                 "reroutingMaxCombinations": 500,
                 "reroutingMaxRuntimeMs": 1000,
                 "reroutingUseStructuralPrecompute": True,
-                "reroutingProfileWeights": {"(1)": 1.0, "(1,1)": 0.6, "(1,1,1)": 0.3, "(1,2)": 0.5},
+                "reroutingProfileWeights": {"(1)": 1.0, "(1,1)": 0.6},
                 "agilityWeight": 0.35,
                 "agilityAggregation": "mean",
             },
@@ -263,6 +296,14 @@ BUILTIN_ROUTING_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 
+WORKBENCH_POLICY_PRESET_IDS = (
+    "minimum_time",
+    "safety_time",
+    "cer_weighted",
+    "cer_agility_yen",
+)
+
+
 def available_routing_presets(scenario_raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     presets = copy.deepcopy(BUILTIN_ROUTING_PRESETS)
     for preset in (((scenario_raw or {}).get("experiments") or {}).get("routingPresets") or []):
@@ -270,6 +311,28 @@ def available_routing_presets(scenario_raw: dict[str, Any] | None = None) -> dic
         if preset_id:
             presets[preset_id] = copy.deepcopy(preset)
     return presets
+
+
+def available_workbench_policy_presets(scenario_raw: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
+    """Return the policy-focused preset subset shown in the visual workbench.
+
+    The full catalog still exists for CLI diagnostics. The workbench focuses on
+    recommendation policies, not on comparing path-search algorithms.
+    """
+
+    presets = available_routing_presets(scenario_raw)
+    visible: dict[str, dict[str, Any]] = {
+        preset_id: copy.deepcopy(presets[preset_id])
+        for preset_id in WORKBENCH_POLICY_PRESET_IDS
+        if preset_id in presets
+    }
+    for preset_id, preset in presets.items():
+        if preset_id in visible or preset_id in BUILTIN_ROUTING_PRESETS:
+            continue
+        if preset.get("uiVisible") is False:
+            continue
+        visible[preset_id] = copy.deepcopy(preset)
+    return visible
 
 
 def compare_routing_presets(
